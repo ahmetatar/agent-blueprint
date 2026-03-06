@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" alt="agent-blueprint" width="820"/>
+</p>
+
 # agent-blueprint
 
 Declarative, framework-agnostic AI agent orchestration via YAML.

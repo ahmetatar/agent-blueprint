@@ -1,0 +1,91 @@
+blueprint:
+  name: "customer-support-agent"
+  version: "1.0"
+  description: "Multi-agent customer support with routing"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.3
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    department:
+      type: string
+      default: null
+    resolved:
+      type: boolean
+      default: false
+
+agents:
+  router:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a routing agent. Classify the customer request.
+    tools: [classify_intent]
+    output_schema:
+      department:
+        type: string
+        enum: [billing, technical, general]
+
+  billing_agent:
+    name: "Billing Specialist"
+    model: "gpt-4o"
+    system_prompt: |
+      You are a billing specialist. Help with invoices and payments.
+    tools: [lookup_invoice]
+
+  technical_agent:
+    name: "Technical Support"
+    model: "gpt-4o"
+    system_prompt: |
+      You are a technical support agent. Diagnose technical issues.
+
+tools:
+  classify_intent:
+    type: function
+    description: "Classify customer intent into a department"
+    parameters:
+      message:
+        type: string
+        required: true
+    returns:
+      type: string
+
+  lookup_invoice:
+    type: api
+    method: GET
+    url: "https://api.example.com/invoices/{invoice_id}"
+    auth:
+      type: bearer
+      token_env: "BILLING_API_KEY"
+
+graph:
+  entry_point: router
+  nodes:
+    router:
+      agent: router
+      description: "Classify and route customer requests"
+    billing:
+      agent: billing_agent
+      description: "Handle billing inquiries"
+    technical:
+      agent: technical_agent
+      description: "Handle technical issues"
+  edges:
+    - from: router
+      to:
+        - condition: "state.department == 'billing'"
+          target: billing
+        - condition: "state.department == 'technical'"
+          target: technical
+        - default: END
+    - from: billing
+      to: END
+    - from: technical
+      to: END
+
+memory:
+  backend: in_memory

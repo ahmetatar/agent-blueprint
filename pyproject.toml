@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-blueprint"
+version = "0.1.0"
+description = "Declarative, framework-agnostic AI agent blueprints via YAML"
+requires-python = ">=3.11"
+dependencies = [
+    "typer[all]>=0.12",
+    "rich>=13.0",
+    "pydantic>=2.5",
+    "ruamel.yaml>=0.18",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+abp = "agent_blueprint.cli.app:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+deploy-azure = ["azure-mgmt-containerinstance", "azure-identity"]
+deploy-aws = ["boto3"]
+deploy-gcp = ["google-cloud-run"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_blueprint"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

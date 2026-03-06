@@ -1,0 +1,78 @@
+blueprint:
+  name: "research-team"
+  version: "1.0"
+  description: "Multi-agent research team with planner, researcher, and writer"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.5
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    research_plan:
+      type: string
+      default: null
+    research_findings:
+      type: string
+      default: null
+    draft:
+      type: string
+      default: null
+
+agents:
+  planner:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a research planner. Given a topic, create a structured
+      research plan outlining key questions and areas to investigate.
+
+  researcher:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a researcher. Execute the research plan and gather
+      comprehensive information on each question.
+    tools: [web_search]
+
+  writer:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a professional writer. Transform research findings into
+      a well-structured, clear, and engaging report.
+
+tools:
+  web_search:
+    type: function
+    description: "Search the web for information"
+    parameters:
+      query:
+        type: string
+        required: true
+      num_results:
+        type: integer
+        default: 5
+
+graph:
+  entry_point: planner
+  nodes:
+    planner:
+      agent: planner
+      description: "Create research plan"
+    researcher:
+      agent: researcher
+      description: "Execute research"
+    writer:
+      agent: writer
+      description: "Write final report"
+  edges:
+    - from: planner
+      to: researcher
+    - from: researcher
+      to: writer
+    - from: writer
+      to: END
+
+memory:
+  backend: in_memory

@@ -1,0 +1,33 @@
+blueprint:
+  name: "basic-chatbot"
+  version: "1.0"
+  description: "A simple single-agent chatbot"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.7
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a helpful assistant. Answer questions clearly and concisely.
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+      description: "Main assistant node"
+  edges:
+    - from: assistant
+      to: END
+
+memory:
+  backend: in_memory

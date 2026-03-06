@@ -1,0 +1,20 @@
+blueprint:
+  name: "invalid-blueprint"
+  version: "1.0"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents: {}
+
+graph:
+  entry_point: some_node
+  nodes:
+    some_node:
+      agent: nonexistent_agent  # This agent is not defined
+  edges:
+    - from: some_node
+      to: END

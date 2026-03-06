@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated agent output dirs
+*-langgraph/
+*-crewai/
+*-plain/
+
+# Secrets
+.env
+*.env
+
+# Type checking
+.mypy_cache/

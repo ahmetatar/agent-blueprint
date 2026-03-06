@@ -1,0 +1,519 @@
+# agent-blueprint
+
+Declarative, framework-agnostic AI agent orchestration via YAML.
+
+Define your agent graph in a YAML file. Generate production-ready code for LangGraph, CrewAI, or plain Python — no boilerplate.
+
+```bash
+abp init my-agent
+abp generate my-agent.yml --target langgraph
+```
+
+---
+
+## Why
+
+Building multi-agent systems with LangGraph, CrewAI, or AutoGen means writing a lot of framework-specific boilerplate. Changing frameworks means rewriting everything. `agent-blueprint` separates the **what** (your agent logic) from the **how** (the framework).
+
+| Without abp | With abp |
+|---|---|
+| Write LangGraph state classes, node functions, graph builders | Write a 30-line YAML file |
+| Rewrite everything when switching frameworks | Change `--target` flag |
+| No standard schema — every project looks different | Consistent, validated blueprint format |
+
+---
+
+## Installation
+
+**Requirements:** Python 3.11+
+
+```bash
+pip install agent-blueprint
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/ahmetatar/agent-blueprint
+cd agent-blueprint
+pip install -e ".[dev]"
+```
+
+After installation, the `abp` CLI is available:
+
+```bash
+abp --help
+```
+
+---
+
+## Quick Start
+
+### 1. Create a blueprint
+
+```bash
+abp init my-agent
+# or for a multi-agent setup:
+abp init my-agent --template multi-agent
+```
+
+This creates `my-agent.yml`:
+
+```yaml
+blueprint:
+  name: "my-agent"
+  version: "1.0"
+  description: "A simple single-agent blueprint"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.7
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a helpful assistant.
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+      description: "Main assistant node"
+  edges:
+    - from: assistant
+      to: END
+
+memory:
+  backend: in_memory
+```
+
+### 2. Validate
+
+```bash
+abp validate my-agent.yml
+```
+
+```
+╭──────────────────────── Valid — my-agent.yml ────────────────────────╮
+│   Blueprint      my-agent                                             │
+│   Version        1.0                                                  │
+│   Agents         1                                                    │
+│   Tools          0                                                    │
+│   Nodes          1                                                    │
+│   Entry point    assistant                                            │
+╰───────────────────────────────────────────────────────────────────────╯
+```
+
+### 3. Visualize the graph
+
+```bash
+abp inspect my-agent.yml
+```
+
+Outputs a [Mermaid](https://mermaid.live) diagram you can paste directly into any Mermaid renderer.
+
+### 4. Generate code
+
+```bash
+abp generate my-agent.yml --target langgraph
+```
+
+```
+╭────────────── Generated — my-agent (langgraph) ──────────────╮
+│   my-agent-langgraph/__init__.py                              │
+│   my-agent-langgraph/state.py                                 │
+│   my-agent-langgraph/tools.py                                 │
+│   my-agent-langgraph/nodes.py                                 │
+│   my-agent-langgraph/graph.py                                 │
+│   my-agent-langgraph/main.py                                  │
+│   my-agent-langgraph/requirements.txt                         │
+│   my-agent-langgraph/.env.example                             │
+╰───────────────────────────────────────────────────────────────╯
+```
+
+### 5. Run
+
+```bash
+cd my-agent-langgraph
+pip install -r requirements.txt
+cp .env.example .env   # add your OPENAI_API_KEY
+python main.py "Hello, how are you?"
+```
+
+---
+
+## Blueprint Schema
+
+A blueprint YAML has these top-level sections:
+
+| Section | Required | Description |
+|---|---|---|
+| `blueprint` | Yes | Name, version, description |
+| `settings` | No | Default model, temperature, retries |
+| `state` | No | Shared state fields flowing through the graph |
+| `agents` | Yes | Agent definitions (model, prompt, tools) |
+| `tools` | No | Tool definitions |
+| `graph` | Yes | Nodes, edges, entry point |
+| `memory` | No | Checkpointing / persistence config |
+| `input` | No | Input schema for the agent |
+| `output` | No | Output schema for the agent |
+
+### `blueprint`
+
+```yaml
+blueprint:
+  name: "my-agent"       # Required. Used for naming generated files.
+  version: "1.0"         # Optional. Default: "1.0"
+  description: "..."     # Optional.
+  author: "..."          # Optional.
+  tags: [support, nlp]   # Optional.
+```
+
+### `settings`
+
+```yaml
+settings:
+  default_model: "gpt-4o"   # Default model for all agents
+  default_temperature: 0.7   # Default temperature
+  max_retries: 3
+  timeout_seconds: 300
+```
+
+Settings values can be referenced anywhere with `${settings.field_name}`.
+
+### `state`
+
+Defines the typed state object shared across all nodes:
+
+```yaml
+state:
+  fields:
+    messages:
+      type: "list[message]"   # Built-in message list type
+      reducer: append          # How concurrent updates merge: append | replace | merge
+    department:
+      type: string
+      default: null
+      enum: [billing, technical, general]
+    resolved:
+      type: boolean
+      default: false
+```
+
+### `agents`
+
+```yaml
+agents:
+  my_agent:
+    name: "Friendly Name"           # Optional display name
+    model: "gpt-4o"                 # or ${settings.default_model}
+    system_prompt: |
+      You are a helpful assistant.
+    tools: [tool_a, tool_b]         # References to tools section
+    temperature: 0.5                # Override settings.default_temperature
+    max_tokens: 2048
+    output_schema:                  # Structured output fields to extract
+      department:
+        type: string
+        enum: [billing, technical]
+    memory:
+      type: conversation_buffer     # conversation_buffer | summary | vector
+      max_tokens: 4000
+    human_in_the_loop:
+      enabled: true
+      trigger: before_tool_call     # before_tool_call | after_tool_call | before_response | always
+      tools: [dangerous_tool]       # Only require approval for specific tools
+```
+
+### `tools`
+
+Three tool types are supported:
+
+**`function`** — A Python function you implement:
+
+```yaml
+tools:
+  classify_intent:
+    type: function
+    description: "Classify customer intent"
+    parameters:
+      message:
+        type: string
+        required: true
+    returns:
+      type: string
+```
+
+**`api`** — An HTTP endpoint (code generated automatically):
+
+```yaml
+tools:
+  lookup_invoice:
+    type: api
+    method: GET
+    url: "https://api.example.com/invoices/{invoice_id}"
+    auth:
+      type: bearer          # bearer | basic | api_key
+      token_env: "BILLING_API_KEY"
+```
+
+**`retrieval`** — A vector store retrieval tool:
+
+```yaml
+tools:
+  search_kb:
+    type: retrieval
+    source: "knowledge_base"
+    embedding_model: "text-embedding-3-small"
+    top_k: 5
+```
+
+### `graph`
+
+Defines the agent workflow as a directed graph:
+
+```yaml
+graph:
+  entry_point: router        # Node where execution starts
+
+  nodes:
+    router:
+      agent: router           # References an agent
+      description: "Route requests"
+    handle_billing:
+      agent: billing_agent
+    escalate:
+      type: handoff           # Built-in: handoff | function
+      channel: slack
+
+  edges:
+    # Simple edge
+    - from: handle_billing
+      to: END
+
+    # Conditional routing
+    - from: router
+      to:
+        - condition: "state.department == 'billing'"
+          target: handle_billing
+        - condition: "state.department == 'technical'"
+          target: handle_technical
+        - default: END           # Fallback if no condition matches
+```
+
+**Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference `state` fields: `state.field_name`.
+
+### `memory`
+
+```yaml
+memory:
+  backend: sqlite              # in_memory | sqlite | postgres | redis
+  connection_string_env: "DATABASE_URL"
+  checkpoint_every: node       # node | edge | manual
+```
+
+---
+
+## CLI Reference
+
+### `abp init`
+
+Scaffold a new blueprint file:
+
+```bash
+abp init <name> [--template basic|multi-agent] [--output my-agent.yml]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--template` | `basic` | `basic` (single agent) or `multi-agent` (router + specialists) |
+| `--output` | `<name>.yml` | Output file path |
+
+### `abp validate`
+
+Validate a blueprint against the schema:
+
+```bash
+abp validate <blueprint.yml> [--quiet]
+```
+
+Exits with code `0` on success, `1` on failure. Use `--quiet` in CI pipelines.
+
+### `abp generate`
+
+Generate framework code:
+
+```bash
+abp generate <blueprint.yml> [--target langgraph|crewai|plain] [--output-dir ./out] [--dry-run]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--target` | `langgraph` | Target framework |
+| `--output-dir` | `./<name>-<target>` | Where to write generated files |
+| `--dry-run` | `false` | List files without writing them |
+
+**Supported targets:**
+
+| Target | Status | Description |
+|---|---|---|
+| `langgraph` | Stable | Full LangGraph project with StateGraph, nodes, tools, memory |
+| `plain` | Stable | Plain Python with openai SDK, no framework |
+| `crewai` | Coming soon | CrewAI crews and tasks |
+
+### `abp inspect`
+
+Visualize the agent graph as a Mermaid diagram:
+
+```bash
+abp inspect <blueprint.yml> [--output graph.md]
+```
+
+Paste the output into [mermaid.live](https://mermaid.live) to render it visually.
+
+### `abp schema`
+
+Export the full JSON Schema for IDE/editor integration:
+
+```bash
+abp schema [--format json|yaml] [--output blueprint-schema.json]
+```
+
+Use this to enable YAML validation and autocompletion in VS Code (via the [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)).
+
+---
+
+## Examples
+
+The `examples/` directory contains ready-to-use blueprints:
+
+### `examples/basic-chatbot.yml`
+
+Single-agent chatbot. The simplest possible blueprint.
+
+```bash
+abp generate examples/basic-chatbot.yml --target langgraph
+```
+
+### `examples/customer-support.yml`
+
+Three-agent system: a router classifies requests and dispatches to a billing specialist or a technical support agent.
+
+```bash
+abp generate examples/customer-support.yml --target langgraph
+abp inspect examples/customer-support.yml
+```
+
+### `examples/research-team.yml`
+
+Sequential pipeline: planner → researcher (with web search tool) → writer.
+
+```bash
+abp generate examples/research-team.yml --target langgraph
+```
+
+---
+
+## Generated Project Structure (LangGraph target)
+
+```
+my-agent-langgraph/
+├── __init__.py          # Package init
+├── state.py             # AgentState TypedDict
+├── tools.py             # Tool functions (fill in implementations)
+├── nodes.py             # Node functions (one per agent node)
+├── graph.py             # StateGraph construction with edges and routing
+├── main.py              # Entrypoint: run(user_input) → str
+├── requirements.txt     # langgraph, langchain-openai, httpx, ...
+└── .env.example         # Required environment variables
+```
+
+The generated code is **human-readable and fully editable**. It's a starting point, not a black box.
+
+---
+
+## IDE Integration (VS Code)
+
+Export the JSON Schema and configure the YAML extension for autocompletion and inline validation:
+
+```bash
+abp schema --output blueprint-schema.json
+```
+
+Add to `.vscode/settings.json`:
+
+```json
+{
+  "yaml.schemas": {
+    "./blueprint-schema.json": "*.blueprint.yml"
+  }
+}
+```
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/ahmetatar/agent-blueprint
+cd agent-blueprint
+pip install -e ".[dev]"
+
+# Run tests
+python3 -m pytest tests/ -v
+
+# Lint
+ruff check src/
+```
+
+### Project Structure
+
+```
+src/agent_blueprint/
+├── cli/            # Typer CLI commands (validate, generate, inspect, init, schema)
+├── models/         # Pydantic v2 schema models
+├── ir/             # Intermediate representation: compiler + expression parser
+├── generators/     # Code generators (langgraph, plain, crewai stub)
+├── deployers/      # Cloud deployers (Phase 4 — coming soon)
+├── templates/      # Jinja2 templates per target framework
+└── utils/          # YAML loader, Mermaid visualizer
+```
+
+### Adding a new target framework
+
+1. Create `src/agent_blueprint/generators/<framework>.py` implementing `BaseGenerator`
+2. Add Jinja2 templates to `src/agent_blueprint/templates/<framework>/`
+3. Register in `src/agent_blueprint/cli/generate.py`
+
+The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input to all generators — you don't touch the parser or validator.
+
+---
+
+## Roadmap
+
+- [x] YAML schema + Pydantic validation
+- [x] Variable interpolation (`${settings.default_model}`)
+- [x] Safe condition expression parser
+- [x] LangGraph code generator
+- [x] Plain Python generator
+- [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
+- [ ] `abp run` — generate to temp dir and execute locally
+- [ ] CrewAI generator
+- [ ] AutoGen generator
+- [ ] `abp deploy --platform azure|aws|gcp`
+- [ ] VS Code extension
+- [ ] PyPI publish
+
+---
+
+## License
+
+MIT

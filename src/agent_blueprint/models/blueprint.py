@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from agent_blueprint.models.agents import AgentDef
+from agent_blueprint.models.deploy import DeployConfig
 from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
@@ -56,6 +57,7 @@ class BlueprintSpec(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     input: IOSchema | None = None
     output: IOSchema | None = None
+    deploy: DeployConfig | None = None
 
     @model_validator(mode="after")
     def validate_references(self) -> "BlueprintSpec":

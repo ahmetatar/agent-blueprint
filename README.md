@@ -163,6 +163,7 @@ A blueprint YAML has these top-level sections:
 | `blueprint` | Yes | Name, version, description |
 | `settings` | No | Default model, temperature, retries |
 | `state` | No | Shared state fields flowing through the graph |
+| `model_providers` | No | Model provider connection definitions (API keys, endpoints) |
 | `mcp_servers` | No | MCP server connection definitions |
 | `agents` | Yes | Agent definitions (model, prompt, tools) |
 | `tools` | No | Tool definitions (function, api, retrieval, mcp) |
@@ -186,8 +187,9 @@ blueprint:
 
 ```yaml
 settings:
-  default_model: "gpt-4o"   # Default model for all agents
-  default_temperature: 0.7   # Default temperature
+  default_model: "gpt-4o"            # Default model for all agents
+  default_model_provider: openai_gpt  # Default provider (references model_providers)
+  default_temperature: 0.7
   max_retries: 3
   timeout_seconds: 300
 ```
@@ -224,6 +226,7 @@ agents:
   my_agent:
     name: "Friendly Name"           # Optional display name
     model: "gpt-4o"                 # or ${settings.default_model}
+    model_provider: openai_gpt      # References model_providers; falls back to settings.default_model_provider
     system_prompt: |
       You are a helpful assistant.
     tools: [tool_a, tool_b]         # References to tools section
@@ -240,6 +243,69 @@ agents:
       enabled: true
       trigger: before_tool_call     # before_tool_call | after_tool_call | before_response | always
       tools: [dangerous_tool]       # Only require approval for specific tools
+```
+
+### `model_providers`
+
+Defines named model provider connections. Agents reference these by name via `model_provider`. If omitted, the generated code assumes the framework's default provider resolution (e.g. `OPENAI_API_KEY` environment variable).
+
+```yaml
+model_providers:
+  openai_gpt:
+    provider: openai              # openai | anthropic | google | ollama | azure_openai | bedrock | openai_compatible
+    api_key_env: OPENAI_API_KEY   # env var holding the API key
+
+  gemini:
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+
+  local_ollama:
+    provider: ollama
+    base_url: "http://localhost:11434"   # or ${env.OLLAMA_URL}
+
+  azure_gpt4:
+    provider: azure_openai
+    base_url: "${env.AZURE_OPENAI_ENDPOINT}"
+    api_key_env: AZURE_OPENAI_KEY
+    deployment: "gpt-4o-prod"
+    api_version: "2024-02-01"
+
+  bedrock_claude:
+    provider: bedrock
+    region: "us-east-1"
+    aws_profile_env: AWS_PROFILE
+
+  my_local_server:
+    provider: openai_compatible   # Any OpenAI-compatible endpoint (vLLM, LM Studio, etc.)
+    base_url: "http://localhost:8000/v1"
+    api_key_env: LOCAL_API_KEY    # optional
+```
+
+| Provider | Required fields | Optional fields |
+|---|---|---|
+| `openai` | — | `api_key_env` |
+| `anthropic` | — | `api_key_env` |
+| `google` | — | `api_key_env` |
+| `ollama` | `base_url` | — |
+| `azure_openai` | `base_url`, `deployment` | `api_key_env`, `api_version` |
+| `bedrock` | — | `region`, `aws_profile_env` |
+| `openai_compatible` | `base_url` | `api_key_env` |
+
+Agents reference a provider with `model_provider`. If not set, `settings.default_model_provider` is used:
+
+```yaml
+agents:
+  researcher:
+    model: "gemini-2.0-flash"
+    model_provider: gemini         # ← references model_providers.gemini
+
+  writer:
+    model: "llama3.2"
+    model_provider: local_ollama
+
+  router:
+    model: "gpt-4o"
+    # model_provider omitted → falls back to settings.default_model_provider
 ```
 
 ### `mcp_servers`
@@ -576,6 +642,7 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [x] Plain Python generator
 - [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
 - [x] MCP server configuration (`mcp_servers`) and `mcp` tool type
+- [x] Model provider configuration (`model_providers`) for OpenAI, Anthropic, Google, Ollama, Azure, Bedrock
 - [ ] `abp run` — generate to temp dir and execute locally
 - [ ] CrewAI generator
 - [ ] AutoGen generator

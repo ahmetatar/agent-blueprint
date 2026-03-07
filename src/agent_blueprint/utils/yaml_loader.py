@@ -61,14 +61,43 @@ def _to_plain(value: Any) -> Any:
     return value
 
 
+def _load_dotenv(blueprint_path: Path) -> None:
+    """Load .env files into os.environ (existing vars are never overwritten).
+
+    Search order (first found wins):
+      1. <blueprint_dir>/.env
+      2. <cwd>/.env
+    """
+    candidates = [
+        blueprint_path.parent / ".env",
+        Path.cwd() / ".env",
+    ]
+    for env_file in candidates:
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+            break  # stop at first found
+
+
 def load_blueprint_yaml(path: Path) -> dict[str, Any]:
-    """Load a blueprint YAML file, resolve variables, and return a plain dict."""
+    """Load a blueprint YAML file, resolve variables, and return a plain dict.
+
+    Before interpolation, loads the nearest .env file (blueprint dir or cwd)
+    so that ${env.VAR} references resolve without needing to manually export
+    variables. Existing environment variables always take precedence over .env.
+    """
     if not path.exists():
         raise BlueprintValidationError(f"Blueprint file not found: {path}")
     if path.suffix not in {".yml", ".yaml"}:
         raise BlueprintValidationError(
             f"Expected a .yml or .yaml file, got: {path.suffix}"
         )
+
+    _load_dotenv(path)
 
     with path.open("r", encoding="utf-8") as f:
         raw = yaml.load(f)

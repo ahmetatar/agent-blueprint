@@ -1,5 +1,6 @@
 """YAML loader with ${...} variable interpolation."""
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,10 @@ def _interpolate_value(value: Any, root: dict[str, Any]) -> Any:
     if isinstance(value, str):
         def replace_match(m: re.Match) -> str:  # type: ignore[type-arg]
             path = m.group(1)
+            # ${env.VAR_NAME} → read from environment variables at load time
+            if path.startswith("env."):
+                env_var = path[4:]
+                return os.environ.get(env_var, f"${{{path}}}")
             try:
                 resolved = _get_nested(root, path)
             except (KeyError, TypeError) as e:

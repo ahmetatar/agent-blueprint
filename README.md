@@ -163,8 +163,9 @@ A blueprint YAML has these top-level sections:
 | `blueprint` | Yes | Name, version, description |
 | `settings` | No | Default model, temperature, retries |
 | `state` | No | Shared state fields flowing through the graph |
+| `mcp_servers` | No | MCP server connection definitions |
 | `agents` | Yes | Agent definitions (model, prompt, tools) |
-| `tools` | No | Tool definitions |
+| `tools` | No | Tool definitions (function, api, retrieval, mcp) |
 | `graph` | Yes | Nodes, edges, entry point |
 | `memory` | No | Checkpointing / persistence config |
 | `input` | No | Input schema for the agent |
@@ -192,6 +193,10 @@ settings:
 ```
 
 Settings values can be referenced anywhere with `${settings.field_name}`.
+
+> **Variable interpolation** supports two namespaces:
+> - `${settings.field}` — resolved from the blueprint's `settings` section
+> - `${env.VAR_NAME}` — resolved from environment variables at load time; if the variable is not set, the placeholder is kept as-is
 
 ### `state`
 
@@ -237,9 +242,34 @@ agents:
       tools: [dangerous_tool]       # Only require approval for specific tools
 ```
 
+### `mcp_servers`
+
+Defines MCP (Model Context Protocol) server connections. Tools of type `mcp` reference these by name.
+
+```yaml
+mcp_servers:
+  stitch:
+    transport: sse                        # sse | http | stdio
+    url: "http://localhost:3100/sse"
+    headers:
+      Authorization: "Bearer ${env.STITCH_TOKEN}"
+
+  filesystem:
+    transport: stdio                      # Launched as a subprocess
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    env:
+      SOME_VAR: "value"
+```
+
+| Transport | Required fields | Optional fields |
+|---|---|---|
+| `sse` / `http` | `url` | `headers` |
+| `stdio` | `command` | `args`, `env` |
+
 ### `tools`
 
-Three tool types are supported:
+Four tool types are supported:
 
 **`function`** — A Python function you implement:
 
@@ -278,6 +308,42 @@ tools:
     source: "knowledge_base"
     embedding_model: "text-embedding-3-small"
     top_k: 5
+```
+
+**`mcp`** — A tool exposed by an MCP server (references `mcp_servers`):
+
+```yaml
+tools:
+  create_project:
+    type: mcp
+    server: stitch             # Must match a key in mcp_servers
+    tool: create_project       # Tool name on the server
+    description: "Create a new Stitch project"
+    parameters:
+      name:
+        type: string
+        required: true
+
+  generate_screen:
+    type: mcp
+    server: stitch
+    tool: generate_screen_from_text
+    parameters:
+      text:
+        type: string
+        required: true
+      project_id:
+        type: string
+        required: true
+```
+
+Agents use MCP tools the same way as any other tool:
+
+```yaml
+agents:
+  ui_agent:
+    model: "claude-opus-4-6"
+    tools: [create_project, generate_screen]
 ```
 
 ### `graph`
@@ -504,11 +570,12 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 ## Roadmap
 
 - [x] YAML schema + Pydantic validation
-- [x] Variable interpolation (`${settings.default_model}`)
+- [x] Variable interpolation (`${settings.field}`, `${env.VAR}`)
 - [x] Safe condition expression parser
 - [x] LangGraph code generator
 - [x] Plain Python generator
 - [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
+- [x] MCP server configuration (`mcp_servers`) and `mcp` tool type
 - [ ] `abp run` — generate to temp dir and execute locally
 - [ ] CrewAI generator
 - [ ] AutoGen generator

@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from agent_blueprint.models.agents import AgentDef
 from agent_blueprint.models.graph import GraphDef
+from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.state import StateDef
-from agent_blueprint.models.tools import ToolDef
+from agent_blueprint.models.tools import ToolDef, ToolType
 
 
 class BlueprintMeta(BaseModel):
@@ -45,6 +46,7 @@ class BlueprintSpec(BaseModel):
     blueprint: BlueprintMeta
     settings: BlueprintSettings = Field(default_factory=BlueprintSettings)
     state: StateDef = Field(default_factory=StateDef)
+    mcp_servers: dict[str, McpServerDef] = Field(default_factory=dict)
     agents: dict[str, AgentDef] = Field(default_factory=dict)
     tools: dict[str, ToolDef] = Field(default_factory=dict)
     graph: GraphDef
@@ -67,6 +69,13 @@ class BlueprintSpec(BaseModel):
                         raise ValueError(
                             f"Agent '{agent_name}' human_in_the_loop references undefined tool '{tool_ref}'"
                         )
+
+        # Validate mcp tool server references
+        for tool_name, tool in self.tools.items():
+            if tool.type == ToolType.mcp and tool.server not in self.mcp_servers:
+                raise ValueError(
+                    f"Tool '{tool_name}' references undefined MCP server '{tool.server}'"
+                )
 
         # Validate node agent references
         for node_name, node in self.graph.nodes.items():

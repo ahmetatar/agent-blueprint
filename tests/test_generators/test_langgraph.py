@@ -101,6 +101,66 @@ class TestLangGraphGenerator:
         files = self.gen.generate(ir)
         ast.parse(files["tools.py"])
 
+    def test_memory_in_memory_uses_memorysaver(self):
+        ir = load_ir("basic_chatbot.yml")
+        files = self.gen.generate(ir)
+        graph_py = files["graph.py"]
+        assert "MemorySaver" in graph_py
+        assert "MemorySaver()" in graph_py
+
+    def test_memory_sqlite_uses_sqlitesaver(self):
+        ir = load_ir("memory_sqlite.yml")
+        files = self.gen.generate(ir)
+        graph_py = files["graph.py"]
+        assert "SqliteSaver" in graph_py
+        assert "from_conn_string" in graph_py
+        assert "SQLITE_DB_PATH" in graph_py
+
+    def test_memory_redis_uses_redissaver(self):
+        ir = load_ir("memory_redis.yml")
+        files = self.gen.generate(ir)
+        graph_py = files["graph.py"]
+        assert "RedisSaver" in graph_py
+        assert "from_conn_string" in graph_py
+        assert "REDIS_URL" in graph_py
+
+    def test_memory_postgres_uses_postgressaver(self):
+        ir = load_ir("memory_postgres.yml")
+        files = self.gen.generate(ir)
+        graph_py = files["graph.py"]
+        assert "PostgresSaver" in graph_py
+        assert "from_conn_string" in graph_py
+        assert "DATABASE_URL" in graph_py
+
+    def test_memory_redis_graph_is_valid_python(self):
+        ir = load_ir("memory_redis.yml")
+        files = self.gen.generate(ir)
+        ast.parse(files["graph.py"])
+
+    def test_memory_sqlite_requirements_include_package(self):
+        ir = load_ir("memory_sqlite.yml")
+        files = self.gen.generate(ir)
+        assert "langgraph-checkpoint-sqlite" in files["requirements.txt"]
+
+    def test_memory_redis_requirements_include_package(self):
+        ir = load_ir("memory_redis.yml")
+        files = self.gen.generate(ir)
+        assert "langgraph-checkpoint-redis" in files["requirements.txt"]
+        assert "redis>=" in files["requirements.txt"]
+
+    def test_memory_postgres_requirements_include_package(self):
+        ir = load_ir("memory_postgres.yml")
+        files = self.gen.generate(ir)
+        assert "langgraph-checkpoint-postgres" in files["requirements.txt"]
+        assert "psycopg" in files["requirements.txt"]
+
+    def test_memory_in_memory_requirements_no_extra_package(self):
+        ir = load_ir("basic_chatbot.yml")
+        files = self.gen.generate(ir)
+        assert "langgraph-checkpoint-sqlite" not in files["requirements.txt"]
+        assert "langgraph-checkpoint-redis" not in files["requirements.txt"]
+        assert "langgraph-checkpoint-postgres" not in files["requirements.txt"]
+
     def test_impl_field_only_valid_for_function_type(self):
         from pydantic import ValidationError
         from agent_blueprint.models.blueprint import BlueprintSpec

@@ -1,0 +1,63 @@
+blueprint:
+  name: "impl-tools-agent"
+  version: "1.0"
+  description: "Agent with impl-backed function tools"
+
+settings:
+  default_model: "gpt-4o"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+tools:
+  # impl provided — generator wires the existing function
+  classify_intent:
+    type: function
+    impl: "myapp.classifiers.classify_intent"
+    description: "Classify customer intent"
+    parameters:
+      message:
+        type: string
+        required: true
+
+  # impl in a deeper module path
+  web_search:
+    type: function
+    impl: "myapp.tools.search.web_search"
+    description: "Search the web"
+    parameters:
+      query:
+        type: string
+        required: true
+
+  # no impl — generator produces a stub
+  send_email:
+    type: function
+    description: "Send an email"
+    parameters:
+      to:
+        type: string
+        required: true
+      body:
+        type: string
+        required: true
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a helpful assistant.
+    tools: [classify_intent, web_search, send_email]
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+      description: "Main assistant"
+  edges:
+    - from: assistant
+      to: END

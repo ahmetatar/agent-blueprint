@@ -5,45 +5,59 @@ import os
 import httpx
 from langchain_core.tools import tool
 
+{% for tool_name, tool_def in ir.all_tools.items() %}
+{% if tool_def.type.value == "function" and tool_def.impl %}
+{% set p = impl_parts(tool_name, tool_def.impl) %}
+{{ p.import_stmt }}
+{% endif %}
+{% endfor %}
 
-{%- for tool_name, tool_def in ir.all_tools.items() %}
+{% for tool_name, tool_def in ir.all_tools.items() %}
+{% if tool_def.type.value == "function" %}
+{% if tool_def.impl %}
+{% set p = impl_parts(tool_name, tool_def.impl) %}
+# {{ tool_name }} → wired from {{ tool_def.impl }}
+{{ tool_name }} = tool({{ p.alias }}, name="{{ tool_name }}", description="{{ tool_def.description or tool_name | escape_string }}")
 
-{%- if tool_def.type.value == "function" %}
+{% else %}
 @tool
 def {{ tool_name }}(
-{%- for param_name, param_def in tool_def.parameters.items() %}
+{% for param_name, param_def in tool_def.parameters.items() %}
     {{ param_name }}: {{ param_def.type | python_type }}{% if not loop.last %},{% endif %}
 
-{%- endfor %}
+{% endfor %}
 ) -> str:
     """{{ tool_def.description or tool_name }}"""
-    # TODO: Implement {{ tool_name }}
+    # TODO: implement {{ tool_name }}
+    # Move your implementation here or use the 'impl' field in the blueprint
+    # to point to an existing function: impl: "mypackage.module.{{ tool_name }}"
     raise NotImplementedError("{{ tool_name }} is not implemented yet")
 
-{%- elif tool_def.type.value == "api" %}
+{% endif %}
+{% elif tool_def.type.value == "api" %}
 @tool
 def {{ tool_name }}(
-{%- for param_name, param_def in tool_def.parameters.items() %}
+{% for param_name, param_def in tool_def.parameters.items() %}
     {{ param_name }}: {{ param_def.type | python_type }}{% if not loop.last %},{% endif %}
 
-{%- endfor %}
+{% endfor %}
 ) -> str:
     """{{ tool_def.description or tool_name }}"""
-    {%- if tool_def.auth %}
+{% if tool_def.auth %}
     headers = {}
-    {%- if tool_def.auth.type.value == "bearer" %}
+{% if tool_def.auth.type.value == "bearer" %}
     token = os.environ.get("{{ tool_def.auth.token_env }}", "")
     headers["Authorization"] = f"Bearer {token}"
-    {%- endif %}
-    {%- else %}
+{% endif %}
+{% else %}
     headers = {}
-    {%- endif %}
+{% endif %}
     url = "{{ tool_def.url }}"
     response = httpx.{{ tool_def.method.value.lower() }}(url, headers=headers)
     response.raise_for_status()
     return response.text
 
-{%- elif tool_def.type.value == "retrieval" %}
+{% elif tool_def.type.value == "retrieval" %}
 def {{ tool_name }}_retriever():
     """Retrieval tool: {{ tool_def.description or tool_name }}"""
     # TODO: Configure retrieval from source: {{ tool_def.source }}
@@ -56,14 +70,13 @@ def {{ tool_name }}(query: str) -> str:
     docs = retriever.get_relevant_documents(query)
     return "\n\n".join(d.page_content for d in docs)
 
-{%- endif %}
-{%- endfor %}
-
+{% endif %}
+{% endfor %}
 
 TOOLS: dict[str, list] = {
-{%- for node in ir.nodes %}
-{%- if node.tool_defs %}
+{% for node in ir.nodes %}
+{% if node.tool_defs %}
     "{{ node.id }}": [{% for t in node.tool_defs.keys() %}{{ t }}{% if not loop.last %}, {% endif %}{% endfor %}],
-{%- endif %}
-{%- endfor %}
+{% endif %}
+{% endfor %}
 }

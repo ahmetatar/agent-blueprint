@@ -66,6 +66,9 @@ class ToolDef(BaseModel):
     server: str | None = None
     tool: str | None = None
 
+    # function tool fields
+    impl: str | None = None  # dotted import path, e.g. "mypackage.tools.my_func"
+
     @model_validator(mode="after")
     def validate_type_fields(self) -> "ToolDef":
         if self.type == ToolType.api and not self.url:
@@ -74,4 +77,6 @@ class ToolDef(BaseModel):
             raise ValueError("retrieval tools require a 'source' field")
         if self.type == ToolType.mcp and not (self.server and self.tool):
             raise ValueError("mcp tools require 'server' and 'tool' fields")
+        if self.impl and self.type != ToolType.function:
+            raise ValueError("'impl' is only valid for function tools")
         return self

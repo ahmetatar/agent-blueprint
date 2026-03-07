@@ -8,6 +8,7 @@ from agent_blueprint.models.agents import AgentDef
 from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef, ToolType
 
@@ -22,6 +23,7 @@ class BlueprintMeta(BaseModel):
 
 class BlueprintSettings(BaseModel):
     default_model: str = "gpt-4o"
+    default_model_provider: str | None = None  # references a key in model_providers
     default_temperature: float = 0.7
     max_retries: int = 3
     timeout_seconds: int = 300
@@ -46,6 +48,7 @@ class BlueprintSpec(BaseModel):
     blueprint: BlueprintMeta
     settings: BlueprintSettings = Field(default_factory=BlueprintSettings)
     state: StateDef = Field(default_factory=StateDef)
+    model_providers: dict[str, ModelProviderDef] = Field(default_factory=dict)
     mcp_servers: dict[str, McpServerDef] = Field(default_factory=dict)
     agents: dict[str, AgentDef] = Field(default_factory=dict)
     tools: dict[str, ToolDef] = Field(default_factory=dict)
@@ -56,8 +59,24 @@ class BlueprintSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_references(self) -> "BlueprintSpec":
-        # Validate agent tool references
+        # Validate settings.default_model_provider reference
+        if (
+            self.settings.default_model_provider
+            and self.settings.default_model_provider not in self.model_providers
+        ):
+            raise ValueError(
+                f"settings.default_model_provider references undefined provider "
+                f"'{self.settings.default_model_provider}'"
+            )
+
+        # Validate agent model_provider references
         for agent_name, agent in self.agents.items():
+            if agent.model_provider and agent.model_provider not in self.model_providers:
+                raise ValueError(
+                    f"Agent '{agent_name}' references undefined model provider '{agent.model_provider}'"
+                )
+
+            # Validate tool references
             for tool_ref in agent.tools:
                 if tool_ref not in self.tools:
                     raise ValueError(

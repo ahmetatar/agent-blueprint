@@ -1,0 +1,84 @@
+blueprint:
+  name: "multi-provider-agent"
+  version: "1.0"
+  description: "Agent using multiple model providers"
+
+settings:
+  default_model: "gpt-4o"
+  default_model_provider: openai_default
+
+model_providers:
+  openai_default:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+
+  gemini:
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+
+  local_ollama:
+    provider: ollama
+    base_url: "http://localhost:11434"
+
+  azure_gpt4:
+    provider: azure_openai
+    base_url: "${env.AZURE_OPENAI_ENDPOINT}"
+    api_key_env: AZURE_OPENAI_KEY
+    deployment: "gpt-4o-prod"
+    api_version: "2024-02-01"
+
+  anthropic_claude:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  router:
+    model: "gpt-4o"
+    model_provider: openai_default
+    system_prompt: |
+      You are a routing agent.
+
+  researcher:
+    model: "gemini-2.0-flash"
+    model_provider: gemini
+    system_prompt: |
+      You are a researcher.
+
+  local_agent:
+    model: "llama3.2"
+    model_provider: local_ollama
+    system_prompt: |
+      You are a local assistant.
+
+  summarizer:
+    model: "claude-opus-4-6"
+    model_provider: anthropic_claude
+    system_prompt: |
+      You are a summarizer.
+
+graph:
+  entry_point: router
+  nodes:
+    router:
+      agent: router
+    researcher:
+      agent: researcher
+    local_agent:
+      agent: local_agent
+    summarizer:
+      agent: summarizer
+  edges:
+    - from: router
+      to: researcher
+    - from: researcher
+      to: local_agent
+    - from: local_agent
+      to: summarizer
+    - from: summarizer
+      to: END

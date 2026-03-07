@@ -557,6 +557,42 @@ abp generate <blueprint.yml> [--target langgraph|crewai|plain] [--output-dir ./o
 | `plain` | Stable | Plain Python with openai SDK, no framework |
 | `crewai` | Coming soon | CrewAI crews and tasks |
 
+### `abp run`
+
+Generate a blueprint to a temp dir and run it locally — no manual `pip install` or directory setup needed:
+
+```bash
+# Single-shot
+abp run my-agent.yml "What is the capital of France?"
+
+# Interactive REPL (omit input)
+abp run my-agent.yml
+
+# With options
+abp run my-agent.yml --thread-id session-1 --install --env .env.local
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--target` | `langgraph` | Target framework (only `langgraph` currently) |
+| `--thread-id` | `default` | Conversation thread ID (enables memory across turns in REPL) |
+| `--install` | `false` | Run `pip install -r requirements.txt` before executing |
+| `--env` | `.env` | Path to a `.env` file to load before running |
+
+**How it works:**
+
+1. Validates and compiles the blueprint
+2. Generates code to a temporary directory
+3. Adds your current working directory to `PYTHONPATH` — `impl:` references resolve automatically
+4. Executes in a subprocess using the current Python environment
+5. Cleans up the temp dir on exit
+
+**Warnings:** If any `function` tools have no `impl` and haven't been implemented, `abp run` prints a warning — the agent will still start but will raise `NotImplementedError` if those tools are called.
+
+```
+⚠  Warning: 1 tool(s) have no implementation and will raise NotImplementedError if called: send_email
+```
+
 ### `abp inspect`
 
 Visualize the agent graph as a Mermaid diagram:
@@ -696,7 +732,7 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [x] MCP server configuration (`mcp_servers`) and `mcp` tool type
 - [x] Model provider configuration (`model_providers`) for OpenAI, Anthropic, Google, Ollama, Azure, Bedrock
 - [x] `impl` field for function tools — wire existing Python functions without stub overwrite risk
-- [ ] `abp run` — generate to temp dir and execute locally
+- [x] `abp run` — generate to temp dir and execute locally (single-shot + interactive REPL)
 - [ ] CrewAI generator
 - [ ] AutoGen generator
 - [ ] `abp deploy --platform azure|aws|gcp`

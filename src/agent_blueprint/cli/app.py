@@ -8,6 +8,7 @@ from agent_blueprint.cli import schema as schema_cmd
 from agent_blueprint.cli import generate as generate_cmd
 from agent_blueprint.cli import inspect_cmd
 from agent_blueprint.cli import init_cmd
+from agent_blueprint.cli import run_cmd
 
 console = Console()
 
@@ -23,6 +24,7 @@ app.command("schema")(schema_cmd.schema)
 app.command("generate")(generate_cmd.generate)
 app.command("inspect")(inspect_cmd.inspect)
 app.command("init")(init_cmd.init)
+app.command("run")(run_cmd.run)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ _TEMPLATES = [
     ("requirements.txt.j2", "requirements.txt"),
 ]
 
+_RUNNER_TEMPLATE = ("_abp_runner.py.j2", "_abp_runner.py")
+
 
 def _safe_id(value: str) -> str:
     """Convert a node ID to a safe Python identifier."""
@@ -82,8 +84,16 @@ class LangGraphGenerator(BaseGenerator):
         self._env.filters["escape_string"] = _escape_string
         self._env.globals["impl_parts"] = _impl_parts
 
-    def generate(self, ir: AgentGraph) -> dict[str, str]:
-        """Generate LangGraph project files from AgentGraph IR."""
+    def generate(
+        self,
+        ir: AgentGraph,
+        *,
+        runner_thread_id: str | None = None,
+    ) -> dict[str, str]:
+        """Generate LangGraph project files from AgentGraph IR.
+
+        If runner_thread_id is provided, also generates _abp_runner.py.
+        """
         files: dict[str, str] = {}
 
         for template_name, output_name in _TEMPLATES:
@@ -94,6 +104,17 @@ class LangGraphGenerator(BaseGenerator):
             except Exception as e:
                 raise GeneratorError(
                     f"Failed to render template '{template_name}': {e}"
+                ) from e
+
+        if runner_thread_id is not None:
+            tmpl_name, out_name = _RUNNER_TEMPLATE
+            try:
+                template = self._env.get_template(tmpl_name)
+                content = template.render(ir=ir, thread_id=runner_thread_id)
+                files[out_name] = content
+            except Exception as e:
+                raise GeneratorError(
+                    f"Failed to render template '{tmpl_name}': {e}"
                 ) from e
 
         # Generate a .env.example with required env vars

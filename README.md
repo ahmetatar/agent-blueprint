@@ -337,7 +337,11 @@ mcp_servers:
 
 Four tool types are supported:
 
-**`function`** — A Python function you implement:
+**`function`** — A Python function you implement.
+
+Two modes are available:
+
+**Without `impl` (stub generated):** The generator creates a placeholder you fill in:
 
 ```yaml
 tools:
@@ -348,9 +352,57 @@ tools:
       message:
         type: string
         required: true
-    returns:
-      type: string
 ```
+
+Generated `tools.py`:
+```python
+@tool
+def classify_intent(message: str) -> str:
+    """Classify customer intent"""
+    # TODO: implement classify_intent
+    raise NotImplementedError("classify_intent is not implemented yet")
+```
+
+**With `impl` (wires an existing function):** Point to any Python function in your codebase using a dotted import path. The generator produces an import + `tool()` wrapper — it never touches your implementation file:
+
+```yaml
+tools:
+  classify_intent:
+    type: function
+    impl: "myapp.classifiers.classify_intent"   # dotted import path
+    description: "Classify customer intent"
+    parameters:
+      message:
+        type: string
+        required: true
+
+  web_search:
+    type: function
+    impl: "myapp.tools.search.web_search"        # deeper path works too
+    description: "Search the web"
+    parameters:
+      query:
+        type: string
+        required: true
+```
+
+Your function, wherever you keep it:
+```python
+# myapp/classifiers.py  — your file, generator never touches it
+def classify_intent(message: str) -> str:
+    return call_my_model(message)
+```
+
+Generated `tools.py`:
+```python
+from myapp.classifiers import classify_intent as _classify_intent_impl
+from myapp.tools.search import web_search as _web_search_impl
+
+classify_intent = tool(_classify_intent_impl, name="classify_intent", description="...")
+web_search      = tool(_web_search_impl,      name="web_search",      description="...")
+```
+
+> **Why `impl`?** Without it, every `abp generate` run overwrites your implementations in `tools.py`. With `impl`, the generated file is pure wiring code — safe to regenerate at any time.
 
 **`api`** — An HTTP endpoint (code generated automatically):
 
@@ -643,6 +695,7 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
 - [x] MCP server configuration (`mcp_servers`) and `mcp` tool type
 - [x] Model provider configuration (`model_providers`) for OpenAI, Anthropic, Google, Ollama, Azure, Bedrock
+- [x] `impl` field for function tools — wire existing Python functions without stub overwrite risk
 - [ ] `abp run` — generate to temp dir and execute locally
 - [ ] CrewAI generator
 - [ ] AutoGen generator

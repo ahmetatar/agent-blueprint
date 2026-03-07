@@ -74,3 +74,45 @@ class TestLangGraphGenerator:
         ir = load_ir("basic_chatbot.yml")
         files = self.gen.generate(ir)
         assert "basic-chatbot" in files["main.py"]
+
+    def test_impl_tool_generates_import(self):
+        ir = load_ir("impl_tools.yml")
+        files = self.gen.generate(ir)
+        tools_py = files["tools.py"]
+        assert "from myapp.classifiers import classify_intent as _classify_intent_impl" in tools_py
+        assert "from myapp.tools.search import web_search as _web_search_impl" in tools_py
+
+    def test_impl_tool_generates_wire_call(self):
+        ir = load_ir("impl_tools.yml")
+        files = self.gen.generate(ir)
+        tools_py = files["tools.py"]
+        assert 'classify_intent = tool(_classify_intent_impl' in tools_py
+        assert 'web_search = tool(_web_search_impl' in tools_py
+
+    def test_no_impl_tool_generates_stub(self):
+        ir = load_ir("impl_tools.yml")
+        files = self.gen.generate(ir)
+        tools_py = files["tools.py"]
+        assert "raise NotImplementedError" in tools_py
+        assert "def send_email(" in tools_py
+
+    def test_impl_tools_py_is_valid_python(self):
+        ir = load_ir("impl_tools.yml")
+        files = self.gen.generate(ir)
+        ast.parse(files["tools.py"])
+
+    def test_impl_field_only_valid_for_function_type(self):
+        from pydantic import ValidationError
+        from agent_blueprint.models.blueprint import BlueprintSpec
+        with pytest.raises(ValidationError):
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "tools": {
+                    "bad": {
+                        "type": "api",
+                        "url": "https://example.com",
+                        "impl": "myapp.tools.bad",  # impl on non-function tool
+                    }
+                },
+                "graph": {"entry_point": "n", "nodes": {"n": {}}, "edges": []},
+            })

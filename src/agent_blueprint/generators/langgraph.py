@@ -47,6 +47,25 @@ def _escape_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
 
+def _impl_parts(tool_name: str, impl_path: str) -> dict:
+    """Parse an impl dotted path into an import statement and a local alias.
+
+    Example:
+        "myapp.tools.classify" → {
+            "import_stmt": "from myapp.tools import classify as _classify_intent_impl",
+            "alias": "_classify_intent_impl"
+        }
+    """
+    alias = f"_{tool_name}_impl"
+    parts = impl_path.rsplit(".", 1)
+    if len(parts) == 1:
+        import_stmt = f"import {parts[0]} as {alias}"
+    else:
+        module, func = parts
+        import_stmt = f"from {module} import {func} as {alias}"
+    return {"import_stmt": import_stmt, "alias": alias}
+
+
 class LangGraphGenerator(BaseGenerator):
     """Generates a LangGraph Python project from an AgentGraph IR."""
 
@@ -61,6 +80,7 @@ class LangGraphGenerator(BaseGenerator):
         self._env.filters["safe_id"] = _safe_id
         self._env.filters["python_type"] = _python_type
         self._env.filters["escape_string"] = _escape_string
+        self._env.globals["impl_parts"] = _impl_parts
 
     def generate(self, ir: AgentGraph) -> dict[str, str]:
         """Generate LangGraph project files from AgentGraph IR."""

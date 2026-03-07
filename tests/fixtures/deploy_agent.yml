@@ -1,0 +1,64 @@
+blueprint:
+  name: "deploy-test-agent"
+  version: "1.0"
+  description: "Agent with full deploy config for testing"
+
+settings:
+  default_model: "gpt-4o"
+  default_model_provider: openai_main
+
+model_providers:
+  openai_main:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+
+  gemini_main:
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+
+tools:
+  lookup_invoice:
+    type: api
+    method: GET
+    url: "https://api.example.com/invoices/{id}"
+    auth:
+      type: bearer
+      token_env: BILLING_API_KEY
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    model_provider: openai_main
+    system_prompt: |
+      You are a helpful assistant.
+    tools: [lookup_invoice]
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+
+deploy:
+  platform: azure
+  azure:
+    resource_group: "my-rg"
+    location: "westeurope"
+    acr_name: "myregistry"
+    container_app_env: "my-env"
+  aws:
+    region: "eu-west-1"
+    ecr_repo: "deploy-test-agent"
+  gcp:
+    project_env: GCP_PROJECT_ID
+    region: "europe-west1"
+    allow_unauthenticated: true

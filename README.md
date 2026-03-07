@@ -15,6 +15,38 @@ abp generate my-agent.yml --target langgraph
 
 ---
 
+## Table of Contents
+
+- [Why](#why)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Blueprint Schema](#blueprint-schema)
+  - [`blueprint`](#blueprint)
+  - [`settings`](#settings)
+  - [`state`](#state)
+  - [`agents`](#agents)
+  - [`model_providers`](#model_providers)
+  - [`mcp_servers`](#mcp_servers)
+  - [`tools`](#tools)
+  - [`graph`](#graph)
+  - [`memory`](#memory)
+- [CLI Reference](#cli-reference)
+  - [`abp init`](#abp-init)
+  - [`abp validate`](#abp-validate)
+  - [`abp generate`](#abp-generate)
+  - [`abp deploy`](#abp-deploy)
+  - [`abp run`](#abp-run)
+  - [`abp inspect`](#abp-inspect)
+  - [`abp schema`](#abp-schema)
+- [Examples](#examples)
+- [Generated Project Structure](#generated-project-structure-langgraph-target)
+- [IDE Integration (VS Code)](#ide-integration-vs-code)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
 ## Why
 
 Building multi-agent systems with LangGraph, CrewAI, or AutoGen means writing a lot of framework-specific boilerplate. Changing frameworks means rewriting everything. `agent-blueprint` separates the **what** (your agent logic) from the **how** (the framework).

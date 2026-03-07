@@ -47,6 +47,59 @@ class TestValidBlueprints:
         assert len(targets) == 3
 
 
+class TestMcpTools:
+    def test_mcp_blueprint_loads(self):
+        raw = load("mcp_tools.yml")
+        spec = BlueprintSpec.model_validate(raw)
+        assert "stitch" in spec.mcp_servers
+        assert "filesystem" in spec.mcp_servers
+
+    def test_mcp_server_transports(self):
+        raw = load("mcp_tools.yml")
+        spec = BlueprintSpec.model_validate(raw)
+        assert spec.mcp_servers["stitch"].transport == "sse"
+        assert spec.mcp_servers["stitch"].url == "http://localhost:3100/sse"
+        assert spec.mcp_servers["filesystem"].transport == "stdio"
+        assert spec.mcp_servers["filesystem"].command == "npx"
+
+    def test_mcp_tool_references(self):
+        raw = load("mcp_tools.yml")
+        spec = BlueprintSpec.model_validate(raw)
+        assert spec.tools["create_project"].type == "mcp"
+        assert spec.tools["create_project"].server == "stitch"
+        assert spec.tools["create_project"].tool == "create_project"
+        assert spec.tools["generate_screen"].server == "stitch"
+        assert spec.tools["read_file"].server == "filesystem"
+
+    def test_mcp_tool_undefined_server_raises(self):
+        raw = load("mcp_tools.yml")
+        raw["tools"]["bad_tool"] = {
+            "type": "mcp",
+            "server": "nonexistent_server",
+            "tool": "some_tool",
+        }
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate(raw)
+        assert "nonexistent_server" in str(exc_info.value)
+
+    def test_mcp_tool_missing_server_field_raises(self):
+        with pytest.raises(ValidationError):
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "mcp_servers": {"stitch": {"transport": "sse", "url": "http://localhost:3100/sse"}},
+                "tools": {"t": {"type": "mcp", "tool": "create_project"}},  # server eksik
+                "graph": {"entry_point": "n", "nodes": {"n": {}}, "edges": []},
+            })
+
+    def test_mcp_server_stdio_missing_command_raises(self):
+        with pytest.raises(ValidationError):
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "mcp_servers": {"fs": {"transport": "stdio"}},  # command eksik
+                "graph": {"entry_point": "n", "nodes": {"n": {}}, "edges": []},
+            })
+
+
 class TestInvalidBlueprints:
     def test_missing_agent_reference(self):
         raw = load("invalid_missing_agent.yml")

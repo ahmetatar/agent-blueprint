@@ -1,0 +1,83 @@
+blueprint:
+  name: "ui-generator-agent"
+  version: "1.0"
+  description: "Agent that generates UI screens via MCP tools"
+
+settings:
+  default_model: "claude-opus-4-6"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    project_id:
+      type: string
+      default: null
+    screen_url:
+      type: string
+      default: null
+
+mcp_servers:
+  stitch:
+    transport: sse
+    url: "http://localhost:3100/sse"
+    headers:
+      Authorization: "Bearer ${env.STITCH_TOKEN}"
+
+  filesystem:
+    transport: stdio
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+
+tools:
+  create_project:
+    type: mcp
+    server: stitch
+    tool: create_project
+    description: "Create a new Stitch project"
+    parameters:
+      name:
+        type: string
+        required: true
+
+  generate_screen:
+    type: mcp
+    server: stitch
+    tool: generate_screen_from_text
+    description: "Generate a screen design from text"
+    parameters:
+      text:
+        type: string
+        required: true
+      project_id:
+        type: string
+        required: true
+
+  read_file:
+    type: mcp
+    server: filesystem
+    tool: read_file
+    description: "Read a file from the workspace"
+    parameters:
+      path:
+        type: string
+        required: true
+
+agents:
+  ui_agent:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a UI design agent. Create projects and generate screens
+      using the available design tools.
+    tools: [create_project, generate_screen, read_file]
+
+graph:
+  entry_point: ui_agent
+  nodes:
+    ui_agent:
+      agent: ui_agent
+      description: "Generate UI screens"
+  edges:
+    - from: ui_agent
+      to: END

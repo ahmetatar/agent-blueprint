@@ -10,6 +10,7 @@ class ToolType(str, Enum):
     function = "function"
     api = "api"
     retrieval = "retrieval"
+    mcp = "mcp"
 
 
 class HttpMethod(str, Enum):
@@ -61,10 +62,16 @@ class ToolDef(BaseModel):
     embedding_model: str | None = None
     top_k: int = 5
 
+    # mcp tool fields
+    server: str | None = None
+    tool: str | None = None
+
     @model_validator(mode="after")
     def validate_type_fields(self) -> "ToolDef":
         if self.type == ToolType.api and not self.url:
             raise ValueError("api tools require a 'url' field")
         if self.type == ToolType.retrieval and not self.source:
             raise ValueError("retrieval tools require a 'source' field")
+        if self.type == ToolType.mcp and not (self.server and self.tool):
+            raise ValueError("mcp tools require 'server' and 'tool' fields")
         return self

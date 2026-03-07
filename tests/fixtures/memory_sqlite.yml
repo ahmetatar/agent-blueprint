@@ -1,0 +1,30 @@
+blueprint:
+  name: "sqlite-agent"
+  version: "1.0"
+
+settings:
+  default_model: "gpt-4o"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    system_prompt: "You are a helpful assistant."
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+
+memory:
+  backend: sqlite
+  connection_string_env: SQLITE_DB_PATH

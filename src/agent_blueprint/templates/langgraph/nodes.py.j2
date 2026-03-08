@@ -5,8 +5,8 @@ import os
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from .state import AgentState
-from .tools import TOOLS
+from state import AgentState
+from tools import TOOLS
 
 
 def _make_llm(model: str, temperature: float = 0.7):

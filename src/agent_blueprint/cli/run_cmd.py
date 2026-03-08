@@ -27,7 +27,7 @@ def run(
         "default", "--thread-id", help="Conversation thread ID"
     ),
     install: bool = typer.Option(
-        False, "--install", help="pip install dependencies before running"
+        True, "--install/--no-install", help="pip install dependencies before running (default: on)"
     ),
     env_file: Path = typer.Option(
         Path(".env"), "--env", help="Path to .env file to load"

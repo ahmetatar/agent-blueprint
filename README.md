@@ -36,6 +36,7 @@ abp generate my-agent.yml --target langgraph
   - [`abp generate`](#abp-generate)
   - [`abp deploy`](#abp-deploy)
   - [`abp run`](#abp-run)
+  - [`abp editor`](#abp-editor)
   - [`abp inspect`](#abp-inspect)
   - [`abp schema`](#abp-schema)
 - [Examples](#examples)
@@ -763,6 +764,40 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 
 ```
 ⚠  Warning: 1 tool(s) have no implementation and will raise NotImplementedError if called: send_email
+```
+
+### `abp editor`
+
+Open the visual Blueprint editor in your browser — design agents and edges interactively, then export to YAML or generate code directly:
+
+```bash
+abp editor [blueprint.yml] [--port 7842] [--no-browser]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `blueprint.yml` | _(none)_ | Blueprint file to load (optional — creates blank canvas if omitted) |
+| `--port` | `7842` | Port to listen on |
+| `--no-browser` | `false` | Don't open the browser automatically |
+
+![Agent Blueprint Editor](docs/editor-screenshot.png)
+
+The editor provides a drag-and-drop canvas where you can:
+
+- **Add nodes** with `+ Node` or by double-clicking the canvas
+- **Connect nodes** by dragging from a node's right-side port to another
+- **Edit properties** by clicking a node to open the properties panel
+- **Add agents** with `+ Agent` and assign them to nodes
+- **Auto-layout** with `⟳ Layout` to re-arrange nodes cleanly
+- **Preview YAML** live with `</> YAML`
+- **Run** the blueprint directly with `▶ Run`
+
+Changes auto-save to the blueprint file every 600 ms.
+
+**Requires UI extras:**
+
+```bash
+pip install 'agent-blueprint[ui]'
 ```
 
 ### `abp inspect`

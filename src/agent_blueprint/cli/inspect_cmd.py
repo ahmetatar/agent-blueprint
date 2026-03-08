@@ -36,11 +36,8 @@ def inspect(
         output.write_text(diagram, encoding="utf-8")
         console.print(f"[green]Mermaid diagram written to[/] {output}")
     else:
-        console.print(Panel(
-            Syntax(diagram, "text", theme="monokai"),
-            title=f"[bold cyan]Graph[/] — {spec.blueprint.name}",
-            border_style="cyan",
-        ))
+        console.print(f"\n[bold cyan]Graph[/] — {spec.blueprint.name}\n")
+        console.print(Syntax(diagram, "text", theme="monokai"))
         console.print(
             "\n[dim]Paste the above into https://mermaid.live to visualize[/]"
         )

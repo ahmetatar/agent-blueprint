@@ -14,8 +14,8 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.redis import RedisSaver
 {% endif %}
 
-from .state import AgentState
-from .nodes import (
+from state import AgentState
+from nodes import (
 {% for node in ir.nodes %}
     node_{{ node.id | safe_id }},
 {% endfor %}

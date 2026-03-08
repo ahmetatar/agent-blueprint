@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
 ]
+ui = ["fastapi>=0.111", "uvicorn[standard]>=0.29"]
 deploy-azure = ["azure-mgmt-containerinstance", "azure-identity"]
 deploy-aws = ["boto3"]
 deploy-gcp = ["google-cloud-run"]

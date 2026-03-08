@@ -10,6 +10,7 @@ from agent_blueprint.cli import inspect_cmd
 from agent_blueprint.cli import init_cmd
 from agent_blueprint.cli import run_cmd
 from agent_blueprint.cli import deploy_cmd
+from agent_blueprint.cli import ui_cmd
 
 console = Console()
 
@@ -27,6 +28,7 @@ app.command("inspect")(inspect_cmd.inspect)
 app.command("init")(init_cmd.init)
 app.command("run")(run_cmd.run)
 app.command("deploy")(deploy_cmd.deploy)
+app.command("editor")(ui_cmd.ui)
 
 
 if __name__ == "__main__":

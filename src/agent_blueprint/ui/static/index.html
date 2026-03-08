@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Blueprint UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #080810;
+  --bg2:       #0f0f1c;
+  --bg3:       #181828;
+  --bg4:       #1f1f35;
+  --border:    rgba(130,110,255,0.18);
+  --border2:   rgba(130,110,255,0.32);
+  --accent:    #7c6af7;
+  --accent-h:  #9d8fff;
+  --teal:      #00d9a3;
+  --teal-h:    #00f0b5;
+  --danger:    #ff5f72;
+  --text:      #e2e2f0;
+  --text-muted:#7070a0;
+  --text-dim:  #4a4a72;
+  --node-w:    210px;
+  --radius:    12px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+/* ── Scrollbar ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ── Header ────────────────────────────────────────── */
+#header {
+  height: 52px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 10px;
+  flex-shrink: 0;
+  z-index: 200;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent-h);
+  letter-spacing: -0.02em;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.logo svg { flex-shrink: 0; }
+
+#file-info {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.header-actions { display: flex; gap: 6px; align-items: center; }
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+button:active { opacity: 0.85; }
+
+.btn { background: var(--bg4); color: var(--text); padding: 6px 12px; }
+.btn:hover { background: var(--bg3); color: var(--accent-h); }
+
+.btn-accent {
+  background: linear-gradient(135deg, #6c5ce7, #a855f7);
+  color: #fff;
+  padding: 6px 14px;
+  box-shadow: 0 0 16px rgba(124,106,247,0.3);
+}
+.btn-accent:hover { box-shadow: 0 0 24px rgba(124,106,247,0.5); }
+
+.btn-teal {
+  background: linear-gradient(135deg, #00b894, #00cec9);
+  color: #fff;
+  padding: 6px 14px;
+  box-shadow: 0 0 16px rgba(0,217,163,0.25);
+}
+.btn-teal:hover { box-shadow: 0 0 24px rgba(0,217,163,0.45); }
+
+.btn-danger { background: rgba(255,95,114,0.15); color: var(--danger); padding: 4px 8px; }
+.btn-danger:hover { background: rgba(255,95,114,0.25); }
+
+.btn-icon { background: transparent; color: var(--text-muted); padding: 4px 6px; font-size: 15px; }
+.btn-icon:hover { color: var(--text); }
+
+.sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
+/* ── Main layout ───────────────────────────────────── */
+#main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Left sidebar ──────────────────────────────────── */
+#sidebar-left {
+  width: 220px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar-section { padding: 12px; border-bottom: 1px solid var(--border); }
+.sidebar-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+#agent-list { overflow-y: auto; padding: 6px; flex: 1; min-height: 0; }
+.agent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.agent-item:hover { background: var(--bg3); }
+.agent-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+}
+.agent-name { flex: 1; font-size: 12px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-model { font-size: 10px; color: var(--text-muted); }
+.agent-del { opacity: 0; font-size: 14px; color: var(--danger); background: none; border: none; cursor: pointer; padding: 0 2px; }
+.agent-item:hover .agent-del { opacity: 1; }
+
+/* ── Canvas ────────────────────────────────────────── */
+#canvas-wrap {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle, rgba(110,90,220,0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  cursor: default;
+  min-width: 0;
+}
+
+#canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 5000px; height: 4000px;
+  transform-origin: 0 0;
+}
+
+#edges-svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 5000px; height: 4000px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* ── Node cards ────────────────────────────────────── */
+.node {
+  position: absolute;
+  width: var(--node-w);
+  background: rgba(22, 22, 42, 0.95);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 12px 14px;
+  cursor: move;
+  user-select: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  backdrop-filter: blur(12px);
+}
+.node:hover { border-color: var(--border2); box-shadow: 0 4px 24px rgba(100,80,240,0.2); }
+.node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124,106,247,0.25), 0 4px 32px rgba(124,106,247,0.3);
+}
+.node.entry-node { border-color: rgba(0,217,163,0.5); box-shadow: 0 0 20px rgba(0,217,163,0.15); }
+.node.entry-node.selected {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px rgba(0,217,163,0.25), 0 4px 32px rgba(0,217,163,0.3);
+}
+
+.node-header {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+}
+.node-icon { font-size: 16px; flex-shrink: 0; }
+.node-id { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-del { opacity: 0; background: none; border: none; cursor: pointer; color: var(--danger); font-size: 16px; padding: 0; line-height: 1; }
+.node:hover .node-del { opacity: 1; }
+
+.node-agent { font-size: 11px; color: var(--teal); margin-bottom: 3px; }
+.node-model { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+.node-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+.node-footer { display: flex; align-items: center; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+.badge {
+  font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.badge-type { background: rgba(124,106,247,0.15); color: var(--accent); }
+.badge-entry { background: rgba(0,217,163,0.15); color: var(--teal); }
+
+/* ── Ports ─────────────────────────────────────────── */
+.port {
+  position: absolute;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--bg4);
+  border: 2px solid var(--border2);
+  cursor: crosshair;
+  z-index: 20;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.port:hover, .port.active {
+  background: var(--accent);
+  border-color: var(--accent-h);
+  transform: scale(1.3);
+}
+.port-in  { left: -7px; top: 50%; transform: translateY(-50%); }
+.port-in:hover  { transform: translateY(-50%) scale(1.3); }
+.port-out { right: -7px; top: 50%; transform: translateY(-50%); }
+.port-out:hover { transform: translateY(-50%) scale(1.3); }
+
+/* ── Pseudo-nodes (START / END) ────────────────────── */
+.pseudo-node {
+  position: absolute;
+  padding: 7px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: move;
+  user-select: none;
+  letter-spacing: 0.06em;
+}
+.pseudo-start {
+  background: rgba(0,217,163,0.12);
+  border: 1px solid rgba(0,217,163,0.4);
+  color: var(--teal);
+}
+.pseudo-end {
+  background: rgba(255,95,114,0.1);
+  border: 1px solid rgba(255,95,114,0.3);
+  color: var(--danger);
+}
+
+/* ── Right sidebar (properties) ───────────────────── */
+#sidebar-right {
+  width: 280px;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+#props-inner { padding: 14px; }
+
+.props-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.props-group { margin-bottom: 16px; }
+.props-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px; }
+.props-field { margin-bottom: 8px; }
+.props-field label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+
+input[type=text], input[type=number], select, textarea {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input[type=text]:focus, input[type=number]:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124,106,247,0.15);
+}
+select option { background: var(--bg3); }
+textarea { resize: vertical; min-height: 80px; line-height: 1.5; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.toggle-row span { font-size: 12px; color: var(--text-muted); }
+input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+.edge-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.edge-arrow { color: var(--accent); font-size: 14px; }
+.edge-target { flex: 1; font-size: 12px; font-weight: 500; }
+.edge-cond { font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+/* ── YAML / Run panel ──────────────────────────────── */
+#bottom-panel {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 0;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: height 0.3s cubic-bezier(0.4,0,0.2,1);
+  z-index: 300;
+  overflow: hidden;
+}
+#bottom-panel.open { height: 380px; }
+
+#panel-tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 0;
+  flex-shrink: 0;
+}
+.tab {
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent-h); border-bottom-color: var(--accent); }
+.panel-close { margin-left: auto; }
+
+.panel-content { flex: 1; overflow: hidden; display: none; }
+.panel-content.active { display: flex; flex-direction: column; }
+
+/* YAML tab */
+#yaml-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+#yaml-toolbar {
+  display: flex; gap: 6px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#yaml-code {
+  flex: 1;
+  margin: 0;
+  padding: 12px 16px;
+  overflow: auto;
+  background: var(--bg);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c3e88d;
+  white-space: pre;
+}
+
+/* Run tab */
+#run-content { display: flex; flex-direction: column; height: 100%; }
+#run-messages {
+  flex: 1; overflow-y: auto;
+  padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-user { align-self: flex-end; background: rgba(124,106,247,0.25); border: 1px solid rgba(124,106,247,0.35); }
+.msg-agent { align-self: flex-start; background: var(--bg3); border: 1px solid var(--border); }
+.msg-error { align-self: flex-start; background: rgba(255,95,114,0.1); border: 1px solid rgba(255,95,114,0.3); color: var(--danger); }
+.msg-system { align-self: center; font-size: 11px; color: var(--text-dim); font-style: italic; }
+#run-input-row {
+  display: flex; gap: 8px; padding: 10px 12px;
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+#run-input { flex: 1; }
+#run-input:disabled { opacity: 0.5; }
+
+/* ── Add-node modal ────────────────────────────────── */
+#modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+#modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 14px;
+  padding: 24px;
+  width: 380px;
+  max-width: 95vw;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+
+/* ── Toast ─────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 999;
+  white-space: nowrap;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.toast-ok { border-color: rgba(0,217,163,0.5); color: var(--teal); }
+#toast.toast-err { border-color: rgba(255,95,114,0.5); color: var(--danger); }
+
+/* ── Connecting mode cursor ────────────────────────── */
+body.connecting { cursor: crosshair !important; }
+body.connecting .node { cursor: crosshair; }
+
+/* ── Loading spinner ───────────────────────────────── */
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────── -->
+<div id="header">
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      <polygon points="11,2 20,7 20,17 11,22 2,17 2,7" fill="none" stroke="url(#lg)" stroke-width="1.5"/>
+      <circle cx="11" cy="11" r="3" fill="url(#lg)"/>
+      <defs>
+        <linearGradient id="lg" x1="2" y1="2" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#7c6af7"/><stop offset="1" stop-color="#00d9a3"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    Agent Blueprint
+  </div>
+  <div id="file-info">unsaved</div>
+  <div class="header-actions">
+    <button class="btn" onclick="openAddNodeModal()">+ Node</button>
+    <button class="btn" onclick="openAddAgentModal()">+ Agent</button>
+    <button class="btn" onclick="autoLayout(); renderAll(); fitView(); toast('Auto-layout applied')">⟳ Layout</button>
+    <div class="sep"></div>
+    <button class="btn" onclick="saveFile()">Save</button>
+    <button class="btn-accent" onclick="showYaml()">&#60;/&#62; YAML</button>
+    <button class="btn-teal" onclick="showRun()">&#9654; Run</button>
+  </div>
+</div>
+
+<!-- ── Main ────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Left sidebar -->
+  <div id="sidebar-left">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Blueprint</div>
+      <div class="props-field">
+        <label>Name</label>
+        <input type="text" id="bp-name" oninput="bp.blueprint.name=this.value; schedSave()">
+      </div>
+      <div class="props-field">
+        <label>Default model</label>
+        <input type="text" id="bp-model" oninput="bp.settings.default_model=this.value; schedSave()">
+      </div>
+    </div>
+    <div class="sidebar-section" style="display:flex; align-items:center; justify-content:space-between;">
+      <div class="sidebar-title" style="margin:0">Agents</div>
+      <button class="btn" style="padding:3px 9px; font-size:11px;" onclick="openAddAgentModal()">+ Add</button>
+    </div>
+    <div id="agent-list"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div id="canvas-wrap"
+    onmousedown="onCanvasDown(event)"
+    onmousemove="onCanvasMove(event)"
+    onmouseup="onCanvasUp(event)"
+    onwheel="onWheel(event)"
+    ondblclick="onCanvasDblClick(event)">
+    <div id="canvas">
+      <svg id="edges-svg"></svg>
+    </div>
+  </div>
+
+  <!-- Right sidebar (properties) -->
+  <div id="sidebar-right">
+    <div id="props-inner">
+      <div class="props-empty">Click a node to edit its properties.<br><br>Double-click empty canvas to add a node.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bottom panel ─────────────────────────────────── -->
+<div id="bottom-panel">
+  <div id="panel-tabs">
+    <div class="tab active" data-tab="yaml" onclick="switchTab('yaml')">YAML Output</div>
+    <div class="tab" data-tab="run" onclick="switchTab('run')">Run</div>
+    <button class="btn-icon panel-close" onclick="closePanel()">✕</button>
+  </div>
+  <div id="tab-yaml" class="panel-content active">
+    <div id="yaml-content">
+      <div id="yaml-toolbar">
+        <button class="btn" onclick="copyYaml()">Copy</button>
+        <button class="btn" onclick="downloadYaml()">Download</button>
+        <button class="btn" onclick="refreshYaml()">Refresh</button>
+      </div>
+      <pre id="yaml-code"></pre>
+    </div>
+  </div>
+  <div id="tab-run" class="panel-content">
+    <div id="run-content">
+      <div id="run-messages">
+        <div class="msg msg-system">Send a message to run the agent. The blueprint is compiled on the fly.</div>
+      </div>
+      <div id="run-input-row">
+        <input type="text" id="run-input" placeholder="Type a message and press Enter..." onkeydown="if(event.key==='Enter')sendRun()">
+        <button class="btn-teal" onclick="sendRun()" style="white-space:nowrap">Send &#9654;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Node Modal ───────────────────────────────── -->
+<div id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-box">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<!-- ── Toast ────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════════════════
+let bp = {};            // blueprint JSON (mirrors YAML structure)
+let uiPos = {};         // { nodeId: {x, y} }  — canvas coords
+let sourcePath = null;
+let selNodeId = null;   // selected nodeId
+let connectFrom = null; // nodeId being connected (or null)
+let tempPath = null;    // SVG element for in-progress edge
+
+// Interaction state
+let drag = null;
+let pan  = null;
+let vpX = 60, vpY = 60, vpScale = 1;
+
+// Debounce save timer
+let saveTimer = null;
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════════════════════
+async function init() {
+  try {
+    const d = await api('GET', '/api/state');
+    bp = d.blueprint || defaultBp();
+    uiPos = d.ui_positions || {};
+    sourcePath = d.source_path;
+    if (sourcePath) document.getElementById('file-info').textContent = sourcePath;
+    if (Object.keys(uiPos).length === 0) autoLayout();
+    renderAll();
+    // Fit all nodes into view after first render (DOM must exist for offsetWidth)
+    requestAnimationFrame(fitView);
+  } catch(e) {
+    toast('Failed to load state: ' + e.message, 'err');
+  }
+}
+
+function defaultBp() {
+  return {
+    blueprint: {name: 'my-agent', version: '1.0', description: ''},
+    settings: {default_model: 'gpt-4o', default_temperature: 0.7},
+    state: {fields: {}},
+    agents: {}, tools: {},
+    graph: {entry_point: '', nodes: {}, edges: []},
+    memory: {backend: 'in_memory'},
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  API
+// ═══════════════════════════════════════════════════════════════════════
+async function api(method, path, body) {
+  const opts = { method, headers: {'Content-Type': 'application/json'} };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function schedSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(pushState, 600);
+}
+
+async function pushState() {
+  try { await api('PUT', '/api/state', {blueprint: bp, ui_positions: uiPos}); }
+  catch(e) { console.warn('Auto-save failed', e); }
+}
+
+async function saveFile() {
+  if (!sourcePath) {
+    const p = prompt('Save as (file path):', 'blueprint.yml');
+    if (!p) return;
+    sourcePath = p;
+  }
+  try {
+    const r = await api('POST', '/api/save', {blueprint: bp, path: sourcePath});
+    document.getElementById('file-info').textContent = r.path;
+    toast('Saved to ' + r.path, 'ok');
+  } catch(e) { toast('Save failed: ' + e.message, 'err'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Auto-layout (BFS topological)
+// ═══════════════════════════════════════════════════════════════════════
+function autoLayout() {
+  const nodes = Object.keys((bp.graph||{}).nodes||{});
+  const edges = (bp.graph||{}).edges||[];
+  const entry = bp.graph?.entry_point || nodes[0] || '';
+
+  const levels = {};
+  const visited = new Set();
+  const queue = [[entry, 0]];
+  while (queue.length) {
+    const [nid, lvl] = queue.shift();
+    if (!nid || visited.has(nid)) continue;
+    visited.add(nid);
+    (levels[lvl] = levels[lvl]||[]).push(nid);
+    for (const e of edges) {
+      if (e.from !== nid) continue;
+      const tos = Array.isArray(e.to) ? e.to : [e.to];
+      for (const t of tos) {
+        const tid = typeof t === 'string' ? t : t?.target;
+        if (tid && tid !== 'END' && !visited.has(tid)) queue.push([tid, lvl+1]);
+      }
+    }
+  }
+  for (const n of nodes) {
+    if (!visited.has(n)) {
+      const l = Object.keys(levels).length;
+      (levels[l] = levels[l]||[]).push(n);
+    }
+  }
+
+  const GX = 290, GY = 155, BX = 220, BY = 80;
+  const newPos = {};
+  for (const [l, nids] of Object.entries(levels)) {
+    const x = BX + parseInt(l) * GX;
+    const totalH = nids.length * GY;
+    const sy = BY + (500 - totalH) / 2;
+    nids.forEach((nid, i) => { newPos[nid] = {x, y: sy + i * GY}; });
+  }
+
+  // START pseudo
+  const firstX = BX; const firstNids = levels[0]||[];
+  const avgY = firstNids.length
+    ? firstNids.reduce((s,n)=>(s+(newPos[n]?.y||BY)), 0)/firstNids.length : BY+200;
+  newPos['__START__'] = {x: 50, y: avgY + 10};
+
+  // END pseudo
+  const lastLvl = Math.max(...Object.keys(levels).map(Number));
+  const lastNids = levels[lastLvl]||[];
+  const avgYe = lastNids.length
+    ? lastNids.reduce((s,n)=>(s+(newPos[n]?.y||BY)), 0)/lastNids.length : BY+200;
+  const endX = BX + (lastLvl+1)*GX + 40;
+  newPos['__END__'] = {x: endX, y: avgYe + 10};
+
+  uiPos = newPos;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Fit all nodes into the visible viewport
+// ═══════════════════════════════════════════════════════════════════════
+function fitView() {
+  const ids = Object.keys(uiPos);
+  if (!ids.length) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const ww = wrap.offsetWidth  || 800;
+  const wh = wrap.offsetHeight || 600;
+  const PAD = 60;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const id of ids) {
+    const el = document.getElementById(`node-${id}`);
+    const w = el ? el.offsetWidth  : 210;
+    const h = el ? el.offsetHeight : 110;
+    const {x, y} = uiPos[id];
+    minX = Math.min(minX, x);      minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + w);  maxY = Math.max(maxY, y + h);
+  }
+
+  // Guard: if bounds are degenerate (Infinity/-Infinity from empty graph), bail out
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return;
+
+  const graphW = maxX - minX;
+  const graphH = maxY - minY;
+  const scaleX = (ww - PAD * 2) / Math.max(graphW, 1);
+  const scaleY = (wh - PAD * 2) / Math.max(graphH, 1);
+  vpScale = Math.min(scaleX, scaleY, 1);
+  if (!isFinite(vpScale) || vpScale <= 0) { vpScale = 1; return; }
+
+  vpX = PAD + (ww - PAD * 2 - graphW * vpScale) / 2 - minX * vpScale;
+  vpY = PAD + (wh - PAD * 2 - graphH * vpScale) / 2 - minY * vpScale;
+  applyViewTransform();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Render
+// ═══════════════════════════════════════════════════════════════════════
+function renderAll() {
+  applyViewTransform();
+  renderNodes();
+  renderEdges();
+  renderAgentList();
+  syncHeaderInputs();
+}
+
+function applyViewTransform() {
+  document.getElementById('canvas').style.transform =
+    `translate(${vpX}px,${vpY}px) scale(${vpScale})`;
+}
+
+function syncHeaderInputs() {
+  const n = document.getElementById('bp-name');
+  const m = document.getElementById('bp-model');
+  if (n) n.value = bp.blueprint?.name || '';
+  if (m) m.value = bp.settings?.default_model || 'gpt-4o';
+}
+
+function renderAgentList() {
+  const el = document.getElementById('agent-list');
+  const agents = bp.agents || {};
+  el.innerHTML = '';
+  for (const [id, def] of Object.entries(agents)) {
+    const row = document.createElement('div');
+    row.className = 'agent-item';
+    row.innerHTML = `
+      <div class="agent-dot"></div>
+      <div style="flex:1;min-width:0">
+        <div class="agent-name">${id}</div>
+        <div class="agent-model">${def.model || bp.settings?.default_model || 'gpt-4o'}</div>
+      </div>
+      <button class="agent-del" title="Delete agent" onclick="deleteAgent('${id}');event.stopPropagation()">×</button>`;
+    row.onclick = () => { selectNode(null); renderAgentProps(id); };
+    el.appendChild(row);
+  }
+}
+
+// ── Nodes ──────────────────────────────────────────────────────────────
+function renderNodes() {
+  document.querySelectorAll('.node,.pseudo-node').forEach(e => e.remove());
+  const canvas = document.getElementById('canvas');
+  const nodes = bp.graph?.nodes || {};
+  const entry = bp.graph?.entry_point || '';
+
+  // START
+  canvas.appendChild(makePseudoNode('__START__', '▶ START', 'pseudo-start'));
+  // END
+  canvas.appendChild(makePseudoNode('__END__', '■ END', 'pseudo-end'));
+
+  for (const [nodeId, def] of Object.entries(nodes)) {
+    canvas.appendChild(makeNodeEl(nodeId, def, nodeId === entry));
+  }
+}
+
+function makePseudoNode(id, label, cls) {
+  const el = document.createElement('div');
+  el.className = `pseudo-node ${cls}`;
+  el.id = `node-${id}`;
+  el.draggable = false;
+  const pos = uiPos[id] || {x: 50, y: 400};
+  el.style.left = pos.x + 'px';
+  el.style.top  = pos.y + 'px';
+  el.textContent = label;
+
+  // Port: START has out only, END has in only
+  if (id === '__START__') {
+    const p = portEl('out', id);
+    el.appendChild(p);
+  } else {
+    const p = portEl('in', id);
+    el.appendChild(p);
+  }
+
+  el.addEventListener('mousedown', e => onNodeDown(e, id));
+  el.addEventListener('click', e => {
+    if (connectFrom && connectFrom !== id) { e.stopPropagation(); finishConnect(id); }
+  });
+  return el;
+}
+
+function makeNodeEl(nodeId, def, isEntry) {
+  const agentId = def.agent || '';
+  const agentDef = (bp.agents||{})[agentId] || {};
+  const model = agentDef.model || bp.settings?.default_model || 'gpt-4o';
+  const desc = def.description || '';
+  const type = def.type || 'agent';
+
+  const icons = {agent:'🤖', function:'⚙️', handoff:'🤝', parallel:'⫸', subgraph:'📦'};
+  const icon = icons[type] || '🤖';
+
+  const el = document.createElement('div');
+  el.className = 'node' + (isEntry ? ' entry-node' : '') + (selNodeId===nodeId ? ' selected' : '');
+  el.id = `node-${nodeId}`;
+  el.dataset.nid = nodeId;
+
+  const pos = uiPos[nodeId] || {x: 200, y: 200};
+  el.style.left = pos.x + 'px';
+  el.style.top  = pos.y + 'px';
+
+  el.innerHTML = `
+    <div class="node-header">
+      <span class="node-icon">${icon}</span>
+      <span class="node-id">${nodeId}</span>
+      <button class="node-del" title="Delete" onclick="deleteNode('${nodeId}');event.stopPropagation()">×</button>
+    </div>
+    ${agentId ? `<div class="node-agent">⟶ ${agentId}</div>` : ''}
+    <div class="node-model">${model}</div>
+    ${desc ? `<div class="node-desc">${escHtml(desc)}</div>` : ''}
+    <div class="node-footer">
+      <span class="badge badge-type">${type}</span>
+      ${isEntry ? '<span class="badge badge-entry">entry</span>' : ''}
+    </div>`;
+
+  // Ports
+  el.appendChild(portEl('in',  nodeId));
+  el.appendChild(portEl('out', nodeId));
+
+  el.addEventListener('mousedown', e => onNodeDown(e, nodeId));
+  el.addEventListener('click', e => {
+    if (connectFrom && connectFrom !== nodeId) { e.stopPropagation(); finishConnect(nodeId); }
+    else if (!connectFrom) { e.stopPropagation(); selectNode(nodeId); }
+  });
+  return el;
+}
+
+function portEl(type, nodeId) {
+  const p = document.createElement('div');
+  p.className = `port port-${type}`;
+  if (type === 'out') {
+    p.title = 'Drag to connect';
+    p.addEventListener('mousedown', e => { e.stopPropagation(); startConnect(nodeId, e); });
+  }
+  return p;
+}
+
+// ── Edges ──────────────────────────────────────────────────────────────
+function renderEdges() {
+  const svg = document.getElementById('edges-svg');
+  svg.innerHTML = `
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="rgba(124,106,247,0.7)"/>
+      </marker>
+      <marker id="arr-teal" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="rgba(0,217,163,0.8)"/>
+      </marker>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="2" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>`;
+
+  const entry = bp.graph?.entry_point || '';
+  const edges = bp.graph?.edges || [];
+
+  // START → entry
+  if (entry) drawEdgeSvg(svg, '__START__', entry, null, true);
+
+  for (const edge of edges) {
+    const from = edge.from;
+    const tos = Array.isArray(edge.to) ? edge.to : [edge.to];
+    for (const t of tos) {
+      const target = typeof t === 'string' ? t : t?.target;
+      const cond = typeof t === 'object' ? t?.condition : null;
+      const toId = (target === 'END') ? '__END__' : target;
+      if (toId) drawEdgeSvg(svg, from, toId, cond, false);
+    }
+  }
+}
+
+function portCenter(nodeId, portType) {
+  const el = document.getElementById(`node-${nodeId}`);
+  if (!el) return null;
+  const pos = uiPos[nodeId] || {x:0,y:0};
+  const w = el.offsetWidth || 210;
+  const h = el.offsetHeight || 110;
+  return portType === 'out'
+    ? {x: pos.x + w + 7, y: pos.y + h/2}
+    : {x: pos.x - 7,     y: pos.y + h/2};
+}
+
+function bezierD(x1,y1,x2,y2) {
+  const dx = Math.max(Math.abs(x2-x1)*0.5, 60);
+  return `M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
+}
+
+function drawEdgeSvg(svg, fromId, toId, condition, isTeal) {
+  const src = portCenter(fromId, 'out');
+  const dst = portCenter(toId,   'in');
+  if (!src || !dst) return;
+
+  const marker = isTeal ? 'url(#arr-teal)' : 'url(#arr)';
+  const stroke = isTeal ? 'rgba(0,217,163,0.6)' : 'rgba(124,106,247,0.55)';
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d', bezierD(src.x,src.y,dst.x,dst.y));
+  path.setAttribute('fill','none');
+  path.setAttribute('stroke', stroke);
+  path.setAttribute('stroke-width','2');
+  path.setAttribute('marker-end', marker);
+  path.style.pointerEvents = 'stroke';
+  path.style.cursor = 'pointer';
+  path.title = `${fromId} → ${toId}`;
+  path.addEventListener('click', () => onEdgeClick(fromId, toId));
+  svg.appendChild(path);
+
+  if (condition) {
+    const mx = (src.x+dst.x)/2, my = (src.y+dst.y)/2;
+    const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x', mx); txt.setAttribute('y', my-4);
+    txt.setAttribute('text-anchor','middle');
+    txt.setAttribute('fill','rgba(160,140,255,0.9)');
+    txt.setAttribute('font-size','10');
+    txt.setAttribute('font-family','JetBrains Mono, monospace');
+    txt.textContent = condition;
+    svg.appendChild(txt);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Selection & Properties
+// ═══════════════════════════════════════════════════════════════════════
+function selectNode(nodeId) {
+  if (selNodeId) {
+    const old = document.getElementById(`node-${selNodeId}`);
+    if (old) old.classList.remove('selected');
+  }
+  selNodeId = nodeId;
+  if (nodeId) {
+    const el = document.getElementById(`node-${nodeId}`);
+    if (el) el.classList.add('selected');
+    renderNodeProps(nodeId);
+  } else {
+    document.getElementById('props-inner').innerHTML =
+      '<div class="props-empty">Click a node to edit its properties.<br><br>Double-click empty canvas to add a node.</div>';
+  }
+}
+
+function renderNodeProps(nodeId) {
+  const def = (bp.graph?.nodes||{})[nodeId];
+  if (!def) { renderAgentProps(nodeId); return; }
+
+  const agentNames = Object.keys(bp.agents||{});
+  const agentOpts = agentNames.map(a =>
+    `<option value="${a}" ${def.agent===a?'selected':''}>${a}</option>`
+  ).join('');
+
+  const types = ['agent','function','handoff','parallel','subgraph'];
+  const typeOpts = types.map(t =>
+    `<option value="${t}" ${(def.type||'agent')===t?'selected':''}>${t}</option>`
+  ).join('');
+
+  const isEntry = (bp.graph?.entry_point||'') === nodeId;
+
+  // Build edge list for this node
+  const edges = (bp.graph?.edges||[]).filter(e => e.from === nodeId);
+  const edgeRows = edges.map(e => {
+    const tos = Array.isArray(e.to) ? e.to : [e.to];
+    return tos.map(t => {
+      const target = typeof t==='string'? t : t?.target;
+      const cond   = typeof t==='object'? (t?.condition||'') : '';
+      return `<div class="edge-row">
+        <span class="edge-arrow">→</span>
+        <span class="edge-target">${target}</span>
+        ${cond ? `<span class="edge-cond">[${cond}]</span>` : ''}
+        <button class="btn-danger" onclick="deleteEdge('${nodeId}','${target}')">×</button>
+      </div>`;
+    }).join('');
+  }).join('');
+
+  document.getElementById('props-inner').innerHTML = `
+    <div class="props-group">
+      <div class="props-label">Node</div>
+      <div class="props-field"><label>ID</label>
+        <input type="text" value="${nodeId}" readonly style="opacity:0.6">
+      </div>
+      <div class="props-field"><label>Type</label>
+        <select onchange="updateNode('${nodeId}','type',this.value)">${typeOpts}</select>
+      </div>
+      <div class="props-field"><label>Agent</label>
+        <select onchange="updateNode('${nodeId}','agent',this.value)">
+          <option value="">— none —</option>${agentOpts}
+        </select>
+      </div>
+      <div class="props-field"><label>Description</label>
+        <input type="text" value="${escHtml(def.description||'')}"
+          oninput="updateNode('${nodeId}','description',this.value)">
+      </div>
+      <div class="toggle-row props-field">
+        <span>Entry point</span>
+        <input type="checkbox" ${isEntry?'checked':''} onchange="setEntry('${nodeId}',this.checked)">
+      </div>
+    </div>
+
+    <div class="props-group">
+      <div class="props-label" style="display:flex;justify-content:space-between;align-items:center">
+        Connections
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="openAddEdgeModal('${nodeId}')">+ Add</button>
+      </div>
+      ${edgeRows || '<div style="color:var(--text-dim);font-size:11px;padding:4px 0">No outgoing edges</div>'}
+    </div>
+
+    <div class="props-group">
+      <button class="btn-danger" style="width:100%;padding:7px" onclick="deleteNode('${nodeId}')">Delete Node</button>
+    </div>`;
+}
+
+function renderAgentProps(agentId) {
+  const def = (bp.agents||{})[agentId];
+  if (!def) return;
+  const toolKeys = Object.keys(bp.tools||{});
+  const toolOpts = toolKeys.map(t =>
+    `<option value="${t}" ${(def.tools||[]).includes(t)?'selected':''}>${t}</option>`
+  ).join('');
+
+  document.getElementById('props-inner').innerHTML = `
+    <div class="props-group">
+      <div class="props-label">Agent: ${agentId}</div>
+      <div class="props-field"><label>Model</label>
+        <input type="text" value="${def.model||'gpt-4o'}"
+          oninput="updateAgent('${agentId}','model',this.value)">
+      </div>
+      <div class="props-field"><label>Temperature</label>
+        <input type="number" step="0.1" min="0" max="2" value="${def.temperature??''}"
+          placeholder="${bp.settings?.default_temperature??0.7}"
+          oninput="updateAgent('${agentId}','temperature',parseFloat(this.value)||null)">
+      </div>
+      <div class="props-field"><label>System Prompt</label>
+        <textarea oninput="updateAgent('${agentId}','system_prompt',this.value)">${escHtml(def.system_prompt||'')}</textarea>
+      </div>
+      ${toolKeys.length ? `<div class="props-field"><label>Tools (multi-select)</label>
+        <select multiple onchange="updateAgentTools('${agentId}',this)"
+          style="height:80px">${toolOpts}</select>
+      </div>` : ''}
+    </div>
+    <div class="props-group">
+      <button class="btn-danger" style="width:100%;padding:7px" onclick="deleteAgent('${agentId}')">Delete Agent</button>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Node / Agent / Edge mutations
+// ═══════════════════════════════════════════════════════════════════════
+function updateNode(nodeId, field, value) {
+  if (!bp.graph.nodes[nodeId]) return;
+  bp.graph.nodes[nodeId][field] = value;
+  schedSave();
+  renderNodes(); renderEdges();
+  selectNode(nodeId);
+}
+
+function setEntry(nodeId, isEntry) {
+  if (isEntry) bp.graph.entry_point = nodeId;
+  else if (bp.graph.entry_point === nodeId) bp.graph.entry_point = '';
+  schedSave();
+  renderNodes(); renderEdges();
+  selectNode(nodeId);
+}
+
+function deleteNode(nodeId) {
+  if (!confirm(`Delete node "${nodeId}"?`)) return;
+  delete bp.graph.nodes[nodeId];
+  bp.graph.edges = (bp.graph.edges||[]).filter(e => {
+    const tos = Array.isArray(e.to)?e.to:[e.to];
+    const tids = tos.map(t=>typeof t==='string'?t:t?.target);
+    return e.from!==nodeId && !tids.includes(nodeId);
+  });
+  if (bp.graph.entry_point === nodeId) bp.graph.entry_point = '';
+  delete uiPos[nodeId];
+  if (selNodeId === nodeId) selNodeId = null;
+  schedSave(); renderAll();
+}
+
+function updateAgent(agentId, field, value) {
+  if (!bp.agents[agentId]) return;
+  if (value === null || value === undefined || value === '') {
+    delete bp.agents[agentId][field];
+  } else {
+    bp.agents[agentId][field] = value;
+  }
+  schedSave(); renderAgentList(); renderNodes();
+}
+
+function updateAgentTools(agentId, sel) {
+  bp.agents[agentId].tools = Array.from(sel.selectedOptions).map(o => o.value);
+  schedSave();
+}
+
+function deleteAgent(agentId) {
+  if (!confirm(`Delete agent "${agentId}"? Nodes using it will lose their agent reference.`)) return;
+  delete bp.agents[agentId];
+  for (const node of Object.values(bp.graph?.nodes||{})) {
+    if (node.agent === agentId) node.agent = '';
+  }
+  schedSave(); renderAll();
+}
+
+function deleteEdge(fromId, toId) {
+  bp.graph.edges = (bp.graph.edges||[]).filter(e => {
+    if (e.from !== fromId) return true;
+    const tos = Array.isArray(e.to)?e.to:[e.to];
+    const tids = tos.map(t=>typeof t==='string'?t:t?.target);
+    return !tids.includes(toId);
+  });
+  schedSave(); renderEdges(); selectNode(selNodeId);
+}
+
+function addEdge(fromId, toId, condition) {
+  const existingEdge = (bp.graph.edges||[]).find(e=>e.from===fromId);
+  const targetObj = condition ? {target: toId, condition} : toId;
+
+  if (existingEdge) {
+    // Add to existing edge's `to` list
+    if (typeof existingEdge.to === 'string') {
+      existingEdge.to = [existingEdge.to, targetObj];
+    } else if (Array.isArray(existingEdge.to)) {
+      existingEdge.to.push(targetObj);
+    }
+  } else {
+    bp.graph.edges = bp.graph.edges||[];
+    bp.graph.edges.push({from: fromId, to: targetObj});
+  }
+  schedSave(); renderEdges(); selectNode(fromId);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Mouse interaction
+// ═══════════════════════════════════════════════════════════════════════
+function onNodeDown(e, nodeId) {
+  if (e.button !== 0) return;
+  e.stopPropagation(); // always stop — prevents onCanvasDown cancelling a connect
+  if (connectFrom) return; // click handler will call finishConnect
+  const pos = uiPos[nodeId] || {x: 0, y: 0};
+  const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
+  drag = {nodeId, ox: cx - pos.x, oy: cy - pos.y};
+  document.addEventListener('mousemove', onDocMove);
+  document.addEventListener('mouseup',   onDocUp);
+}
+
+function onCanvasDown(e) {
+  if (e.button !== 0) return;
+  if (connectFrom) { cancelConnect(); return; }
+  pan = {mx: e.clientX, my: e.clientY, ox: vpX, oy: vpY};
+  document.getElementById('canvas-wrap').style.cursor = 'grabbing';
+  document.addEventListener('mousemove', onDocMove);
+  document.addEventListener('mouseup',   onDocUp);
+}
+
+function onDocMove(e) {
+  if (drag) {
+    const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
+    const nx = cx - drag.ox;
+    const ny = cy - drag.oy;
+    uiPos[drag.nodeId] = {x: nx, y: ny};
+    const el = document.getElementById(`node-${drag.nodeId}`);
+    if (el) { el.style.left = nx + 'px'; el.style.top = ny + 'px'; }
+    renderEdges();
+    return;
+  }
+  if (pan) {
+    vpX = pan.ox + (e.clientX - pan.mx);
+    vpY = pan.oy + (e.clientY - pan.my);
+    applyViewTransform();
+    return;
+  }
+  if (connectFrom && tempPath) {
+    const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
+    const src = portCenter(connectFrom, 'out');
+    if (src) tempPath.setAttribute('d', bezierD(src.x, src.y, cx, cy));
+  }
+}
+
+function onDocUp(e) {
+  document.removeEventListener('mousemove', onDocMove);
+  document.removeEventListener('mouseup',   onDocUp);
+  if (drag) { schedSave(); drag = null; }
+  if (pan)  { pan = null; document.getElementById('canvas-wrap').style.cursor = ''; }
+}
+
+// Temp-edge tracking (drag/pan fully handled by document listeners)
+function onCanvasMove(e) {
+  if (!drag && !pan && connectFrom && tempPath) {
+    const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
+    const src = portCenter(connectFrom, 'out');
+    if (src) tempPath.setAttribute('d', bezierD(src.x,src.y,cx,cy));
+  }
+}
+function onCanvasUp(e) { /* handled by onDocUp */ }
+
+function onCanvasDblClick(e) {
+  if (e.target !== document.getElementById('canvas-wrap') &&
+      e.target !== document.getElementById('canvas')) return;
+  const [cx, cy] = clientToCanvas(e.clientX, e.clientY);
+  openAddNodeModal(cx, cy);
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const delta = e.deltaY < 0 ? 1.1 : 0.91;
+  const newScale = Math.min(3, Math.max(0.2, vpScale * delta));
+  // Zoom toward mouse
+  vpX = mx - (mx - vpX) * (newScale / vpScale);
+  vpY = my - (my - vpY) * (newScale / vpScale);
+  vpScale = newScale;
+  applyViewTransform();
+}
+
+function onEdgeClick(fromId, toId) {
+  if (!confirm(`Delete edge ${fromId} → ${toId}?`)) return;
+  deleteEdge(fromId, toId === '__END__' ? 'END' : toId);
+}
+
+function clientToCanvas(clientX, clientY) {
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  return [
+    (clientX - rect.left - vpX) / vpScale,
+    (clientY - rect.top  - vpY) / vpScale,
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Connect mode
+// ═══════════════════════════════════════════════════════════════════════
+function startConnect(nodeId, e) {
+  connectFrom = nodeId;
+  document.body.classList.add('connecting');
+  const svg = document.getElementById('edges-svg');
+  tempPath = document.createElementNS('http://www.w3.org/2000/svg','path');
+  tempPath.setAttribute('fill','none');
+  tempPath.setAttribute('stroke','rgba(124,106,247,0.8)');
+  tempPath.setAttribute('stroke-width','2');
+  tempPath.setAttribute('stroke-dasharray','6 4');
+  tempPath.setAttribute('marker-end','url(#arr)');
+  svg.appendChild(tempPath);
+  toast('Click target node to connect, Esc to cancel');
+}
+
+function finishConnect(toNodeId) {
+  if (!connectFrom) return;
+  const fromId = connectFrom;
+  cancelConnect();
+
+  const actualTo = toNodeId === '__END__' ? 'END' : toNodeId;
+  if (actualTo === '__START__') { toast('Cannot connect to START', 'err'); return; }
+  if (fromId === '__END__' || fromId === '__START__' && actualTo !== '') {
+    // START is only the visual entry point marker — can't add edges from/to it
+    if (fromId === '__START__') { toast('Cannot create edges from START — set the entry point instead', 'err'); return; }
+  }
+
+  const cond = prompt('Condition (leave empty for unconditional):', '') || null;
+  if (actualTo) addEdge(fromId, actualTo, cond || null);
+}
+
+function cancelConnect() {
+  connectFrom = null;
+  document.body.classList.remove('connecting');
+  if (tempPath) { tempPath.remove(); tempPath = null; }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (connectFrom) cancelConnect();
+    closeModal();
+    closePanel();
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selNodeId &&
+      document.activeElement.tagName === 'BODY') {
+    deleteNode(selNodeId);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Modals
+// ═══════════════════════════════════════════════════════════════════════
+function openAddNodeModal(x, y) {
+  const agentNames = Object.keys(bp.agents||{});
+  const agentOpts = ['', ...agentNames].map(a =>
+    `<option value="${a}">${a||'— no agent —'}</option>`
+  ).join('');
+  const types = ['agent','function','handoff','parallel','subgraph'];
+  const typeOpts = types.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  document.getElementById('modal-box').innerHTML = `
+    <h3>Add Node</h3>
+    <div class="props-field"><label>Node ID</label>
+      <input type="text" id="m-nid" placeholder="e.g. planner">
+    </div>
+    <div class="props-field"><label>Type</label>
+      <select id="m-ntype">${typeOpts}</select>
+    </div>
+    <div class="props-field"><label>Agent</label>
+      <select id="m-nagent">${agentOpts}</select>
+    </div>
+    <div class="props-field"><label>Description</label>
+      <input type="text" id="m-ndesc" placeholder="Optional">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn-accent" onclick="confirmAddNode(${x||200},${y||200})">Add Node</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('m-nid')?.focus(), 50);
+}
+
+function confirmAddNode(x, y) {
+  const nid   = document.getElementById('m-nid').value.trim();
+  const ntype = document.getElementById('m-ntype').value;
+  const agent = document.getElementById('m-nagent').value;
+  const desc  = document.getElementById('m-ndesc').value.trim();
+  if (!nid) { toast('Node ID required', 'err'); return; }
+  if ((bp.graph?.nodes||{})[nid]) { toast(`Node "${nid}" already exists`, 'err'); return; }
+
+  bp.graph = bp.graph || {entry_point:'', nodes:{}, edges:[]};
+  bp.graph.nodes[nid] = {type: ntype, agent: agent||undefined, description: desc||undefined};
+  if (!bp.graph.entry_point) bp.graph.entry_point = nid;
+  uiPos[nid] = {x, y};
+  schedSave();
+  closeModal();
+  renderAll();
+  selectNode(nid);
+  toast(`Node "${nid}" added`);
+}
+
+function openAddAgentModal() {
+  document.getElementById('modal-box').innerHTML = `
+    <h3>Add Agent</h3>
+    <div class="props-field"><label>Agent ID</label>
+      <input type="text" id="m-aid" placeholder="e.g. researcher">
+    </div>
+    <div class="props-field"><label>Model</label>
+      <input type="text" id="m-amodel" value="${bp.settings?.default_model||'gpt-4o'}">
+    </div>
+    <div class="props-field"><label>System Prompt</label>
+      <textarea id="m-aprompt" placeholder="You are a helpful assistant..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn-accent" onclick="confirmAddAgent()">Add Agent</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('m-aid')?.focus(), 50);
+}
+
+function confirmAddAgent() {
+  const aid    = document.getElementById('m-aid').value.trim();
+  const model  = document.getElementById('m-amodel').value.trim();
+  const prompt = document.getElementById('m-aprompt').value.trim();
+  if (!aid) { toast('Agent ID required', 'err'); return; }
+  if ((bp.agents||{})[aid]) { toast(`Agent "${aid}" already exists`, 'err'); return; }
+  bp.agents = bp.agents||{};
+  bp.agents[aid] = {model: model||'gpt-4o', system_prompt: prompt||undefined};
+  schedSave();
+  closeModal();
+  renderAll();
+  renderAgentProps(aid);
+  toast(`Agent "${aid}" added`);
+}
+
+function openAddEdgeModal(fromId) {
+  const nodeIds = Object.keys(bp.graph?.nodes||{}).filter(n=>n!==fromId);
+  const opts = [...nodeIds, 'END'].map(n => `<option value="${n}">${n}</option>`).join('');
+  document.getElementById('modal-box').innerHTML = `
+    <h3>Add Edge from "${fromId}"</h3>
+    <div class="props-field"><label>To</label>
+      <select id="m-eto">${opts}</select>
+    </div>
+    <div class="props-field"><label>Condition (optional)</label>
+      <input type="text" id="m-econd" placeholder='e.g. state["next"] == "writer"'>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn-accent" onclick="confirmAddEdge('${fromId}')">Add Edge</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function confirmAddEdge(fromId) {
+  const to   = document.getElementById('m-eto').value;
+  const cond = document.getElementById('m-econd').value.trim() || null;
+  closeModal();
+  addEdge(fromId, to, cond);
+  toast(`Edge added: ${fromId} → ${to}`);
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Bottom panel — YAML & Run
+// ═══════════════════════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.panel-content').forEach(c => c.classList.toggle('active', c.id===`tab-${name}`));
+}
+
+function openPanel() { document.getElementById('bottom-panel').classList.add('open'); }
+function closePanel() { document.getElementById('bottom-panel').classList.remove('open'); }
+
+async function showYaml() {
+  openPanel(); switchTab('yaml');
+  await refreshYaml();
+}
+
+async function refreshYaml() {
+  document.getElementById('yaml-code').textContent = 'Generating…';
+  try {
+    const r = await api('POST', '/api/yaml', {blueprint: bp});
+    document.getElementById('yaml-code').textContent = r.yaml;
+  } catch(e) {
+    document.getElementById('yaml-code').textContent = 'Error: ' + e.message;
+  }
+}
+
+function copyYaml() {
+  navigator.clipboard.writeText(document.getElementById('yaml-code').textContent);
+  toast('Copied to clipboard', 'ok');
+}
+
+function downloadYaml() {
+  const txt = document.getElementById('yaml-code').textContent;
+  const name = (bp.blueprint?.name||'blueprint').replace(/[^a-z0-9_-]/gi,'_') + '.yml';
+  const a = document.createElement('a');
+  a.href = 'data:text/yaml;charset=utf-8,' + encodeURIComponent(txt);
+  a.download = name;
+  a.click();
+}
+
+function showRun() {
+  openPanel(); switchTab('run');
+}
+
+async function sendRun() {
+  const inp = document.getElementById('run-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  inp.disabled = true;
+
+  appendMsg(msg, 'user');
+
+  const spinner = document.createElement('div');
+  spinner.className = 'msg msg-agent';
+  spinner.innerHTML = '<div class="spinner"></div>';
+  document.getElementById('run-messages').appendChild(spinner);
+  scrollMsgs();
+
+  try {
+    const r = await api('POST', '/api/run', {blueprint: bp, input: msg});
+    spinner.remove();
+    if (r.stdout) appendMsg(r.stdout.trim(), 'agent');
+    if (r.stderr && r.returncode !== 0) appendMsg(r.stderr.trim(), 'error');
+    if (r.error) appendMsg('Error: ' + r.error, 'error');
+  } catch(e) {
+    spinner.remove();
+    appendMsg('Request failed: ' + e.message, 'error');
+  } finally {
+    inp.disabled = false;
+    inp.focus();
+  }
+}
+
+function appendMsg(text, type) {
+  const el = document.createElement('div');
+  el.className = `msg msg-${type}`;
+  el.textContent = text;
+  document.getElementById('run-messages').appendChild(el);
+  scrollMsgs();
+}
+
+function scrollMsgs() {
+  const el = document.getElementById('run-messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Toast
+// ═══════════════════════════════════════════════════════════════════════
+let toastTimer = null;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type==='ok'?' toast-ok':type==='err'?' toast-err':'');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Utility
+// ═══════════════════════════════════════════════════════════════════════
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Keyboard: Escape, Delete
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { cancelConnect(); closeModal(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') &&
+      selNodeId && document.activeElement === document.body) {
+    e.preventDefault();
+    deleteNode(selNodeId);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

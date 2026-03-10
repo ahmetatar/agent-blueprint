@@ -11,6 +11,7 @@ from agent_blueprint.cli import init_cmd
 from agent_blueprint.cli import run_cmd
 from agent_blueprint.cli import deploy_cmd
 from agent_blueprint.cli import ui_cmd
+from agent_blueprint.cli import github_cmd
 
 console = Console()
 
@@ -29,6 +30,7 @@ app.command("init")(init_cmd.init)
 app.command("run")(run_cmd.run)
 app.command("deploy")(deploy_cmd.deploy)
 app.command("editor")(ui_cmd.ui)
+app.command("github")(github_cmd.github)
 
 
 if __name__ == "__main__":

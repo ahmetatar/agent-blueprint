@@ -39,6 +39,7 @@ abp generate my-agent.yml --target langgraph
   - [`abp editor`](#abp-editor)
   - [`abp inspect`](#abp-inspect)
   - [`abp schema`](#abp-schema)
+  - [`abp github`](#abp-github)
 - [Examples](#examples)
 - [Generated Project Structure](#generated-project-structure-langgraph-target)
 - [IDE Integration (VS Code)](#ide-integration-vs-code)
@@ -819,6 +820,14 @@ abp schema [--format json|yaml] [--output blueprint-schema.json]
 ```
 
 Use this to enable YAML validation and autocompletion in VS Code (via the [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)).
+
+### `abp github`
+
+Open the Agent Blueprint GitHub repository in your browser:
+
+```bash
+abp github
+```
 
 ---
 

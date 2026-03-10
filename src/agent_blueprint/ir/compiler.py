@@ -60,6 +60,20 @@ class AgentGraph:
     def get_edges_from(self, node_id: str) -> list[IREdge]:
         return [e for e in self.edges if e.from_node == node_id]
 
+    @property
+    def used_providers(self) -> set[str]:
+        """Return the set of provider prefixes used across all agent nodes.
+
+        Models without a '/' prefix are treated as 'openai' for backward compatibility.
+        """
+        providers: set[str] = set()
+        for node in self.nodes:
+            if node.agent and node.agent.model:
+                model = node.agent.model
+                provider = model.split("/", 1)[0] if "/" in model else "openai"
+                providers.add(provider)
+        return providers
+
 
 def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     """Compile a validated BlueprintSpec into the framework-agnostic AgentGraph IR."""

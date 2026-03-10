@@ -32,7 +32,7 @@ class OutputFieldDef(BaseModel):
 
 class AgentDef(BaseModel):
     name: str | None = None
-    model: str = "gpt-4o"
+    model: str = "openai/gpt-4o"
     model_provider: str | None = None  # references a key in BlueprintSpec.model_providers
     system_prompt: str | None = None
     tools: list[str] = Field(default_factory=list)

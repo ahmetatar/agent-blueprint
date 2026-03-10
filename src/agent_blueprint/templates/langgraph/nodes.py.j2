@@ -3,14 +3,47 @@
 
 import os
 from langchain_core.messages import HumanMessage, SystemMessage
+{% set providers = ir.used_providers %}
+{% if 'openai' in providers or 'custom' in providers %}
 from langchain_openai import ChatOpenAI
+{% endif %}
+{% if 'anthropic' in providers %}
+from langchain_anthropic import ChatAnthropic
+{% endif %}
+{% if 'google' in providers %}
+from langchain_google_genai import ChatGoogleGenerativeAI
+{% endif %}
+{% if 'ollama' in providers %}
+from langchain_ollama import ChatOllama
+{% endif %}
 
 from state import AgentState
 from tools import TOOLS
 
 
 def _make_llm(model: str, temperature: float = 0.7):
-    return ChatOpenAI(model=model, temperature=temperature)
+    provider, _, model_name = model.partition("/")
+    if not model_name:
+        provider, model_name = "openai", model
+    if provider == "openai":
+        return ChatOpenAI(model=model_name, temperature=temperature)
+    if provider == "anthropic":
+        return ChatAnthropic(model=model_name, temperature=temperature)
+    if provider == "google":
+        return ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
+    if provider == "ollama":
+        return ChatOllama(
+            model=model_name,
+            temperature=temperature,
+            base_url=os.environ.get("OLLAMA_BASE_URL", "{{ ir.settings.ollama_base_url }}"),
+        )
+    if provider == "custom":
+        return ChatOpenAI(
+            model=model_name,
+            temperature=temperature,
+            base_url=os.environ.get("CUSTOM_BASE_URL", "http://localhost:8000"),
+        )
+    raise ValueError(f"Unknown provider '{provider}' in model '{model}'")
 
 {% for node in ir.nodes %}
 {% if node.agent %}

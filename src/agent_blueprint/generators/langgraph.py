@@ -123,7 +123,16 @@ class LangGraphGenerator(BaseGenerator):
         return files
 
     def _generate_env_example(self, ir: AgentGraph) -> str:
-        lines = ["# Environment variables required by this agent", "OPENAI_API_KEY="]
+        providers = ir.used_providers
+        lines = ["# Environment variables required by this agent"]
+        if "openai" in providers or "custom" in providers or not providers:
+            lines.append("OPENAI_API_KEY=")
+        if "anthropic" in providers:
+            lines.append("ANTHROPIC_API_KEY=")
+        if "google" in providers:
+            lines.append("GOOGLE_API_KEY=")
+        if "custom" in providers:
+            lines.append("CUSTOM_BASE_URL=http://localhost:8000")
         seen: set[str] = set()
 
         for tool in ir.all_tools.values():

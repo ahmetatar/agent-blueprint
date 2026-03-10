@@ -29,8 +29,21 @@ class GCPDeployConfig(BaseModel):
     allow_unauthenticated: bool = False
 
 
+class DockerDeployConfig(BaseModel):
+    host_port: int = 8080
+    container_name: str | None = None    # defaults to blueprint name
+    network: str | None = None           # e.g. "host" on Linux
+    platform: str | None = None          # e.g. "linux/amd64"
+
+
+# Podman shares the same config shape as Docker
+PodmanDeployConfig = DockerDeployConfig
+
+
 class DeployConfig(BaseModel):
-    platform: str | None = None          # default platform: azure | aws | gcp
+    platform: str | None = None          # default platform: azure | aws | gcp | docker | podman
     azure: AzureDeployConfig | None = None
     aws: AWSDeployConfig | None = None
     gcp: GCPDeployConfig | None = None
+    docker: DockerDeployConfig | None = None
+    podman: PodmanDeployConfig | None = None

@@ -1,6 +1,18 @@
 langgraph>=0.2
 langchain-core>=0.2
+{% set providers = ir.used_providers %}
+{% if 'openai' in providers or 'custom' in providers %}
 langchain-openai>=0.1
+{% endif %}
+{% if 'anthropic' in providers %}
+langchain-anthropic>=0.3
+{% endif %}
+{% if 'google' in providers %}
+langchain-google-genai>=2.0
+{% endif %}
+{% if 'ollama' in providers %}
+langchain-ollama>=0.2
+{% endif %}
 httpx>=0.27
 python-dotenv>=1.0
 {% if ir.memory.backend.value == "sqlite" %}

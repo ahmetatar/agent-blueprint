@@ -23,11 +23,12 @@ class BlueprintMeta(BaseModel):
 
 
 class BlueprintSettings(BaseModel):
-    default_model: str = "gpt-4o"
+    default_model: str = "openai/gpt-4o"
     default_model_provider: str | None = None  # references a key in model_providers
     default_temperature: float = 0.7
     max_retries: int = 3
     timeout_seconds: int = 300
+    ollama_base_url: str = "http://localhost:11434"
 
 
 class IOFieldDef(BaseModel):

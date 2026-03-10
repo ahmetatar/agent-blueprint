@@ -17,7 +17,7 @@ from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 console = Console()
 err_console = Console(stderr=True)
 
-_PLATFORMS = ("azure", "aws", "gcp")
+_PLATFORMS = ("azure", "aws", "gcp", "docker", "podman")
 
 
 def deploy(
@@ -75,7 +75,12 @@ def deploy(
     platform_config = None
     if deploy_cfg:
         platform_config = getattr(deploy_cfg, resolved_platform, None)
-    if platform_config is None:
+
+    # docker/podman: allow missing config — fall back to defaults
+    if platform_config is None and resolved_platform in ("docker", "podman"):
+        from agent_blueprint.models.deploy import DockerDeployConfig
+        platform_config = DockerDeployConfig()
+    elif platform_config is None:
         err_console.print(
             f"[bold red]No deploy.{resolved_platform} config found in blueprint.[/] "
             f"Add a [cyan]deploy.{resolved_platform}[/] section."
@@ -100,6 +105,12 @@ def deploy(
     elif resolved_platform == "aws":
         from agent_blueprint.deployers.aws import AWSDeployer
         deployer = AWSDeployer(platform_config, bp_name)
+    elif resolved_platform == "docker":
+        from agent_blueprint.deployers.docker import DockerDeployer
+        deployer = DockerDeployer(platform_config, bp_name)
+    elif resolved_platform == "podman":
+        from agent_blueprint.deployers.docker import PodmanDeployer
+        deployer = PodmanDeployer(platform_config, bp_name)
     else:
         from agent_blueprint.deployers.gcp import GCPDeployer
         deployer = GCPDeployer(platform_config, bp_name)

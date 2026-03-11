@@ -4,8 +4,9 @@ blueprint:
   description: "Multi-agent customer support with routing"
 
 settings:
-  default_model: "gpt-4o"
+  default_model: "ollama/qwen3:1.7b"
   default_temperature: 0.3
+  ollama_base_url: "http://localhost:11434"
 
 state:
   fields:
@@ -34,7 +35,7 @@ agents:
 
   billing_agent:
     name: "Billing Specialist"
-    model: "gpt-4o"
+    model: "${settings.default_model}"
     system_prompt: |
       You are a billing specialist. Help customers with invoices,
       payments, and subscription changes.
@@ -42,7 +43,7 @@ agents:
 
   technical_agent:
     name: "Technical Support"
-    model: "gpt-4o"
+    model: "${settings.default_model}"
     system_prompt: |
       You are a technical support agent. Diagnose and resolve
       technical issues. Be precise and step-by-step.

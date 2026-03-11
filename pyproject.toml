@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-blueprint"
-version = "0.1.0"
+version = "0.2.0"
 description = "Declarative, framework-agnostic AI agent blueprints via YAML"
 readme = "README.md"
 license = { text = "MIT" }

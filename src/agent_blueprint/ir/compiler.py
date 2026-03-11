@@ -9,6 +9,7 @@ from agent_blueprint.models.agents import AgentDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings
 from agent_blueprint.models.graph import NodeDef, NodeType
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef
 
@@ -37,6 +38,9 @@ class IRNode:
     agent: AgentDef | None
     tool_defs: dict[str, ToolDef]
     description: str
+    resolved_provider: str = "openai"       # e.g. "openai", "anthropic", "ollama"
+    resolved_model: str = "gpt-4o"          # model name without provider prefix
+    resolved_provider_def: ModelProviderDef | None = None
 
 
 @dataclass
@@ -62,17 +66,8 @@ class AgentGraph:
 
     @property
     def used_providers(self) -> set[str]:
-        """Return the set of provider prefixes used across all agent nodes.
-
-        Models without a '/' prefix are treated as 'openai' for backward compatibility.
-        """
-        providers: set[str] = set()
-        for node in self.nodes:
-            if node.agent and node.agent.model:
-                model = node.agent.model
-                provider = model.split("/", 1)[0] if "/" in model else "openai"
-                providers.add(provider)
-        return providers
+        """Return the set of resolved providers used across all agent nodes."""
+        return {node.resolved_provider for node in self.nodes if node.agent}
 
 
 def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
@@ -94,12 +89,35 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     )
 
 
+def _resolve_llm(agent: AgentDef, spec: BlueprintSpec) -> tuple[str, str, ModelProviderDef | None]:
+    """Resolve (provider, model_name, provider_def) for an agent at compile time."""
+    provider_def: ModelProviderDef | None = None
+
+    # Look up explicit model_provider, then fall back to settings default
+    provider_key = agent.model_provider or spec.settings.default_model_provider
+    if provider_key:
+        provider_def = spec.model_providers.get(provider_key)
+
+    if provider_def:
+        return provider_def.provider.value, agent.model, provider_def
+
+    # No model_providers configured — parse "provider/model" syntax
+    if "/" in agent.model:
+        provider, model_name = agent.model.split("/", 1)
+    else:
+        provider, model_name = "openai", agent.model
+    return provider, model_name, None
+
+
 def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
     nodes: list[IRNode] = []
 
     for node_id, node_def in spec.graph.nodes.items():
         agent: AgentDef | None = None
         tool_defs: dict[str, ToolDef] = {}
+        resolved_provider = "openai"
+        resolved_model = "gpt-4o"
+        resolved_provider_def: ModelProviderDef | None = None
 
         if node_def.agent:
             agent = spec.agents.get(node_def.agent)
@@ -110,6 +128,7 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
             for tool_name in agent.tools:
                 if tool_name in spec.tools:
                     tool_defs[tool_name] = spec.tools[tool_name]
+            resolved_provider, resolved_model, resolved_provider_def = _resolve_llm(agent, spec)
 
         description = (
             node_def.description
@@ -123,6 +142,9 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
             agent=agent,
             tool_defs=tool_defs,
             description=description,
+            resolved_provider=resolved_provider,
+            resolved_model=resolved_model,
+            resolved_provider_def=resolved_provider_def,
         ))
 
     return nodes

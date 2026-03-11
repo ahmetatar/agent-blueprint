@@ -778,12 +778,12 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 Open the visual Blueprint editor in your browser — design agents and edges interactively, then export to YAML or generate code directly:
 
 ```bash
-abp editor [blueprint.yml] [--port 7842] [--no-browser]
+abp editor [--blueprint blueprint.yml] [--port 7842] [--no-browser]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `blueprint.yml` | _(none)_ | Blueprint file to load (optional — creates blank canvas if omitted) |
+| `--blueprint` / `-b` | _(none)_ | Blueprint file to load (optional — creates blank canvas if omitted) |
 | `--port` | `7842` | Port to listen on |
 | `--no-browser` | `false` | Don't open the browser automatically |
 

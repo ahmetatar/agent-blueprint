@@ -13,7 +13,7 @@ console = Console()
 
 
 def ui(
-    blueprint: Optional[Path] = typer.Argument(None, help="Blueprint YAML to load (optional)"),
+    blueprint: Optional[Path] = typer.Option(None, "--blueprint", "-b", help="Blueprint YAML to load (optional)"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind"),
     port: int = typer.Option(7842, "--port", "-p", help="Port to listen on"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Don't open browser automatically"),

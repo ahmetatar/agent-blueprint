@@ -69,6 +69,12 @@ Building multi-agent systems with LangGraph, CrewAI, or AutoGen means writing a 
 pip install agent-blueprint
 ```
 
+Or with `pipx` (recommended for CLI tools — keeps `abp` isolated):
+
+```bash
+pipx install agent-blueprint
+```
+
 Or install from source:
 
 ```bash
@@ -953,7 +959,7 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [ ] AutoGen generator
 - [x] `abp deploy --platform azure|aws|gcp` — Docker → ACR/ECR/Artifact Registry → Container Apps/App Runner/Cloud Run
 - [ ] VS Code extension
-- [ ] PyPI publish
+- [x] PyPI publish (`pip install agent-blueprint`)
 
 ---
 

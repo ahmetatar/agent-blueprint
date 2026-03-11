@@ -19,7 +19,7 @@ class TestParseExpression:
     def test_to_dict_access(self):
         expr = parse_expression("state.department == 'billing'")
         code = expr.to_dict_access("state")
-        assert 'state["department"]' in code
+        assert 'state.get("department")' in code
         assert "'billing'" in code
 
     def test_and_expression(self):
@@ -49,8 +49,8 @@ class TestCompileExpression:
     def test_compile_for_langgraph(self):
         expr = parse_expression("state.route == 'billing'")
         python_code = expr.to_dict_access("state")
-        # state["route"] == 'billing' should evaluate correctly
-        assert python_code == "state[\"route\"] == 'billing'"
+        # state.get("route") == 'billing' should evaluate correctly
+        assert python_code == "state.get(\"route\") == 'billing'"
 
     def test_compile_negative(self):
         expr = parse_expression("state.route == 'billing'")

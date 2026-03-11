@@ -106,7 +106,7 @@ def _render_node_dict(node: ast.expr, state_var: str) -> str:
         return node.id
     elif isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name) and node.value.id == "state":
-            return f'{state_var}["{node.attr}"]'
+            return f'{state_var}.get("{node.attr}")'
         base = _render_node_dict(node.value, state_var)
         return f'{base}.{node.attr}'
     elif isinstance(node, ast.Compare):

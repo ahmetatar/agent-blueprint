@@ -7,20 +7,20 @@ from typing_extensions import TypedDict
 
 
 class AgentState(TypedDict):
-{%- for field_name, field_def in ir.state.fields.items() %}
-{%- if field_def.type == "list[message]" %}
+{% for field_name, field_def in ir.state.fields.items() %}
+{% if field_def.type == "list[message]" %}
     {{ field_name }}: Annotated[list, add_messages]
-{%- elif field_def.type == "string" %}
+{% elif field_def.type == "string" %}
     {{ field_name }}: str | None
-{%- elif field_def.type == "boolean" %}
+{% elif field_def.type == "boolean" %}
     {{ field_name }}: bool
-{%- elif field_def.type == "number" or field_def.type == "float" %}
+{% elif field_def.type == "number" or field_def.type == "float" %}
     {{ field_name }}: float | None
-{%- elif field_def.type == "integer" %}
+{% elif field_def.type == "integer" %}
     {{ field_name }}: int | None
-{%- else %}
+{% else %}
     {{ field_name }}: Any
-{%- endif %}
-{%- else %}
+{% endif %}
+{% else %}
     pass
-{%- endfor %}
+{% endfor %}

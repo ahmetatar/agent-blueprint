@@ -30,7 +30,11 @@ from tools import TOOLS
 {% set m = node.resolved_model %}
 {% set pd = node.resolved_provider_def %}
 {% if p == "anthropic" %}
+{% if node.agent.reasoning and node.agent.reasoning.enabled %}
+llm = ChatAnthropic(model="{{ m }}", temperature=1, thinking={"type": "enabled", "budget_tokens": {{ node.agent.reasoning.budget_tokens }}})
+{% else %}
 llm = ChatAnthropic(model="{{ m }}", temperature={{ temperature }})
+{% endif %}
 {% elif p == "google" %}
 llm = ChatGoogleGenerativeAI(model="{{ m }}", temperature={{ temperature }})
 {% elif p == "ollama" %}

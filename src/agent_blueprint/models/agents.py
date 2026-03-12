@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field
 from agent_blueprint.models.memory import AgentMemoryConfig
 
 
+class ReasoningConfig(BaseModel):
+    enabled: bool = True
+    budget_tokens: int = 8000
+
+
 class HumanInTheLoopTrigger(str, Enum):
     before_tool_call = "before_tool_call"
     after_tool_call = "after_tool_call"
@@ -41,4 +46,5 @@ class AgentDef(BaseModel):
     output_schema: dict[str, OutputFieldDef] = Field(default_factory=dict)
     memory: AgentMemoryConfig | None = None
     human_in_the_loop: HumanInTheLoopConfig | None = None
+    reasoning: ReasoningConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

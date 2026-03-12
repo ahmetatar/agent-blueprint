@@ -161,6 +161,23 @@ class TestLangGraphGenerator:
         assert "langgraph-checkpoint-redis" not in files["requirements.txt"]
         assert "langgraph-checkpoint-postgres" not in files["requirements.txt"]
 
+    def test_reasoning_generates_extended_thinking(self):
+        ir = load_ir("reasoning_agent.yml")
+        files = self.gen.generate(ir)
+        nodes_py = files["nodes.py"]
+        assert 'thinking={"type": "enabled", "budget_tokens": 10000}' in nodes_py
+        assert "temperature=1" in nodes_py
+
+    def test_reasoning_nodes_py_is_valid_python(self):
+        ir = load_ir("reasoning_agent.yml")
+        files = self.gen.generate(ir)
+        ast.parse(files["nodes.py"])
+
+    def test_no_reasoning_generates_normal_llm(self):
+        ir = load_ir("basic_chatbot.yml")
+        files = self.gen.generate(ir)
+        assert "thinking=" not in files["nodes.py"]
+
     def test_impl_field_only_valid_for_function_type(self):
         from pydantic import ValidationError
         from agent_blueprint.models.blueprint import BlueprintSpec

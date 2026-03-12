@@ -1,0 +1,42 @@
+blueprint:
+  name: "reasoning-agent"
+  version: "1.0"
+  description: "Agent with extended thinking enabled"
+
+settings:
+  default_model: "claude-opus-4-6"
+  default_temperature: 0.7
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+model_providers:
+  claude:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+
+agents:
+  thinker:
+    model: "claude-opus-4-6"
+    model_provider: claude
+    system_prompt: |
+      You are a thoughtful assistant. Reason carefully before answering.
+    reasoning:
+      enabled: true
+      budget_tokens: 10000
+
+graph:
+  entry_point: thinker
+  nodes:
+    thinker:
+      agent: thinker
+      description: "Deep reasoning node"
+  edges:
+    - from: thinker
+      to: END
+
+memory:
+  backend: in_memory

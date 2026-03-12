@@ -780,7 +780,13 @@ llm = ChatAnthropic(
 
 > **Note:** Extended thinking forces `temperature=1` (required by the Anthropic API). The `temperature` field on the agent is ignored when `reasoning.enabled: true`.
 
-> **Provider restriction:** `reasoning` is only effective when the agent's resolved provider is `anthropic`. For other providers the field is silently ignored in generated code.
+> **Provider restriction:** `reasoning` is only effective when the agent's resolved provider is `anthropic`. For other providers the field is ignored in generated code. Both `abp validate` and `abp generate` will print a yellow warning if `reasoning.enabled: true` is set on a non-Anthropic agent:
+>
+> ```
+> ⚠  Warning: Node 'thinker': reasoning.enabled is set but provider is 'openai'
+>              — extended thinking is only supported for Anthropic models and
+>              will be ignored in generated code.
+> ```
 
 ---
 

@@ -68,3 +68,23 @@ class TestCompileCustomerSupport:
         router_node = ir.get_node("router")
         assert router_node is not None
         assert "classify_intent" in router_node.tool_defs
+
+
+class TestCompilerWarnings:
+    def test_no_warnings_for_anthropic_reasoning(self):
+        spec = load_spec("reasoning_agent.yml")
+        ir = compile_blueprint(spec)
+        assert ir.warnings == []
+
+    def test_warning_for_reasoning_on_non_anthropic(self):
+        spec = load_spec("reasoning_openai.yml")
+        ir = compile_blueprint(spec)
+        assert len(ir.warnings) == 1
+        assert "thinker" in ir.warnings[0]
+        assert "openai" in ir.warnings[0]
+        assert "Anthropic" in ir.warnings[0]
+
+    def test_no_warnings_when_reasoning_not_set(self):
+        spec = load_spec("basic_chatbot.yml")
+        ir = compile_blueprint(spec)
+        assert ir.warnings == []

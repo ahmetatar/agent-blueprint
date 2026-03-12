@@ -56,6 +56,7 @@ class AgentGraph:
     entry_point: str
     memory: MemoryConfig
     all_tools: dict[str, ToolDef]
+    warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def get_node(self, node_id: str) -> IRNode | None:
@@ -74,6 +75,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     """Compile a validated BlueprintSpec into the framework-agnostic AgentGraph IR."""
     nodes = _compile_nodes(spec)
     edges = _compile_edges(spec)
+    warnings = _collect_warnings(nodes)
 
     return AgentGraph(
         name=spec.blueprint.name,
@@ -86,7 +88,21 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         entry_point=spec.graph.entry_point,
         memory=spec.memory,
         all_tools=spec.tools,
+        warnings=warnings,
     )
+
+
+def _collect_warnings(nodes: list[IRNode]) -> list[str]:
+    warnings: list[str] = []
+    for node in nodes:
+        if node.agent and node.agent.reasoning and node.agent.reasoning.enabled:
+            if node.resolved_provider != "anthropic":
+                warnings.append(
+                    f"Node '{node.id}': reasoning.enabled is set but provider is "
+                    f"'{node.resolved_provider}' — extended thinking is only supported "
+                    f"for Anthropic models and will be ignored in generated code."
+                )
+    return warnings
 
 
 def _resolve_llm(agent: AgentDef, spec: BlueprintSpec) -> tuple[str, str, ModelProviderDef | None]:

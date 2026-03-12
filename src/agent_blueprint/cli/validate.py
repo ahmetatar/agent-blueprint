@@ -8,7 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from agent_blueprint.exceptions import BlueprintValidationError
+from agent_blueprint.exceptions import BlueprintCompilationError, BlueprintValidationError
+from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
@@ -34,6 +35,16 @@ def validate(
             border_style="red",
         ))
         raise typer.Exit(1) from e
+
+    try:
+        ir = compile_blueprint(spec)
+    except BlueprintCompilationError as e:
+        err_console.print(f"[bold red]Compilation error:[/] {e}")
+        raise typer.Exit(1) from e
+
+    if ir.warnings and not quiet:
+        for w in ir.warnings:
+            console.print(f"[bold yellow]⚠  Warning:[/] {w}")
 
     if not quiet:
         table = Table(show_header=False, box=None, padding=(0, 2))

@@ -1,0 +1,35 @@
+blueprint:
+  name: "reasoning-openai"
+  version: "1.0"
+  description: "reasoning.enabled set on a non-Anthropic (OpenAI) agent — should warn"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.7
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  thinker:
+    model: "openai/gpt-4o"
+    system_prompt: "You are a helpful assistant."
+    reasoning:
+      enabled: true
+      budget_tokens: 8000
+
+graph:
+  entry_point: thinker
+  nodes:
+    thinker:
+      agent: thinker
+      description: "Thinker node"
+  edges:
+    - from: thinker
+      to: END
+
+memory:
+  backend: in_memory

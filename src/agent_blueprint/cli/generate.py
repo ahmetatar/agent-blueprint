@@ -57,6 +57,9 @@ def generate(
         err_console.print(f"[bold red]Compilation error:[/] {e}")
         raise typer.Exit(1) from e
 
+    for w in ir.warnings:
+        console.print(f"[bold yellow]⚠  Warning:[/] {w}")
+
     # Select generator
     if target == TargetFramework.langgraph:
         from agent_blueprint.generators.langgraph import LangGraphGenerator

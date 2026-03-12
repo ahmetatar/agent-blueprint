@@ -1,8 +1,8 @@
-langgraph>=0.2
-langchain-core>=0.2
+langgraph>=0.3
+langchain-core>=0.3
 {% set providers = ir.used_providers %}
 {% if 'openai' in providers or 'custom' in providers %}
-langchain-openai>=0.1
+langchain-openai>=0.2
 {% endif %}
 {% if 'anthropic' in providers %}
 langchain-anthropic>=0.3

@@ -16,6 +16,12 @@ def run(user_input: str, thread_id: str = "default") -> str:
         {"messages": [HumanMessage(content=user_input)]},
         config=config,
     )
+    if result is None:
+        raise RuntimeError(
+            "graph.invoke() returned None — the graph produced no output. "
+            "This usually means an unhandled exception occurred inside the graph. "
+            "Try running with LANGCHAIN_VERBOSE=true or check your API keys."
+        )
     messages = result.get("messages", [])
     if messages:
         return messages[-1].content

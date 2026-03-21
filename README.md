@@ -4,6 +4,11 @@
 
 # agent-blueprint
 
+[![PyPI version](https://img.shields.io/pypi/v/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
+[![Python 3.11+](https://img.shields.io/pypi/pyversions/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-33%2F33-brightgreen)]()
+
 Declarative, framework-agnostic AI agent orchestration via YAML.
 
 Define your agent graph in a YAML file. Generate production-ready code for LangGraph, CrewAI, or plain Python — no boilerplate.
@@ -12,45 +17,6 @@ Define your agent graph in a YAML file. Generate production-ready code for LangG
 abp init my-agent
 abp generate my-agent.yml --target langgraph
 ```
-
----
-
-## Table of Contents
-
-- [Why](#why)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Blueprint Schema](#blueprint-schema)
-  - [`blueprint`](#blueprint)
-  - [`settings`](#settings)
-  - [`state`](#state)
-  - [`agents`](#agents)
-  - [`model_providers`](#model_providers)
-  - [`mcp_servers`](#mcp_servers)
-  - [`tools`](#tools)
-  - [`graph`](#graph)
-  - [`memory`](#memory)
-- [Reasoning Patterns](#reasoning-patterns)
-  - [Chain-of-Thought](#chain-of-thought-cot)
-  - [ReAct](#react-reason--act--observe)
-  - [Self-Reflection](#self-reflection)
-  - [Extended Thinking (Claude)](#extended-thinking-claude)
-- [CLI Reference](#cli-reference)
-  - [`abp init`](#abp-init)
-  - [`abp validate`](#abp-validate)
-  - [`abp generate`](#abp-generate)
-  - [`abp deploy`](#abp-deploy)
-  - [`abp run`](#abp-run)
-  - [`abp editor`](#abp-editor)
-  - [`abp inspect`](#abp-inspect)
-  - [`abp schema`](#abp-schema)
-  - [`abp github`](#abp-github)
-- [Examples](#examples)
-- [Generated Project Structure](#generated-project-structure-langgraph-target)
-- [IDE Integration (VS Code)](#ide-integration-vs-code)
-- [Development](#development)
-- [Roadmap](#roadmap)
-- [License](#license)
 
 ---
 
@@ -208,15 +174,15 @@ A blueprint YAML has these top-level sections:
 | `blueprint` | Yes | Name, version, description |
 | `settings` | No | Default model, temperature, retries |
 | `state` | No | Shared state fields flowing through the graph |
-| `model_providers` | No | Model provider connection definitions (API keys, endpoints) |
-| `mcp_servers` | No | MCP server connection definitions |
+| `model_providers` | No | Model provider connections ([details](docs/model-providers.md)) |
+| `mcp_servers` | No | MCP server connections ([details](docs/mcp-servers.md)) |
 | `agents` | Yes | Agent definitions (model, prompt, tools) |
-| `tools` | No | Tool definitions (function, api, retrieval, mcp) |
+| `tools` | No | Tool definitions ([details](docs/tools.md)) |
 | `graph` | Yes | Nodes, edges, entry point |
-| `memory` | No | Checkpointing / persistence config |
+| `memory` | No | Checkpointing / persistence ([details](docs/memory.md)) |
 | `input` | No | Input schema for the agent |
 | `output` | No | Output schema for the agent |
-| `deploy` | No | Cloud deployment configuration (Azure, AWS, GCP) |
+| `deploy` | No | Cloud deployment configuration ([details](docs/deploy.md)) |
 
 ### `blueprint`
 
@@ -272,13 +238,13 @@ agents:
   my_agent:
     name: "Friendly Name"           # Optional display name
     model: "gpt-4o"                 # or ${settings.default_model}
-    model_provider: openai_gpt      # References model_providers; falls back to settings.default_model_provider
+    model_provider: openai_gpt      # References model_providers
     system_prompt: |
       You are a helpful assistant.
     tools: [tool_a, tool_b]         # References to tools section
-    temperature: 0.5                # Override settings.default_temperature
+    temperature: 0.5
     max_tokens: 2048
-    output_schema:                  # Structured output fields to extract
+    output_schema:                  # Structured output fields
       department:
         type: string
         enum: [billing, technical]
@@ -290,228 +256,37 @@ agents:
       trigger: before_tool_call     # before_tool_call | after_tool_call | before_response | always
       tools: [dangerous_tool]       # Only require approval for specific tools
     reasoning:
-      enabled: true                 # Enable extended thinking (Anthropic models only)
-      budget_tokens: 8000           # Max tokens the model may spend on internal reasoning
+      enabled: true                 # Enable extended thinking (Anthropic only)
+      budget_tokens: 8000
 ```
 
-### `model_providers`
-
-Defines named model provider connections. Agents reference these by name via `model_provider`. If omitted, the generated code assumes the framework's default provider resolution (e.g. `OPENAI_API_KEY` environment variable).
-
-```yaml
-model_providers:
-  openai_gpt:
-    provider: openai              # openai | anthropic | google | ollama | azure_openai | bedrock | openai_compatible
-    api_key_env: OPENAI_API_KEY   # env var holding the API key
-
-  gemini:
-    provider: google
-    api_key_env: GOOGLE_API_KEY
-
-  local_ollama:
-    provider: ollama
-    base_url: "http://localhost:11434"   # or ${env.OLLAMA_URL}
-
-  azure_gpt4:
-    provider: azure_openai
-    base_url: "${env.AZURE_OPENAI_ENDPOINT}"
-    api_key_env: AZURE_OPENAI_KEY
-    deployment: "gpt-4o-prod"
-    api_version: "2024-02-01"
-
-  bedrock_claude:
-    provider: bedrock
-    region: "us-east-1"
-    aws_profile_env: AWS_PROFILE
-
-  my_local_server:
-    provider: openai_compatible   # Any OpenAI-compatible endpoint (vLLM, LM Studio, etc.)
-    base_url: "http://localhost:8000/v1"
-    api_key_env: LOCAL_API_KEY    # optional
-```
-
-| Provider | Required fields | Optional fields |
-|---|---|---|
-| `openai` | — | `api_key_env` |
-| `anthropic` | — | `api_key_env` |
-| `google` | — | `api_key_env` |
-| `ollama` | `base_url` | — |
-| `azure_openai` | `base_url`, `deployment` | `api_key_env`, `api_version` |
-| `bedrock` | — | `region`, `aws_profile_env` |
-| `openai_compatible` | `base_url` | `api_key_env` |
-
-Agents reference a provider with `model_provider`. If not set, `settings.default_model_provider` is used:
-
-```yaml
-agents:
-  researcher:
-    model: "gemini-2.0-flash"
-    model_provider: gemini         # ← references model_providers.gemini
-
-  writer:
-    model: "llama3.2"
-    model_provider: local_ollama
-
-  router:
-    model: "gpt-4o"
-    # model_provider omitted → falls back to settings.default_model_provider
-```
-
-### `mcp_servers`
-
-Defines MCP (Model Context Protocol) server connections. Tools of type `mcp` reference these by name.
-
-```yaml
-mcp_servers:
-  stitch:
-    transport: sse                        # sse | http | stdio
-    url: "http://localhost:3100/sse"
-    headers:
-      Authorization: "Bearer ${env.STITCH_TOKEN}"
-
-  filesystem:
-    transport: stdio                      # Launched as a subprocess
-    command: "npx"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
-    env:
-      SOME_VAR: "value"
-```
-
-| Transport | Required fields | Optional fields |
-|---|---|---|
-| `sse` / `http` | `url` | `headers` |
-| `stdio` | `command` | `args`, `env` |
+> See [Model Providers](docs/model-providers.md) for provider configuration and [Reasoning Patterns](docs/reasoning.md) for reasoning strategies.
 
 ### `tools`
 
-Four tool types are supported:
-
-**`function`** — A Python function you implement.
-
-Two modes are available:
-
-**Without `impl` (stub generated):** The generator creates a placeholder you fill in:
+Four tool types are supported: `function`, `api`, `retrieval`, and `mcp`.
 
 ```yaml
 tools:
   classify_intent:
     type: function
-    description: "Classify customer intent"
-    parameters:
-      message:
-        type: string
-        required: true
-```
-
-Generated `tools.py`:
-```python
-@tool
-def classify_intent(message: str) -> str:
-    """Classify customer intent"""
-    # TODO: implement classify_intent
-    raise NotImplementedError("classify_intent is not implemented yet")
-```
-
-**With `impl` (wires an existing function):** Point to any Python function in your codebase using a dotted import path. The generator produces an import + `tool()` wrapper — it never touches your implementation file:
-
-```yaml
-tools:
-  classify_intent:
-    type: function
-    impl: "myapp.classifiers.classify_intent"   # dotted import path
+    impl: "myapp.classifiers.classify_intent"   # optional: wire existing code
     description: "Classify customer intent"
     parameters:
       message:
         type: string
         required: true
 
-  web_search:
-    type: function
-    impl: "myapp.tools.search.web_search"        # deeper path works too
-    description: "Search the web"
-    parameters:
-      query:
-        type: string
-        required: true
-```
-
-Your function, wherever you keep it:
-```python
-# myapp/classifiers.py  — your file, generator never touches it
-def classify_intent(message: str) -> str:
-    return call_my_model(message)
-```
-
-Generated `tools.py`:
-```python
-from myapp.classifiers import classify_intent as _classify_intent_impl
-from myapp.tools.search import web_search as _web_search_impl
-
-classify_intent = tool(_classify_intent_impl, name="classify_intent", description="...")
-web_search      = tool(_web_search_impl,      name="web_search",      description="...")
-```
-
-> **Why `impl`?** Without it, every `abp generate` run overwrites your implementations in `tools.py`. With `impl`, the generated file is pure wiring code — safe to regenerate at any time.
-
-**`api`** — An HTTP endpoint (code generated automatically):
-
-```yaml
-tools:
   lookup_invoice:
     type: api
     method: GET
     url: "https://api.example.com/invoices/{invoice_id}"
     auth:
-      type: bearer          # bearer | basic | api_key
+      type: bearer
       token_env: "BILLING_API_KEY"
 ```
 
-**`retrieval`** — A vector store retrieval tool:
-
-```yaml
-tools:
-  search_kb:
-    type: retrieval
-    source: "knowledge_base"
-    embedding_model: "text-embedding-3-small"
-    top_k: 5
-```
-
-**`mcp`** — A tool exposed by an MCP server (references `mcp_servers`):
-
-```yaml
-tools:
-  create_project:
-    type: mcp
-    server: stitch             # Must match a key in mcp_servers
-    tool: create_project       # Tool name on the server
-    description: "Create a new Stitch project"
-    parameters:
-      name:
-        type: string
-        required: true
-
-  generate_screen:
-    type: mcp
-    server: stitch
-    tool: generate_screen_from_text
-    parameters:
-      text:
-        type: string
-        required: true
-      project_id:
-        type: string
-        required: true
-```
-
-Agents use MCP tools the same way as any other tool:
-
-```yaml
-agents:
-  ui_agent:
-    model: "claude-opus-4-6"
-    tools: [create_project, generate_screen]
-```
+> See [Tools](docs/tools.md) for full documentation on all tool types including `impl`, `api`, `retrieval`, and `mcp`.
 
 ### `graph`
 
@@ -519,16 +294,16 @@ Defines the agent workflow as a directed graph:
 
 ```yaml
 graph:
-  entry_point: router        # Node where execution starts
+  entry_point: router
 
   nodes:
     router:
-      agent: router           # References an agent
+      agent: router
       description: "Route requests"
     handle_billing:
       agent: billing_agent
     escalate:
-      type: handoff           # Built-in: handoff | function
+      type: handoff
       channel: slack
 
   edges:
@@ -543,380 +318,37 @@ graph:
           target: handle_billing
         - condition: "state.department == 'technical'"
           target: handle_technical
-        - default: END           # Fallback if no condition matches
+        - default: END
 ```
 
 **Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference `state` fields: `state.field_name`.
 
 ### `memory`
 
-Configures LangGraph checkpointing — how conversation state and turn history are persisted across invocations. The `thread_id` passed to `run()` identifies the conversation; the checkpointer stores state per thread.
-
 ```yaml
 memory:
-  backend: in_memory           # in_memory | sqlite | postgres | redis
-  connection_string_env: REDIS_URL
-  checkpoint_every: node       # node | edge | manual
+  backend: in_memory     # in_memory | sqlite | postgres | redis
 ```
 
-| Backend | Persistence | Use case |
-|---|---|---|
-| `in_memory` | Process lifetime only | Development, stateless APIs |
-| `sqlite` | Local file | Local dev with persistence, single-process |
-| `postgres` | External DB | Production, multi-instance |
-| `redis` | External cache | Production, low-latency, multi-instance |
-
-**`in_memory`** — no extra config needed:
-
-```yaml
-memory:
-  backend: in_memory
-```
-
-**`sqlite`** — stores state in a local `.db` file. No server required:
-
-```yaml
-memory:
-  backend: sqlite
-  connection_string_env: SQLITE_DB_PATH   # optional; defaults to <blueprint-name>.db
-```
-
-```bash
-# .env
-SQLITE_DB_PATH=./my-agent.db
-```
-
-**`redis`** — connect to any Redis instance:
-
-```yaml
-memory:
-  backend: redis
-  connection_string_env: REDIS_URL
-```
-
-```bash
-# .env
-REDIS_URL=redis://localhost:6379       # local Redis
-# REDIS_URL=rediss://user:pass@host:6380  # TLS / cloud Redis
-```
-
-Required package (added automatically to generated `requirements.txt`): `langgraph-checkpoint-redis`, `redis`
-
-**`postgres`** — connect via standard PostgreSQL URL:
-
-```yaml
-memory:
-  backend: postgres
-  connection_string_env: DATABASE_URL
-```
-
-```bash
-# .env
-DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
-```
-
-Required packages: `langgraph-checkpoint-postgres`, `psycopg[binary]`
-
-> **Note:** If `DATABASE_URL` is not set at startup, the agent raises a `RuntimeError` immediately (fail-fast). For `redis`, the default is `redis://localhost:6379` if the env var is not set.
-
----
-
-## Reasoning Patterns
-
-`agent-blueprint` supports multiple strategies for giving agents explicit reasoning capabilities — from simple multi-node chains to Claude's native extended thinking API.
-
-### Chain-of-Thought (CoT)
-
-Split reasoning and answering into two sequential agent nodes. The first node writes its thinking to state; the second node reads it and produces the final answer.
-
-```yaml
-agents:
-  think:
-    model: "claude-opus-4-6"
-    system_prompt: |
-      Analyse the question step by step. Write your reasoning process.
-  answer:
-    model: "claude-opus-4-6"
-    system_prompt: |
-      Given the analysis in the conversation, produce the final answer.
-
-graph:
-  entry_point: think
-  nodes:
-    think:
-      agent: think
-      description: "Reasoning step"
-    answer:
-      agent: answer
-      description: "Final answer step"
-  edges:
-    - from: think
-      to: answer
-    - from: answer
-      to: END
-```
-
-### ReAct (Reason → Act → Observe)
-
-Implement the ReAct loop by connecting reasoning, tool-calling, and observation nodes in a cycle. The loop exits when the agent signals completion via a state field.
-
-```yaml
-state:
-  fields:
-    messages:
-      type: "list[message]"
-      reducer: append
-    done:
-      type: boolean
-      default: false
-
-agents:
-  reason:
-    model: "claude-opus-4-6"
-    system_prompt: |
-      Decide which tool to call next. Set done=true when no more steps are needed.
-    tools: [web_search, calculator]
-
-graph:
-  entry_point: reason
-  nodes:
-    reason:
-      agent: reason
-      description: "Decide next action"
-  edges:
-    - from: reason
-      to:
-        - condition: "state['done'] == True"
-          target: END
-        - default: reason    # loop until done
-```
-
-### Self-Reflection
-
-Generate a draft, critique it, then refine — repeat until quality meets a threshold stored in state.
-
-```yaml
-state:
-  fields:
-    messages:
-      type: "list[message]"
-      reducer: append
-    quality_score:
-      type: integer
-      default: 0
-
-agents:
-  draft:
-    model: "gpt-4o"
-    system_prompt: "Write an initial answer."
-  critique:
-    model: "gpt-4o"
-    system_prompt: |
-      Rate the previous answer 1–10 and store it in quality_score.
-      Suggest specific improvements.
-  refine:
-    model: "gpt-4o"
-    system_prompt: "Rewrite the answer incorporating the critique."
-
-graph:
-  entry_point: draft
-  nodes:
-    draft:
-      agent: draft
-      description: "First draft"
-    critique:
-      agent: critique
-      description: "Evaluate draft quality"
-    refine:
-      agent: refine
-      description: "Improve based on critique"
-  edges:
-    - from: draft
-      to: critique
-    - from: critique
-      to:
-        - condition: "state['quality_score'] >= 8"
-          target: END
-        - default: refine
-    - from: refine
-      to: critique    # loop until quality_score >= 8
-```
-
-### Extended Thinking (Claude)
-
-The `reasoning` field on an agent enables [Claude's extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking) feature. The model reasons internally for up to `budget_tokens` tokens before producing its response. **Only supported for Anthropic models.**
-
-```yaml
-model_providers:
-  claude:
-    provider: anthropic
-    api_key_env: ANTHROPIC_API_KEY
-
-agents:
-  deep_thinker:
-    model: "claude-opus-4-6"
-    model_provider: claude
-    system_prompt: |
-      You are an expert analyst. Think carefully before answering.
-    reasoning:
-      enabled: true
-      budget_tokens: 10000   # tokens reserved for internal reasoning (default: 8000)
-```
-
-`abp generate` will produce the following in `nodes.py`:
-
-```python
-llm = ChatAnthropic(
-    model="claude-opus-4-6",
-    temperature=1,  # required for extended thinking
-    thinking={"type": "enabled", "budget_tokens": 10000},
-)
-```
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | `true` | Activate extended thinking |
-| `budget_tokens` | int | `8000` | Max tokens the model may use for internal reasoning |
-
-> **Note:** Extended thinking forces `temperature=1` (required by the Anthropic API). The `temperature` field on the agent is ignored when `reasoning.enabled: true`.
-
-> **Provider restriction:** `reasoning` is only effective when the agent's resolved provider is `anthropic`. For other providers the field is ignored in generated code. Both `abp validate` and `abp generate` will print a yellow warning if `reasoning.enabled: true` is set on a non-Anthropic agent:
->
-> ```
-> ⚠  Warning: Node 'thinker': reasoning.enabled is set but provider is 'openai'
->              — extended thinking is only supported for Anthropic models and
->              will be ignored in generated code.
-> ```
+> See [Memory & Checkpointing](docs/memory.md) for all backend options and configuration.
 
 ---
 
 ## CLI Reference
 
-### `abp init`
-
-Scaffold a new blueprint file:
-
-```bash
-abp init <name> [--template basic|multi-agent] [--output my-agent.yml]
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--template` | `basic` | `basic` (single agent) or `multi-agent` (router + specialists) |
-| `--output` | `<name>.yml` | Output file path |
-
-### `abp validate`
-
-Validate a blueprint against the schema:
-
-```bash
-abp validate <blueprint.yml> [--quiet]
-```
-
-Exits with code `0` on success, `1` on failure. Use `--quiet` in CI pipelines.
-
-### `abp generate`
-
-Generate framework code:
-
-```bash
-abp generate <blueprint.yml> [--target langgraph|crewai|plain] [--output-dir ./out] [--dry-run]
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--target` | `langgraph` | Target framework |
-| `--output-dir` | `./<name>-<target>` | Where to write generated files |
-| `--dry-run` | `false` | List files without writing them |
-
-**Supported targets:**
-
-| Target | Status | Description |
-|---|---|---|
-| `langgraph` | Stable | Full LangGraph project with StateGraph, nodes, tools, memory |
-| `plain` | Stable | Plain Python with openai SDK, no framework |
-| `crewai` | Coming soon | CrewAI crews and tasks |
-
-### `abp deploy`
-
-Deploy to a cloud platform. Requires Docker and the relevant CLI (`az` / `aws` / `gcloud`) to be installed and authenticated.
-
-```bash
-abp deploy my-agent.yml --platform azure
-abp deploy my-agent.yml --platform gcp --image-tag v1.2
-abp deploy my-agent.yml --platform aws --dry-run
-abp deploy my-agent.yml --env EXTRA_KEY=value
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--platform` | from blueprint | `azure` \| `aws` \| `gcp` |
-| `--image-tag` | `latest` | Docker image tag |
-| `--dry-run` | `false` | Print all commands without executing |
-| `--env KEY=VAL` | — | Extra env vars to inject as secrets (repeatable) |
-
-**Deploy flow:**
-
-1. Validates and compiles the blueprint
-2. Generates LangGraph code to a temp dir
-3. Adds `Dockerfile`, `server.py` (FastAPI `/invoke` + `/health`), `requirements_deploy.txt`
-4. Checks platform CLI prerequisites and authentication
-5. Collects secrets from environment (`api_key_env`, tool auth env vars)
-6. Builds Docker image → pushes to cloud registry → creates/updates cloud service
-7. Prints the deployed endpoint URL
-
-**HTTP API of deployed agent:**
-
-```bash
-# Single invocation
-curl -X POST https://<endpoint>/invoke \
-  -H "Content-Type: application/json" \
-  -d '{"input": "Hello", "thread_id": "default"}'
-
-# Health check
-curl https://<endpoint>/health
-```
-
-**Platform-specific resources:**
-
-| Platform | Registry | Service |
-|---|---|---|
-| Azure | Azure Container Registry (ACR) | Container Apps |
-| AWS | Elastic Container Registry (ECR) | App Runner |
-| GCP | Artifact Registry | Cloud Run |
-
-**`deploy` section in blueprint:**
-
-```yaml
-deploy:
-  platform: azure             # default platform for abp deploy (overridable with --platform)
-
-  azure:
-    subscription_env: AZURE_SUBSCRIPTION_ID
-    resource_group: "my-rg"
-    location: "westeurope"
-    acr_name: "myregistry"
-    container_app_env: "my-env"
-    min_replicas: 0
-    max_replicas: 3
-
-  aws:
-    region: "eu-west-1"
-    ecr_repo: "my-agent"
-    service_name: "my-agent-service"   # optional, defaults to blueprint name
-
-  gcp:
-    project_env: GCP_PROJECT_ID
-    region: "europe-west1"
-    artifact_repo: "cloud-run-source-deploy"
-    allow_unauthenticated: false
-```
-
-**Secret injection:** Secrets are collected automatically from the blueprint (`model_providers[*].api_key_env`, `tools[*].auth.*_env`) and read from your local environment at deploy time. Missing secrets produce a warning but do not block deployment.
+| Command | Description |
+|---|---|
+| `abp init <name>` | Scaffold a new blueprint (`--template basic\|multi-agent`) |
+| `abp validate <file>` | Validate a blueprint against the schema (`--quiet` for CI) |
+| `abp generate <file>` | Generate framework code (`--target langgraph\|plain`, `--dry-run`) |
+| `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |
+| `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
+| `abp editor` | Open visual Blueprint editor in browser (`--port 7842`) |
+| `abp inspect <file>` | Visualize graph as Mermaid diagram |
+| `abp schema` | Export JSON Schema (`--format json\|yaml`) |
+| `abp github` | Open the GitHub repository |
 
 ### `abp run`
-
-Generate a blueprint to a temp dir and run it locally — no manual `pip install` or directory setup needed:
 
 ```bash
 # Single-shot
@@ -931,24 +363,10 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target` | `langgraph` | Target framework (only `langgraph` currently) |
-| `--thread-id` | `default` | Conversation thread ID (enables memory across turns in REPL) |
+| `--target` | `langgraph` | Target framework |
+| `--thread-id` | `default` | Conversation thread ID |
 | `--install` | `false` | Run `pip install -r requirements.txt` before executing |
-| `--env` | `.env` | Path to a `.env` file to load before running |
-
-**How it works:**
-
-1. Validates and compiles the blueprint
-2. Generates code to a temporary directory
-3. Adds your current working directory to `PYTHONPATH` — `impl:` references resolve automatically
-4. Executes in a subprocess using the current Python environment
-5. Cleans up the temp dir on exit
-
-**Warnings:** If any `function` tools have no `impl` and haven't been implemented, `abp run` prints a warning — the agent will still start but will raise `NotImplementedError` if those tools are called.
-
-```
-⚠  Warning: 1 tool(s) have no implementation and will raise NotImplementedError if called: send_email
-```
+| `--env` | `.env` | Path to a `.env` file to load |
 
 ### `abp editor`
 
@@ -958,58 +376,14 @@ Open the visual Blueprint editor in your browser — design agents and edges int
 abp editor [--blueprint blueprint.yml] [--port 7842] [--no-browser]
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--blueprint` / `-b` | _(none)_ | Blueprint file to load (optional — creates blank canvas if omitted) |
-| `--port` | `7842` | Port to listen on |
-| `--no-browser` | `false` | Don't open the browser automatically |
-
 ![Agent Blueprint Editor](docs/editor-screenshot.png)
 
-The editor provides a drag-and-drop canvas where you can:
-
-- **Add nodes** with `+ Node` or by double-clicking the canvas
-- **Connect nodes** by dragging from a node's right-side port to another
-- **Edit properties** by clicking a node to open the properties panel
-- **Add agents** with `+ Agent` and assign them to nodes
-- **Auto-layout** with `⟳ Layout` to re-arrange nodes cleanly
-- **Preview YAML** live with `</> YAML`
-- **Run** the blueprint directly with `▶ Run`
-
-Changes auto-save to the blueprint file every 600 ms.
+The editor provides a drag-and-drop canvas where you can add nodes, connect them, edit properties, preview YAML, and run blueprints directly.
 
 **Requires UI extras:**
 
 ```bash
 pip install 'agent-blueprint[ui]'
-```
-
-### `abp inspect`
-
-Visualize the agent graph as a Mermaid diagram:
-
-```bash
-abp inspect <blueprint.yml> [--output graph.md]
-```
-
-Paste the output into [mermaid.live](https://mermaid.live) to render it visually.
-
-### `abp schema`
-
-Export the full JSON Schema for IDE/editor integration:
-
-```bash
-abp schema [--format json|yaml] [--output blueprint-schema.json]
-```
-
-Use this to enable YAML validation and autocompletion in VS Code (via the [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)).
-
-### `abp github`
-
-Open the Agent Blueprint GitHub repository in your browser:
-
-```bash
-abp github
 ```
 
 ---
@@ -1018,30 +392,18 @@ abp github
 
 The `examples/` directory contains ready-to-use blueprints:
 
-### `examples/basic-chatbot.yml`
-
-Single-agent chatbot. The simplest possible blueprint.
-
-```bash
-abp generate examples/basic-chatbot.yml --target langgraph
-```
-
-### `examples/customer-support.yml`
-
-Three-agent system: a router classifies requests and dispatches to a billing specialist or a technical support agent.
+| Example | Description |
+|---|---|
+| [`basic-chatbot.yml`](examples/basic-chatbot.yml) | Single-agent chatbot — the simplest possible blueprint |
+| [`customer-support.yml`](examples/customer-support.yml) | Three-agent system: router → billing specialist / technical support |
+| [`research-team.yml`](examples/research-team.yml) | Sequential pipeline: planner → researcher → writer |
 
 ```bash
 abp generate examples/customer-support.yml --target langgraph
 abp inspect examples/customer-support.yml
 ```
 
-### `examples/research-team.yml`
-
-Sequential pipeline: planner → researcher (with web search tool) → writer.
-
-```bash
-abp generate examples/research-team.yml --target langgraph
-```
+> See [Reasoning Patterns](docs/reasoning.md) for advanced patterns: Chain-of-Thought, ReAct, Self-Reflection, and Extended Thinking.
 
 ---
 
@@ -1105,7 +467,7 @@ src/agent_blueprint/
 ├── models/         # Pydantic v2 schema models
 ├── ir/             # Intermediate representation: compiler + expression parser
 ├── generators/     # Code generators (langgraph, plain, crewai stub)
-├── deployers/      # Cloud deployers (Phase 4 — coming soon)
+├── deployers/      # Cloud deployers
 ├── templates/      # Jinja2 templates per target framework
 └── utils/          # YAML loader, Mermaid visualizer
 ```
@@ -1128,15 +490,15 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [x] LangGraph code generator
 - [x] Plain Python generator
 - [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
-- [x] MCP server configuration (`mcp_servers`) and `mcp` tool type
-- [x] Model provider configuration (`model_providers`) for OpenAI, Anthropic, Google, Ollama, Azure, Bedrock
-- [x] `impl` field for function tools — wire existing Python functions without stub overwrite risk
-- [x] `abp run` — generate to temp dir and execute locally (single-shot + interactive REPL)
+- [x] MCP server configuration and `mcp` tool type
+- [x] Model provider configuration (OpenAI, Anthropic, Google, Ollama, Azure, Bedrock)
+- [x] `impl` field for function tools
+- [x] `abp run` — generate and execute locally
+- [x] `abp deploy --platform azure|aws|gcp`
+- [x] PyPI publish (`pip install agent-blueprint`)
 - [ ] CrewAI generator
 - [ ] AutoGen generator
-- [x] `abp deploy --platform azure|aws|gcp` — Docker → ACR/ECR/Artifact Registry → Container Apps/App Runner/Cloud Run
 - [ ] VS Code extension
-- [x] PyPI publish (`pip install agent-blueprint`)
 
 ---
 

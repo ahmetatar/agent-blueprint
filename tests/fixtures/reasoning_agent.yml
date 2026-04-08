@@ -26,7 +26,11 @@ agents:
       You are a thoughtful assistant. Reason carefully before answering.
     reasoning:
       enabled: true
-      budget_tokens: 10000
+      llm_kwargs:
+        thinking:
+          type: enabled
+          budget_tokens: 10000
+        temperature: 1
 
 graph:
   entry_point: thinker

@@ -1,7 +1,7 @@
 blueprint:
-  name: "reasoning-openai"
+  name: "reasoning-empty-kwargs"
   version: "1.0"
-  description: "reasoning.enabled set on a non-Anthropic (OpenAI) agent — should warn"
+  description: "reasoning.enabled set but llm_kwargs is empty — should warn"
 
 settings:
   default_model: "gpt-4o"
@@ -19,7 +19,6 @@ agents:
     system_prompt: "You are a helpful assistant."
     reasoning:
       enabled: true
-      budget_tokens: 8000
 
 graph:
   entry_point: thinker

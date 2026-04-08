@@ -10,7 +10,7 @@ from agent_blueprint.models.memory import AgentMemoryConfig
 
 class ReasoningConfig(BaseModel):
     enabled: bool = True
-    budget_tokens: int = 8000
+    llm_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
 class HumanInTheLoopTrigger(str, Enum):

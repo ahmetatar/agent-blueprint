@@ -86,8 +86,8 @@ class TestLangGraphGenerator:
         ir = load_ir("impl_tools.yml")
         files = self.gen.generate(ir)
         tools_py = files["tools.py"]
-        assert 'classify_intent = tool(_classify_intent_impl' in tools_py
-        assert 'web_search = tool(_web_search_impl' in tools_py
+        assert 'classify_intent = StructuredTool.from_function(func=_classify_intent_impl' in tools_py
+        assert 'web_search = StructuredTool.from_function(func=_web_search_impl' in tools_py
 
     def test_no_impl_tool_generates_stub(self):
         ir = load_ir("impl_tools.yml")
@@ -165,7 +165,7 @@ class TestLangGraphGenerator:
         ir = load_ir("reasoning_agent.yml")
         files = self.gen.generate(ir)
         nodes_py = files["nodes.py"]
-        assert 'thinking={"type": "enabled", "budget_tokens": 10000}' in nodes_py
+        assert "thinking={'type': 'enabled', 'budget_tokens': 10000}" in nodes_py
         assert "temperature=1" in nodes_py
 
     def test_reasoning_nodes_py_is_valid_python(self):

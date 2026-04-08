@@ -49,6 +49,11 @@ def _escape_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
 
+def _to_python(value: object) -> str:
+    """Convert a value to a valid Python literal (uses repr)."""
+    return repr(value)
+
+
 def _impl_parts(tool_name: str, impl_path: str) -> dict:
     """Parse an impl dotted path into an import statement and a local alias.
 
@@ -82,6 +87,7 @@ class LangGraphGenerator(BaseGenerator):
         self._env.filters["safe_id"] = _safe_id
         self._env.filters["python_type"] = _python_type
         self._env.filters["escape_string"] = _escape_string
+        self._env.filters["to_python"] = _to_python
         self._env.globals["impl_parts"] = _impl_parts
 
     def generate(

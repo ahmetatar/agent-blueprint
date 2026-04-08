@@ -76,13 +76,12 @@ class TestCompilerWarnings:
         ir = compile_blueprint(spec)
         assert ir.warnings == []
 
-    def test_warning_for_reasoning_on_non_anthropic(self):
+    def test_warning_for_reasoning_with_empty_llm_kwargs(self):
         spec = load_spec("reasoning_openai.yml")
         ir = compile_blueprint(spec)
         assert len(ir.warnings) == 1
         assert "thinker" in ir.warnings[0]
-        assert "openai" in ir.warnings[0]
-        assert "Anthropic" in ir.warnings[0]
+        assert "llm_kwargs" in ir.warnings[0]
 
     def test_no_warnings_when_reasoning_not_set(self):
         spec = load_spec("basic_chatbot.yml")

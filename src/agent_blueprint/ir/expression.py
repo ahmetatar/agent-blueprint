@@ -9,6 +9,9 @@ from dataclasses import dataclass
 
 from agent_blueprint.exceptions import ExpressionError
 
+# YAML/JS literals that are valid Python identifiers but map to Python builtins
+_YAML_TO_PYTHON = {"null": "None", "true": "True", "false": "False"}
+
 # Allowed AST node types for safety (no function calls, assignments, etc.)
 _ALLOWED_NODES = {
     ast.Expression,
@@ -72,7 +75,7 @@ def _render_node(node: ast.expr, state_var: str) -> str:
     if isinstance(node, ast.Constant):
         return repr(node.value)
     elif isinstance(node, ast.Name):
-        return node.id
+        return _YAML_TO_PYTHON.get(node.id, node.id)
     elif isinstance(node, ast.Attribute):
         # state.foo → state_var["foo"] or state_var.foo
         base = _render_node(node.value, state_var)
@@ -103,7 +106,7 @@ def _render_node_dict(node: ast.expr, state_var: str) -> str:
     if isinstance(node, ast.Constant):
         return repr(node.value)
     elif isinstance(node, ast.Name):
-        return node.id
+        return _YAML_TO_PYTHON.get(node.id, node.id)
     elif isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name) and node.value.id == "state":
             return f'{state_var}.get("{node.attr}")'

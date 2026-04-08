@@ -3,7 +3,7 @@
 
 import os
 import httpx
-from langchain_core.tools import tool
+from langchain_core.tools import tool, StructuredTool
 
 {% for tool_name, tool_def in ir.all_tools.items() %}
 {% if tool_def.type.value == "function" and tool_def.impl %}
@@ -17,7 +17,7 @@ from langchain_core.tools import tool
 {% if tool_def.impl %}
 {% set p = impl_parts(tool_name, tool_def.impl) %}
 # {{ tool_name }} → wired from {{ tool_def.impl }}
-{{ tool_name }} = tool({{ p.alias }}, name="{{ tool_name }}", description="{{ tool_def.description or tool_name | escape_string }}")
+{{ tool_name }} = StructuredTool.from_function(func={{ p.alias }}, name="{{ tool_name }}", description="{{ tool_def.description or tool_name | escape_string }}")
 
 {% else %}
 @tool

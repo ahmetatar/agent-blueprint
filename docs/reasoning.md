@@ -119,16 +119,11 @@ graph:
       to: critique    # loop until quality_score >= 8
 ```
 
-## Extended Thinking (Claude)
+## Native Model Thinking
 
-The `reasoning` field on an agent enables [Claude's extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking) feature. The model reasons internally for up to `budget_tokens` tokens before producing its response. **Only supported for Anthropic models.**
+The `reasoning` field on an agent activates a model's built-in thinking capability. `llm_kwargs` is a raw dict of kwargs passed directly to the LangChain LLM constructor — the blueprint makes no assumptions about which parameters are valid. You are responsible for providing the correct kwargs for your provider and model.
 
 ```yaml
-model_providers:
-  claude:
-    provider: anthropic
-    api_key_env: ANTHROPIC_API_KEY
-
 agents:
   deep_thinker:
     model: "claude-opus-4-6"
@@ -137,7 +132,11 @@ agents:
       You are an expert analyst. Think carefully before answering.
     reasoning:
       enabled: true
-      budget_tokens: 10000   # tokens reserved for internal reasoning (default: 8000)
+      llm_kwargs:          # passed as-is to the LLM constructor
+        thinking:
+          type: enabled
+          budget_tokens: 10000
+        temperature: 1     # Anthropic extended thinking requires temperature=1
 ```
 
 `abp generate` will produce the following in `nodes.py`:
@@ -145,22 +144,60 @@ agents:
 ```python
 llm = ChatAnthropic(
     model="claude-opus-4-6",
-    temperature=1,  # required for extended thinking
-    thinking={"type": "enabled", "budget_tokens": 10000},
+    thinking={'type': 'enabled', 'budget_tokens': 10000},
+    temperature=1,
 )
 ```
 
+### Provider examples
+
+**Anthropic** — [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking):
+```yaml
+reasoning:
+  enabled: true
+  llm_kwargs:
+    thinking:
+      type: enabled
+      budget_tokens: 10000
+    temperature: 1   # required by Anthropic API
+```
+
+**OpenAI o-series** — reasoning effort:
+```yaml
+reasoning:
+  enabled: true
+  llm_kwargs:
+    reasoning_effort: medium   # low | medium | high
+```
+
+**Google** — Gemini thinking:
+```yaml
+reasoning:
+  enabled: true
+  llm_kwargs:
+    thinking_config:
+      include_thoughts: true
+      thinking_budget: 8000
+```
+
+**Custom / fine-tuned models** — use whatever kwargs the model accepts:
+```yaml
+reasoning:
+  enabled: true
+  llm_kwargs:
+    think_mode: deep
+    chain_of_thought_tokens: 5000
+```
+
+### Temperature handling
+
+When `temperature` is included in `llm_kwargs`, it overrides the agent-level `temperature` setting. When it is absent, the agent's `temperature` (or `settings.default_temperature`) is used as normal.
+
+### Fields
+
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Activate extended thinking |
-| `budget_tokens` | int | `8000` | Max tokens the model may use for internal reasoning |
+| `enabled` | bool | `true` | Mark this agent as a reasoning agent |
+| `llm_kwargs` | dict | `{}` | Raw kwargs forwarded to the LLM constructor |
 
-> **Note:** Extended thinking forces `temperature=1` (required by the Anthropic API). The `temperature` field on the agent is ignored when `reasoning.enabled: true`.
-
-> **Provider restriction:** `reasoning` is only effective when the agent's resolved provider is `anthropic`. For other providers the field is ignored in generated code. Both `abp validate` and `abp generate` will print a yellow warning if `reasoning.enabled: true` is set on a non-Anthropic agent:
->
-> ```
-> ⚠  Warning: Node 'thinker': reasoning.enabled is set but provider is 'openai'
->              — extended thinking is only supported for Anthropic models and
->              will be ignored in generated code.
-> ```
+> **Warning:** If `reasoning.enabled: true` is set but `llm_kwargs` is empty, both `abp validate` and `abp generate` will print a warning — no reasoning parameters will be sent to the model.

@@ -1,0 +1,366 @@
+blueprint:
+  name: "coffee-barista"
+  version: "1.0"
+  description: >
+    Deterministic coffee barista workflow. An orchestrator follows a fixed graph:
+    fetch weather → predict mood → brew coffee → collect feedback → loop or end.
+  author: "aatar"
+  tags: [coffee, barista, weather, mood, ollama, podman]
+
+# ─────────────────────────── settings ───────────────────────────
+settings:
+  default_model: "ollama/qwen3:1.7b"
+  default_temperature: 0.6
+  ollama_base_url: "http://localhost:11434"
+  timeout_seconds: 120
+  max_retries: 3
+
+# ─────────────────────────── model providers ────────────────────
+model_providers:
+  ollama_local:
+    provider: ollama
+    base_url: "http://localhost:11434"
+
+# ─────────────────────────── shared state ───────────────────────
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    weather_data:
+      type: string
+      default: null
+      description: "Raw weather JSON from OpenWeatherMap"
+    mood:
+      type: string
+      default: null
+      description: "Predicted mood (happy, sad, angry, calm, energetic …)"
+    coffee_recommendation:
+      type: string
+      default: null
+      description: "Recommended coffee drink"
+    coffee_reason:
+      type: string
+      default: null
+      description: "Why this coffee was recommended"
+    brew_result:
+      type: string
+      default: null
+      description: "Response from barista fake API"
+    user_liked:
+      type: boolean
+      default: null
+      nullable: true
+      description: "Did the user approve the coffee choice?"
+    user_feedback:
+      type: string
+      default: null
+      nullable: true
+      description: "User feedback when they disliked the coffee"
+    wants_another:
+      type: boolean
+      default: false
+      description: "Does the user want a new recommendation?"
+    memory_notes:
+      type: string
+      default: null
+      nullable: true
+      description: "Past preference notes loaded from MEMORY.md"
+    api_error:
+      type: string
+      default: null
+      nullable: true
+      description: "Error message when an API call fails"
+    retry_count:
+      type: integer
+      default: 0
+      description: "Number of retry attempts for failed API calls"
+
+# ─────────────────────────── agents ─────────────────────────────
+agents:
+  orchestrator:
+    name: "Coffee Barista Orchestrator"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You are the Coffee Barista Orchestrator. Every morning you:
+        1. Trigger the weather agent to fetch today's weather.
+        2. Pass weather data to the mood predictor agent.
+        3. Receive a mood + coffee recommendation.
+        4. Trigger the brew agent to prepare the coffee.
+        5. Present the result to the user.
+        6. If the user dislikes the choice, save their feedback to MEMORY.md
+           and ask if they want a new recommendation.
+        7. If they want another, loop back to the mood predictor.
+      Always be cheerful and informative.
+
+  weather_agent:
+    name: "Weather Agent"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You are a weather assistant. Use the get_weather tool to fetch
+      current weather data from OpenWeatherMap for the configured city.
+      Return a concise summary: temperature (°C), description, humidity,
+      and wind speed. Store the raw result in state.weather_data.
+
+      If the API call FAILS (network error, invalid key, timeout):
+        - Set state.api_error with a description of the failure.
+        - Leave state.weather_data as null.
+        - Do NOT retry yourself — the system will handle retries.
+    tools: [get_weather]
+    output_schema:
+      weather_data:
+        type: string
+        description: "Concise weather summary"
+      api_error:
+        type: string
+        nullable: true
+        description: "Error description if the API call failed"
+
+  mood_predictor:
+    name: "Mood Predictor & Coffee Advisor"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You are a mood predictor and coffee advisor.
+
+      INPUTS you receive in state:
+        - weather_data: today's weather conditions
+        - memory_notes: past user preferences from MEMORY.md (may be null)
+
+      YOUR TASK:
+        1. Read the weather summary and infer a likely user mood
+           (happy, sad, angry, calm, energetic, melancholic, etc.).
+        2. Read memory_notes carefully. If the user previously disliked
+           certain mood-coffee pairings, AVOID those combinations.
+        3. Recommend a single coffee drink that matches the mood.
+        4. Provide a short reason for your recommendation.
+
+      Respond with JSON:
+        {"mood": "...", "coffee_recommendation": "...", "coffee_reason": "..."}
+    tools: [read_memory]
+    output_schema:
+      mood:
+        type: string
+        description: "Predicted user mood"
+      coffee_recommendation:
+        type: string
+        description: "Recommended coffee drink"
+      coffee_reason:
+        type: string
+        description: "Reason for recommendation"
+
+  brew_agent:
+    name: "Barista Brew Agent"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You are the barista brew agent. Take the coffee_recommendation
+      from state and call the brew_coffee tool to prepare it via the
+      barista API. Report the result back.
+
+      If the API call FAILS (connection refused, timeout, server error):
+        - Set state.api_error with a description of the failure.
+        - Leave state.brew_result as null.
+        - Do NOT retry yourself — the system will handle retries.
+    tools: [brew_coffee]
+    output_schema:
+      brew_result:
+        type: string
+        nullable: true
+        description: "Brew API response"
+      api_error:
+        type: string
+        nullable: true
+        description: "Error description if the API call failed"
+
+  feedback_agent:
+    name: "Feedback & Memory Agent"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You handle user feedback about the coffee recommendation.
+
+      If the user DISLIKES the coffee:
+        1. Record their feedback using the save_memory tool.
+           Format: "Disliked <coffee> when mood was <mood>. Reason: <feedback>"
+        2. Ask the user: "Would you like me to suggest a new coffee?"
+        3. Set state.wants_another based on their answer.
+
+      If the user LIKES the coffee:
+        1. Optionally save positive feedback to memory.
+        2. Wish them a great day!
+    tools: [save_memory]
+    human_in_the_loop:
+      enabled: true
+      trigger: before_response
+      message: "Did you enjoy your coffee recommendation? (yes/no + optional feedback)"
+    output_schema:
+      user_liked:
+        type: boolean
+        description: "Whether the user liked the coffee"
+      user_feedback:
+        type: string
+        nullable: true
+        description: "User's reason if they disliked"
+      wants_another:
+        type: boolean
+        description: "Whether the user wants a new recommendation"
+
+  error_handler:
+    name: "Error Handler Agent"
+    model: "${settings.default_model}"
+    model_provider: ollama_local
+    system_prompt: |
+      You handle API errors in the coffee barista system.
+
+      You receive state.api_error and state.retry_count.
+
+      YOUR TASK:
+        1. If retry_count < ${settings.max_retries}, explain the error briefly
+           to the user and suggest retrying. Set state.api_error to null for the retry.
+        2. If retry_count >= ${settings.max_retries}, apologize and suggest the
+           user try again later or check their configuration (API key, network, etc.).
+        3. Always be polite and helpful.
+    output_schema:
+      api_error:
+        type: string
+        nullable: true
+        description: "Cleared if retrying, kept if giving up"
+      retry_count:
+        type: integer
+        description: "Incremented retry counter"
+
+# ─────────────────────────── tools ──────────────────────────────
+tools:
+  get_weather:
+    type: api
+    method: GET
+    url: "https://api.openweathermap.org/data/2.5/weather?q=Istanbul&units=metric&appid=${env.OPENWEATHER_API_KEY}"
+    description: "Fetch current weather from OpenWeatherMap"
+    auth:
+      type: api_key
+      key_env: "OPENWEATHER_API_KEY"
+      header: "X-Api-Key"
+    parameters:
+      city:
+        type: string
+        required: false
+        default: "Istanbul"
+        description: "City name for weather lookup"
+
+  brew_coffee:
+    type: api
+    method: POST
+    url: "http://localhost:1453/baristafakeapi"
+    description: "Send brew order to the barista fake API"
+    headers:
+      Content-Type: "application/json"
+    parameters:
+      coffee_name:
+        type: string
+        required: true
+        description: "Name of the coffee to brew"
+      mood:
+        type: string
+        required: false
+        description: "Mood context for the brew"
+
+  read_memory:
+    type: function
+    description: "Read past user preferences and feedback from MEMORY.md"
+    parameters:
+      file_path:
+        type: string
+        required: false
+        default: "MEMORY.md"
+    impl: "coffee_barista.tools.read_memory"
+
+  save_memory:
+    type: function
+    description: "Append user feedback / preference to MEMORY.md"
+    parameters:
+      entry:
+        type: string
+        required: true
+        description: "Feedback line to append"
+      file_path:
+        type: string
+        required: false
+        default: "MEMORY.md"
+    impl: "coffee_barista.tools.save_memory"
+
+# ─────────────────────────── graph ──────────────────────────────
+graph:
+  entry_point: orchestrate
+  nodes:
+    orchestrate:
+      agent: orchestrator
+      description: "Main orchestration node — kicks off the morning coffee flow"
+
+    fetch_weather:
+      agent: weather_agent
+      description: "Fetch current weather from OpenWeatherMap"
+
+    predict_mood:
+      agent: mood_predictor
+      description: "Predict mood from weather + memory, recommend coffee"
+
+    brew_coffee:
+      agent: brew_agent
+      description: "Call barista fake API to prepare the coffee"
+
+    collect_feedback:
+      agent: feedback_agent
+      description: "Collect user feedback, save to MEMORY.md if negative"
+
+    handle_error:
+      agent: error_handler
+      description: "Handle API errors — retry or gracefully give up"
+
+  edges:
+    - from: orchestrate
+      to: fetch_weather
+
+    - from: fetch_weather
+      to:
+        - condition: "state.api_error != null"
+          target: handle_error
+        - default: predict_mood
+
+    - from: predict_mood
+      to: brew_coffee
+
+    - from: brew_coffee
+      to:
+        - condition: "state.api_error != null"
+          target: handle_error
+        - default: collect_feedback
+
+    - from: handle_error
+      to:
+        - condition: "state.retry_count < ${settings.max_retries} and state.api_error == null"
+          target: orchestrate
+        - default: END
+
+    - from: collect_feedback
+      to:
+        - condition: "state.user_liked == true"
+          target: END
+        - condition: "state.user_liked == false and state.wants_another == true"
+          target: predict_mood
+        - default: END
+
+# ─────────────────────────── memory ─────────────────────────────
+memory:
+  backend: in_memory
+  checkpoint_every: node
+
+# ─────────────────────────── deploy ─────────────────────────────
+deploy:
+  platform: podman
+  podman:
+    host_port: 8080
+    container_name: "coffee-barista"
+    network: "host"

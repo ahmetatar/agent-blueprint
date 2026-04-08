@@ -11,7 +11,7 @@ from graph import graph
 
 def run(user_input: str, thread_id: str = "default") -> str:
     """Run the agent with a user message and return the final response."""
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": {{ ir.settings.max_graph_steps }}}
     result = graph.invoke(
         {"messages": [HumanMessage(content=user_input)]},
         config=config,

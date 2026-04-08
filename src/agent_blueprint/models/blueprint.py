@@ -28,6 +28,7 @@ class BlueprintSettings(BaseModel):
     default_temperature: float = 0.7
     max_retries: int = 3
     timeout_seconds: int = 300
+    max_graph_steps: int = 25
     ollama_base_url: str = "http://localhost:11434"
 
 

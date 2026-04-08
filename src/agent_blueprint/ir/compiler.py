@@ -96,17 +96,20 @@ def _collect_warnings(nodes: list[IRNode]) -> list[str]:
     warnings: list[str] = []
     for node in nodes:
         if node.agent and node.agent.reasoning and node.agent.reasoning.enabled:
-            if node.resolved_provider != "anthropic":
+            if not node.agent.reasoning.llm_kwargs:
                 warnings.append(
-                    f"Node '{node.id}': reasoning.enabled is set but provider is "
-                    f"'{node.resolved_provider}' — extended thinking is only supported "
-                    f"for Anthropic models and will be ignored in generated code."
+                    f"Node '{node.id}': reasoning.enabled is set but llm_kwargs is empty "
+                    f"— no reasoning parameters will be passed to the LLM."
                 )
     return warnings
 
 
 def _resolve_llm(agent: AgentDef, spec: BlueprintSpec) -> tuple[str, str, ModelProviderDef | None]:
     """Resolve (provider, model_name, provider_def) for an agent at compile time."""
+    # Always strip "provider/" prefix — model_name is the bare model identifier
+    raw_model = agent.model
+    model_name = raw_model.split("/", 1)[1] if "/" in raw_model else raw_model
+
     provider_def: ModelProviderDef | None = None
 
     # Look up explicit model_provider, then fall back to settings default
@@ -115,13 +118,13 @@ def _resolve_llm(agent: AgentDef, spec: BlueprintSpec) -> tuple[str, str, ModelP
         provider_def = spec.model_providers.get(provider_key)
 
     if provider_def:
-        return provider_def.provider.value, agent.model, provider_def
+        return provider_def.provider.value, model_name, provider_def
 
     # No model_providers configured — parse "provider/model" syntax
-    if "/" in agent.model:
-        provider, model_name = agent.model.split("/", 1)
+    if "/" in raw_model:
+        provider = raw_model.split("/", 1)[0]
     else:
-        provider, model_name = "openai", agent.model
+        provider = "openai"
     return provider, model_name, None
 
 

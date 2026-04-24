@@ -175,6 +175,7 @@ A blueprint YAML has these top-level sections:
 | `settings` | No | Default model, temperature, retries |
 | `state` | No | Shared state fields flowing through the graph |
 | `model_providers` | No | Model provider connections ([details](docs/model-providers.md)) |
+| `retrievers` | No | Generic RAG retriever implementations ([details](docs/rag.md)) |
 | `mcp_servers` | No | MCP server connections ([details](docs/mcp-servers.md)) |
 | `agents` | Yes | Agent definitions (model, prompt, tools) |
 | `tools` | No | Tool definitions ([details](docs/tools.md)) |
@@ -291,6 +292,7 @@ tools:
 ```
 
 > See [Tools](docs/tools.md) for full documentation on all tool types including `impl`, `api`, `retrieval`, and `mcp`.
+> See [Retrieval-Augmented Generation](docs/rag.md) for generic retrievers and automatic RAG context injection.
 
 ### `graph`
 

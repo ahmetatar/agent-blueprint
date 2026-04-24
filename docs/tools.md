@@ -97,6 +97,9 @@ Retrieval is generic. `agent-blueprint` does not know Chroma, Qdrant, Pinecone,
 or any other vector-store API. Define a top-level retriever with an `impl`
 function, then expose it as a retrieval tool.
 
+See [Retrieval-Augmented Generation](rag.md) for the full RAG contract and agent
+context-injection modes.
+
 Your retriever implementation is called with keyword arguments:
 
 ```python

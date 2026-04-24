@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -87,13 +90,12 @@ class TestCompilerWarnings:
         assert len(ir.warnings) == 1
         assert "model_provider or provider/model prefix" in ir.warnings[0]
 
-    def test_legacy_llm_kwargs_remains_supported(self):
-        spec = load_spec("reasoning_agent.yml")
-        spec.agents["thinker"].reasoning.llm_kwargs = spec.agents["thinker"].reasoning.params
-        spec.agents["thinker"].reasoning.params = {}
-        ir = compile_blueprint(spec)
-        assert ir.warnings == []
-        assert spec.agents["thinker"].reasoning.effective_params()["thinking"]["type"] == "enabled"
+    def test_legacy_llm_kwargs_is_rejected(self):
+        raw = load_blueprint_yaml(FIXTURES / "reasoning_agent.yml")
+        raw["agents"]["thinker"]["reasoning"]["llm_kwargs"] = raw["agents"]["thinker"]["reasoning"].pop("params")
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate(raw)
+        assert "llm_kwargs" in str(exc_info.value)
 
     def test_no_warnings_when_reasoning_not_set(self):
         spec = load_spec("basic_chatbot.yml")

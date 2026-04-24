@@ -3,20 +3,16 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_blueprint.models.memory import AgentMemoryConfig
 
 
 class ReasoningConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
     params: dict[str, Any] = Field(default_factory=dict)
-    # Backward-compatible alias for older blueprints. Prefer `params`.
-    llm_kwargs: dict[str, Any] = Field(default_factory=dict)
-
-    def effective_params(self) -> dict[str, Any]:
-        """Return the params that should be forwarded to the LLM constructor."""
-        return self.params or self.llm_kwargs
 
 
 class HumanInTheLoopTrigger(str, Enum):

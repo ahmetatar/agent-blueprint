@@ -96,16 +96,10 @@ def _collect_warnings(nodes: list[IRNode]) -> list[str]:
     warnings: list[str] = []
     for node in nodes:
         if node.agent and node.agent.reasoning and node.agent.reasoning.enabled:
-            reasoning_params = node.agent.reasoning.effective_params()
-            if not reasoning_params:
+            if not node.agent.reasoning.params:
                 warnings.append(
                     f"Node '{node.id}': reasoning.enabled is set but params is empty "
                     f"— no reasoning parameters will be passed to the LLM."
-                )
-            if node.agent.reasoning.params and node.agent.reasoning.llm_kwargs:
-                warnings.append(
-                    f"Node '{node.id}': both reasoning.params and legacy reasoning.llm_kwargs "
-                    f"are set — reasoning.params will be used."
                 )
             if not node.resolved_provider_def and "/" not in node.agent.model:
                 warnings.append(

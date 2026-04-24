@@ -65,7 +65,7 @@ def _llm_class(node: IRNode) -> str:
     return mapping.get(node.resolved_provider, "ChatOpenAI")
 
 
-def _llm_kwargs(node: IRNode, temperature: float | None) -> dict[str, object]:
+def _llm_constructor_kwargs(node: IRNode, temperature: float | None) -> dict[str, object]:
     """Build constructor kwargs without interpreting provider-specific extras."""
     p = node.resolved_provider
     m = node.resolved_model
@@ -95,7 +95,7 @@ def _llm_kwargs(node: IRNode, temperature: float | None) -> dict[str, object]:
     if node.agent:
         kwargs.update(node.agent.llm_params)
         if node.agent.reasoning and node.agent.reasoning.enabled:
-            kwargs.update(node.agent.reasoning.effective_params())
+            kwargs.update(node.agent.reasoning.params)
     return kwargs
 
 
@@ -114,7 +114,7 @@ def _render_kwargs(kwargs: dict[str, object]) -> str:
 
 
 def _llm_call_args(node: IRNode, temperature: float | None) -> str:
-    return _render_kwargs(_llm_kwargs(node, temperature))
+    return _render_kwargs(_llm_constructor_kwargs(node, temperature))
 
 
 def _impl_parts(tool_name: str, impl_path: str) -> dict:

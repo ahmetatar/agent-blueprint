@@ -7,6 +7,8 @@
 
 ABP intentionally does not maintain a model capability registry. It does not know whether a model supports reasoning, thinking, reasoning summaries, hidden reasoning tokens, or visible thought blocks. The user chooses the provider adapter and passes the correct parameters for that adapter.
 
+For guidance on when to use native reasoning versus graph orchestration, see [Native Reasoning vs Graph-Level Reasoning](native-vs-graph-reasoning.md).
+
 ## Responsibility Split
 
 | Concern | Owner |

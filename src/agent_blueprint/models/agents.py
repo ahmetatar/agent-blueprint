@@ -29,6 +29,29 @@ class HumanInTheLoopConfig(BaseModel):
     message: str | None = None
 
 
+class RagMode(str, Enum):
+    tool_only = "tool_only"
+    pre_context = "pre_context"
+    hybrid = "hybrid"
+
+
+class RagQuerySource(str, Enum):
+    last_user_message = "last_user_message"
+
+
+class RagConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool = True
+    retrieval_tool: str = Field(alias="tool")
+    mode: RagMode = RagMode.pre_context
+    query_from: RagQuerySource = RagQuerySource.last_user_message
+    max_context_chars: int | None = 8000
+    context_prompt: str = (
+        "Relevant retrieved context. Use it when it is helpful and ignore it when it is not relevant."
+    )
+
+
 class OutputFieldDef(BaseModel):
     type: str
     enum: list[str] | None = None
@@ -50,4 +73,5 @@ class AgentDef(BaseModel):
     memory: AgentMemoryConfig | None = None
     human_in_the_loop: HumanInTheLoopConfig | None = None
     reasoning: ReasoningConfig | None = None
+    rag: RagConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

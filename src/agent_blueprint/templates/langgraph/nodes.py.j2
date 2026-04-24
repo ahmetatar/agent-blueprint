@@ -23,11 +23,20 @@ from langchain_aws import ChatBedrock
 {% endif %}
 
 from state import AgentState
-from tools import TOOLS
+from tools import TOOLS, TOOLS_BY_NAME
 
 {% macro make_llm(node, temperature) %}
 llm = {{ llm_class(node) }}({{ llm_call_args(node, temperature) }})
 {% endmacro %}
+
+
+def _last_user_message_content(messages: list) -> str:
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            return str(msg.content)
+        if getattr(msg, "type", None) == "human":
+            return str(getattr(msg, "content", ""))
+    return ""
 
 {% for node in ir.nodes %}
 {% if node.agent %}
@@ -47,6 +56,24 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     system_prompt = """{{ node.agent.system_prompt | escape_string }}"""
     if not any(isinstance(m, SystemMessage) for m in working):
         working = [SystemMessage(content=system_prompt)] + working
+{% endif %}
+{% if node.agent.rag and node.agent.rag.enabled and node.agent.rag.mode.value != "tool_only" %}
+    rag_query = _last_user_message_content(working)
+    if rag_query:
+        try:
+            rag_context = str(TOOLS_BY_NAME["{{ node.agent.rag.retrieval_tool }}"].invoke({"query": rag_query}))
+        except Exception as exc:
+            rag_context = f"Retrieval error: {exc}"
+{% if node.agent.rag.max_context_chars is not none %}
+        rag_context = rag_context[:{{ node.agent.rag.max_context_chars }}]
+{% endif %}
+        rag_message = SystemMessage(
+            content="""{{ node.agent.rag.context_prompt | escape_string }}""" + "\n\n" + rag_context
+        )
+        if working and isinstance(working[0], SystemMessage):
+            working = [working[0], rag_message] + working[1:]
+        else:
+            working = [rag_message] + working
 {% endif %}
     new_messages: list = []
     updates: dict = {}

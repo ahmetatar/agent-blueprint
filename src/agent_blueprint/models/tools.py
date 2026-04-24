@@ -58,6 +58,7 @@ class ToolDef(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
 
     # retrieval tool fields
+    retriever: str | None = None
     source: str | None = None
     embedding_model: str | None = None
     top_k: int = 5
@@ -73,8 +74,8 @@ class ToolDef(BaseModel):
     def validate_type_fields(self) -> "ToolDef":
         if self.type == ToolType.api and not self.url:
             raise ValueError("api tools require a 'url' field")
-        if self.type == ToolType.retrieval and not self.source:
-            raise ValueError("retrieval tools require a 'source' field")
+        if self.type == ToolType.retrieval and not self.retriever:
+            raise ValueError("retrieval tools require a 'retriever' field")
         if self.type == ToolType.mcp and not (self.server and self.tool):
             raise ValueError("mcp tools require 'server' and 'tool' fields")
         if self.impl and self.type != ToolType.function:

@@ -102,6 +102,31 @@ class TestLangGraphGenerator:
         files = self.gen.generate(ir)
         ast.parse(files["tools.py"])
 
+    def test_retrieval_tool_wires_generic_retriever_impl(self):
+        ir = load_ir("rag_agent.yml")
+        files = self.gen.generate(ir)
+        tools_py = files["tools.py"]
+        assert "from myapp.retrieval import search_support_docs as _retriever_support_docs_impl" in tools_py
+        assert '"support_docs": {"impl": _retriever_support_docs_impl' in tools_py
+        assert 'result = retriever["impl"](query=query, top_k=4, config=retriever["config"])' in tools_py
+
+    def test_retrieval_tools_py_is_valid_python(self):
+        ir = load_ir("rag_agent.yml")
+        files = self.gen.generate(ir)
+        ast.parse(files["tools.py"])
+
+    def test_rag_pre_context_generates_retrieval_injection(self):
+        ir = load_ir("rag_agent.yml")
+        files = self.gen.generate(ir)
+        nodes_py = files["nodes.py"]
+        assert 'TOOLS_BY_NAME["search_kb"].invoke({"query": rag_query})' in nodes_py
+        assert "Relevant retrieved context" in nodes_py
+
+    def test_rag_nodes_py_is_valid_python(self):
+        ir = load_ir("rag_agent.yml")
+        files = self.gen.generate(ir)
+        ast.parse(files["nodes.py"])
+
     def test_memory_in_memory_uses_memorysaver(self):
         ir = load_ir("basic_chatbot.yml")
         files = self.gen.generate(ir)

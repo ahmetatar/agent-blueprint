@@ -1,0 +1,50 @@
+blueprint:
+  name: "rag-agent"
+  version: "1.0"
+  description: "Agent with generic retrieval"
+
+settings:
+  default_model: "gpt-4o"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+retrievers:
+  support_docs:
+    impl: "myapp.retrieval.search_support_docs"
+    description: "Support knowledge base retriever"
+    config:
+      index_name: "support-docs"
+
+tools:
+  search_kb:
+    type: retrieval
+    retriever: support_docs
+    description: "Search support knowledge base"
+    top_k: 4
+
+agents:
+  assistant:
+    model: "${settings.default_model}"
+    system_prompt: |
+      You are a helpful assistant.
+    rag:
+      tool: search_kb
+      mode: pre_context
+      max_context_chars: 6000
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+      description: "RAG assistant"
+  edges:
+    - from: assistant
+      to: END
+
+memory:
+  backend: in_memory

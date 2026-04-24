@@ -93,13 +93,53 @@ tools:
 
 ## `retrieval` — Vector Store
 
+Retrieval is generic. `agent-blueprint` does not know Chroma, Qdrant, Pinecone,
+or any other vector-store API. Define a top-level retriever with an `impl`
+function, then expose it as a retrieval tool.
+
+Your retriever implementation is called with keyword arguments:
+
+```python
+def search_support_docs(query: str, top_k: int, config: dict) -> list[dict] | str:
+    ...
+```
+
+It may return a string, a list of strings, LangChain-style documents with
+`page_content` and `metadata`, or dictionaries with `content`, `source`,
+`score`, and `metadata`.
+
 ```yaml
+retrievers:
+  support_docs:
+    impl: "myapp.retrieval.search_support_docs"
+    config:
+      index_name: "support-docs"
+
 tools:
   search_kb:
     type: retrieval
-    source: "knowledge_base"
-    embedding_model: "text-embedding-3-small"
+    retriever: support_docs
+    description: "Search support knowledge base"
     top_k: 5
+```
+
+Agents can either expose the retrieval tool for model-driven tool use:
+
+```yaml
+agents:
+  assistant:
+    tools: [search_kb]
+```
+
+or ask ABP to retrieve before the LLM call and inject the result as context:
+
+```yaml
+agents:
+  assistant:
+    rag:
+      tool: search_kb
+      mode: pre_context   # pre_context | tool_only | hybrid
+      max_context_chars: 8000
 ```
 
 ## `mcp` — MCP Server Tool

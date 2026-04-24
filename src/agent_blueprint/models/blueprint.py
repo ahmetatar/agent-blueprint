@@ -10,6 +10,7 @@ from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.providers import ModelProviderDef
+from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef, ToolType
 
@@ -52,6 +53,7 @@ class BlueprintSpec(BaseModel):
     settings: BlueprintSettings = Field(default_factory=BlueprintSettings)
     state: StateDef = Field(default_factory=StateDef)
     model_providers: dict[str, ModelProviderDef] = Field(default_factory=dict)
+    retrievers: dict[str, RetrieverDef] = Field(default_factory=dict)
     mcp_servers: dict[str, McpServerDef] = Field(default_factory=dict)
     agents: dict[str, AgentDef] = Field(default_factory=dict)
     tools: dict[str, ToolDef] = Field(default_factory=dict)
@@ -92,12 +94,26 @@ class BlueprintSpec(BaseModel):
                         raise ValueError(
                             f"Agent '{agent_name}' human_in_the_loop references undefined tool '{tool_ref}'"
                         )
+            if agent.rag:
+                tool_ref = agent.rag.retrieval_tool
+                if tool_ref not in self.tools:
+                    raise ValueError(
+                        f"Agent '{agent_name}' rag references undefined tool '{tool_ref}'"
+                    )
+                if self.tools[tool_ref].type != ToolType.retrieval:
+                    raise ValueError(
+                        f"Agent '{agent_name}' rag.retrieval_tool must reference a retrieval tool"
+                    )
 
-        # Validate mcp tool server references
+        # Validate tool resource references
         for tool_name, tool in self.tools.items():
             if tool.type == ToolType.mcp and tool.server not in self.mcp_servers:
                 raise ValueError(
                     f"Tool '{tool_name}' references undefined MCP server '{tool.server}'"
+                )
+            if tool.type == ToolType.retrieval and tool.retriever not in self.retrievers:
+                raise ValueError(
+                    f"Tool '{tool_name}' references undefined retriever '{tool.retriever}'"
                 )
 
         # Validate node agent references

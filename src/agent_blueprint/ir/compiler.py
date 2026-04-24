@@ -5,11 +5,12 @@ from typing import Any
 
 from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.expression import CompiledExpression, parse_expression
-from agent_blueprint.models.agents import AgentDef
+from agent_blueprint.models.agents import AgentDef, RagMode
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings
 from agent_blueprint.models.graph import NodeDef
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.providers import ModelProviderDef
+from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef
 
@@ -56,6 +57,7 @@ class AgentGraph:
     entry_point: str
     memory: MemoryConfig
     all_tools: dict[str, ToolDef]
+    retrievers: dict[str, RetrieverDef]
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -88,6 +90,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         entry_point=spec.graph.entry_point,
         memory=spec.memory,
         all_tools=spec.tools,
+        retrievers=spec.retrievers,
         warnings=warnings,
     )
 
@@ -152,6 +155,12 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
             for tool_name in agent.tools:
                 if tool_name in spec.tools:
                     tool_defs[tool_name] = spec.tools[tool_name]
+            if (
+                agent.rag
+                and agent.rag.mode in (RagMode.tool_only, RagMode.hybrid)
+                and agent.rag.retrieval_tool in spec.tools
+            ):
+                tool_defs[agent.rag.retrieval_tool] = spec.tools[agent.rag.retrieval_tool]
             resolved_provider, resolved_model, resolved_provider_def = _resolve_llm(agent, spec)
 
         description = (

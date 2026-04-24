@@ -46,6 +46,14 @@ class TestValidBlueprints:
         targets = router_edges[0].get_targets()
         assert len(targets) == 3
 
+    def test_rag_blueprint_loads(self):
+        raw = load("rag_agent.yml")
+        spec = BlueprintSpec.model_validate(raw)
+        assert "support_docs" in spec.retrievers
+        assert spec.tools["search_kb"].retriever == "support_docs"
+        assert spec.agents["assistant"].rag is not None
+        assert spec.agents["assistant"].rag.retrieval_tool == "search_kb"
+
 
 class TestMcpTools:
     def test_mcp_blueprint_loads(self):
@@ -124,3 +132,22 @@ class TestInvalidBlueprints:
                     "edges": [],
                 }
             })
+
+    def test_retrieval_tool_undefined_retriever_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "tools": {"search": {"type": "retrieval", "retriever": "missing"}},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            })
+        assert "missing" in str(exc_info.value)
+
+    def test_agent_rag_must_reference_retrieval_tool(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "tools": {"search": {"type": "function"}},
+                "agents": {"a": {"rag": {"tool": "search"}}},
+                "graph": {"entry_point": "n", "nodes": {"n": {"agent": "a"}}, "edges": []},
+            })
+        assert "retrieval tool" in str(exc_info.value)

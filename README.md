@@ -67,9 +67,9 @@ abp --help
 ### 1. Create a blueprint
 
 ```bash
-abp init my-agent
-# or for a multi-agent setup:
-abp init my-agent --template multi-agent
+abp init --template=blueprint --output=my-agent.agents.yaml
+# or create a markdown request template for Codex/Claude Code:
+abp init --template=spec --output=my-agent.spec.md
 ```
 
 This creates `my-agent.yml`:
@@ -344,7 +344,8 @@ memory:
 
 | Command | Description |
 |---|---|
-| `abp init <name>` | Scaffold a new blueprint (`--template basic\|multi-agent`) |
+| `abp init --template=blueprint --output=<file>` | Scaffold an ABP blueprint YAML |
+| `abp init --template=spec --output=<file>` | Scaffold a markdown request template for Codex/Claude Code |
 | `abp validate <file>` | Validate a blueprint against the schema (`--quiet` for CI) |
 | `abp generate <file>` | Generate framework code (`--target langgraph\|plain`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |

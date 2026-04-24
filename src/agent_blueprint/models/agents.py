@@ -31,7 +31,7 @@ class HumanInTheLoopConfig(BaseModel):
 
 class RagMode(str, Enum):
     tool_only = "tool_only"
-    pre_context = "pre_context"
+    context_only = "context_only"
     hybrid = "hybrid"
 
 
@@ -44,7 +44,7 @@ class RagConfig(BaseModel):
 
     enabled: bool = True
     retrieval_tool: str = Field(alias="tool")
-    mode: RagMode = RagMode.pre_context
+    mode: RagMode = RagMode.context_only
     query_from: RagQuerySource = RagQuerySource.last_user_message
     max_context_chars: int | None = 8000
     context_prompt: str = (

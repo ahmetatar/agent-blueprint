@@ -141,7 +141,7 @@ agents:
   assistant:
     rag:
       tool: search_kb
-      mode: pre_context   # pre_context | tool_only | hybrid
+      mode: context_only   # context_only | tool_only | hybrid
       max_context_chars: 8000
 ```
 

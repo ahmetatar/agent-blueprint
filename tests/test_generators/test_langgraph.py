@@ -115,7 +115,7 @@ class TestLangGraphGenerator:
         files = self.gen.generate(ir)
         ast.parse(files["tools.py"])
 
-    def test_rag_pre_context_generates_retrieval_injection(self):
+    def test_rag_context_only_generates_retrieval_injection(self):
         ir = load_ir("rag_agent.yml")
         files = self.gen.generate(ir)
         nodes_py = files["nodes.py"]

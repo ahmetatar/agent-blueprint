@@ -98,10 +98,10 @@ agents:
 Use this when retrieval is optional and the model should decide whether the
 question needs external knowledge.
 
-### Pre Context
+### Context Only
 
 ABP retrieves before the LLM call and injects the result as an additional system
-context message.
+context message. The retrieval tool is not exposed to the model.
 
 ```yaml
 agents:
@@ -111,7 +111,7 @@ agents:
       Answer using the retrieved context when it is relevant.
     rag:
       tool: search_kb
-      mode: pre_context
+      mode: context_only
       max_context_chars: 8000
 ```
 
@@ -166,7 +166,7 @@ agents:
       Answer clearly. Use retrieved context when it is relevant.
     rag:
       tool: search_kb
-      mode: pre_context
+      mode: context_only
       max_context_chars: 8000
 
 graph:

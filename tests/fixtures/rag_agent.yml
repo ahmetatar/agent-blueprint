@@ -33,7 +33,7 @@ agents:
       You are a helpful assistant.
     rag:
       tool: search_kb
-      mode: pre_context
+      mode: context_only
       max_context_chars: 6000
 
 graph:

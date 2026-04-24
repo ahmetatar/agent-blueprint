@@ -11,7 +11,19 @@
 
 Declarative, framework-agnostic AI agent orchestration via YAML.
 
-Define your agent graph in a YAML file. Generate production-ready code for LangGraph, CrewAI, or plain Python — no boilerplate.
+`agent-blueprint` turns AI agent systems into versionable infrastructure.
+
+Instead of relying on nondeterministic, framework-specific glue code, you define your agent workflow once in a validated YAML blueprint and generate production-ready implementations for LangGraph, CrewAI, or plain Python. The blueprint becomes the source of truth: reviewable in pull requests, reproducible across environments, and portable across frameworks.
+
+This is not just about writing less boilerplate. It is about standardizing how agent systems are described, deployed, and maintained:
+
+- **Reproducible**: the same blueprint generates the same project structure every time
+- **Versionable**: agent workflows live in YAML, diff cleanly, and fit normal Git workflows
+- **Portable**: switch generation targets without rewriting your agent logic from scratch
+- **Operational**: validate, inspect, run locally, and package for deployment from one spec
+- **Team-friendly**: platform, MLOps, and DevOps teams can treat agent systems as controlled artifacts instead of ad hoc prompt code
+
+If you are building one-off demos, handwritten code may be enough. If you are building agent systems that need consistency, auditability, and repeatable delivery, `agent-blueprint` gives you a stronger foundation.
 
 ```bash
 abp init my-agent
@@ -22,7 +34,14 @@ abp generate my-agent.yml --target langgraph
 
 ## Why
 
-Building multi-agent systems with LangGraph, CrewAI, or AutoGen means writing a lot of framework-specific boilerplate. Changing frameworks means rewriting everything. `agent-blueprint` separates the **what** (your agent logic) from the **how** (the framework).
+Building multi-agent systems with LangGraph, CrewAI, or other agent frameworks usually means mixing prompts, orchestration logic, provider setup, and deployment details directly into application code. That works for prototypes, but it becomes hard to standardize, review, reproduce, and migrate.
+
+`agent-blueprint` separates the **what** from the **how**:
+
+- the **what** is your agent system definition: agents, tools, memory, graph, inputs, outputs, and deployment intent
+- the **how** is the execution target: LangGraph, CrewAI, or plain Python
+
+That separation makes agent workflows easier to validate, version, and operationalize across teams.
 
 | Without abp | With abp |
 |---|---|

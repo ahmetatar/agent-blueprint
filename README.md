@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-33%2F33-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
 
 Declarative, framework-agnostic AI agent orchestration via YAML.
 
@@ -72,7 +72,7 @@ abp init --template=blueprint --output=my-agent.agents.yaml
 abp init --template=spec --output=my-agent.spec.md
 ```
 
-This creates `my-agent.yml`:
+This creates `my-agent.agents.yaml`:
 
 ```yaml
 blueprint:
@@ -113,11 +113,11 @@ memory:
 ### 2. Validate
 
 ```bash
-abp validate my-agent.yml
+abp validate my-agent.agents.yaml
 ```
 
 ```
-╭──────────────────────── Valid — my-agent.yml ────────────────────────╮
+╭──────────────────── Valid — my-agent.agents.yaml ────────────────────╮
 │   Blueprint      my-agent                                             │
 │   Version        1.0                                                  │
 │   Agents         1                                                    │
@@ -130,7 +130,7 @@ abp validate my-agent.yml
 ### 3. Visualize the graph
 
 ```bash
-abp inspect my-agent.yml
+abp inspect my-agent.agents.yaml
 ```
 
 Outputs a [Mermaid](https://mermaid.live) diagram you can paste directly into any Mermaid renderer.
@@ -138,7 +138,7 @@ Outputs a [Mermaid](https://mermaid.live) diagram you can paste directly into an
 ### 4. Generate code
 
 ```bash
-abp generate my-agent.yml --target langgraph
+abp generate my-agent.agents.yaml --target langgraph
 ```
 
 ```

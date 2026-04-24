@@ -26,7 +26,7 @@ agents:
       You are a thoughtful assistant. Reason carefully before answering.
     reasoning:
       enabled: true
-      llm_kwargs:
+      params:
         thinking:
           type: enabled
           budget_tokens: 10000

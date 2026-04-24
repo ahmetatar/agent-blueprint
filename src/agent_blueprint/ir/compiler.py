@@ -7,7 +7,7 @@ from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.expression import CompiledExpression, parse_expression
 from agent_blueprint.models.agents import AgentDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings
-from agent_blueprint.models.graph import NodeDef, NodeType
+from agent_blueprint.models.graph import NodeDef
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.state import StateDef
@@ -96,10 +96,21 @@ def _collect_warnings(nodes: list[IRNode]) -> list[str]:
     warnings: list[str] = []
     for node in nodes:
         if node.agent and node.agent.reasoning and node.agent.reasoning.enabled:
-            if not node.agent.reasoning.llm_kwargs:
+            reasoning_params = node.agent.reasoning.effective_params()
+            if not reasoning_params:
                 warnings.append(
-                    f"Node '{node.id}': reasoning.enabled is set but llm_kwargs is empty "
+                    f"Node '{node.id}': reasoning.enabled is set but params is empty "
                     f"— no reasoning parameters will be passed to the LLM."
+                )
+            if node.agent.reasoning.params and node.agent.reasoning.llm_kwargs:
+                warnings.append(
+                    f"Node '{node.id}': both reasoning.params and legacy reasoning.llm_kwargs "
+                    f"are set — reasoning.params will be used."
+                )
+            if not node.resolved_provider_def and "/" not in node.agent.model:
+                warnings.append(
+                    f"Node '{node.id}': reasoning.enabled is set but no model_provider or "
+                    f"provider/model prefix was found — the OpenAI adapter will be used by default."
                 )
     return warnings
 

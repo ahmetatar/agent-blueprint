@@ -1,7 +1,7 @@
 blueprint:
   name: "reasoning-empty-kwargs"
   version: "1.0"
-  description: "reasoning.enabled set but llm_kwargs is empty — should warn"
+  description: "reasoning.enabled set but params is empty — should warn"
 
 settings:
   default_model: "gpt-4o"

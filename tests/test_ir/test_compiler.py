@@ -2,9 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-from pydantic import ValidationError
-
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -58,8 +55,7 @@ class TestCompileCustomerSupport:
         assert len(cond_targets) == 2
         # Verify condition compiles to valid Python
         code = cond_targets[0].condition.to_dict_access("state")
-        state = {"department": "billing"}
-        result = eval(code)
+        result = eval(code, {}, {"state": {"department": "billing"}})
         assert isinstance(result, bool)
 
     def test_tool_defs_attached(self):
@@ -76,12 +72,28 @@ class TestCompilerWarnings:
         ir = compile_blueprint(spec)
         assert ir.warnings == []
 
-    def test_warning_for_reasoning_with_empty_llm_kwargs(self):
+    def test_warning_for_reasoning_with_empty_params(self):
         spec = load_spec("reasoning_openai.yml")
         ir = compile_blueprint(spec)
         assert len(ir.warnings) == 1
         assert "thinker" in ir.warnings[0]
-        assert "llm_kwargs" in ir.warnings[0]
+        assert "params" in ir.warnings[0]
+
+    def test_warning_for_reasoning_without_explicit_provider_adapter(self):
+        spec = load_spec("reasoning_openai.yml")
+        spec.agents["thinker"].reasoning.params = {"reasoning": {"effort": "high"}}
+        spec.agents["thinker"].model = "gpt-4o"
+        ir = compile_blueprint(spec)
+        assert len(ir.warnings) == 1
+        assert "model_provider or provider/model prefix" in ir.warnings[0]
+
+    def test_legacy_llm_kwargs_remains_supported(self):
+        spec = load_spec("reasoning_agent.yml")
+        spec.agents["thinker"].reasoning.llm_kwargs = spec.agents["thinker"].reasoning.params
+        spec.agents["thinker"].reasoning.params = {}
+        ir = compile_blueprint(spec)
+        assert ir.warnings == []
+        assert spec.agents["thinker"].reasoning.effective_params()["thinking"]["type"] == "enabled"
 
     def test_no_warnings_when_reasoning_not_set(self):
         spec = load_spec("basic_chatbot.yml")

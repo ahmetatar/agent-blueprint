@@ -26,26 +26,7 @@ from state import AgentState
 from tools import TOOLS
 
 {% macro make_llm(node, temperature) %}
-{% set p = node.resolved_provider %}
-{% set m = node.resolved_model %}
-{% set pd = node.resolved_provider_def %}
-{% set r_kwargs = node.agent.reasoning.llm_kwargs if (node.agent.reasoning and node.agent.reasoning.enabled and node.agent.reasoning.llm_kwargs) else {} %}
-{% set use_temp = 'temperature' not in r_kwargs %}
-{% if p == "anthropic" %}
-llm = ChatAnthropic(model="{{ m }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% elif p == "google" %}
-llm = ChatGoogleGenerativeAI(model="{{ m }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% elif p == "ollama" %}
-llm = ChatOllama(model="{{ m }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}, base_url="{{ pd.base_url if pd else 'http://localhost:11434' }}"{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% elif p == "azure_openai" %}
-llm = AzureChatOpenAI(azure_deployment="{{ pd.deployment }}", azure_endpoint="{{ pd.base_url }}", api_version="{{ pd.api_version or '2024-02-01' }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% elif p == "bedrock" %}
-llm = ChatBedrock(model_id="{{ m }}", region_name="{{ pd.region or 'us-east-1' }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% elif p == "openai_compatible" %}
-llm = ChatOpenAI(model="{{ m }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}, base_url="{{ pd.base_url }}"{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% else %}
-llm = ChatOpenAI(model="{{ m }}"{% if use_temp %}, temperature={{ temperature }}{% endif %}{% for k, v in r_kwargs.items() %}, {{ k }}={{ v | to_python }}{% endfor %})
-{% endif %}
+llm = {{ llm_class(node) }}({{ llm_call_args(node, temperature) }})
 {% endmacro %}
 
 {% for node in ir.nodes %}

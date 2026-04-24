@@ -1,6 +1,11 @@
 # Reasoning Patterns
 
-`agent-blueprint` supports multiple strategies for giving agents explicit reasoning capabilities — from simple multi-node chains to Claude's native extended thinking API.
+`agent-blueprint` supports two different reasoning approaches:
+
+1. Graph-level reasoning patterns: multi-node flows such as Chain-of-Thought, ReAct, and Self-Reflection.
+2. Native model thinking: a single LLM call where provider-specific thinking/reasoning kwargs are passed to the selected LangChain adapter.
+
+ABP does not know whether a specific model supports native reasoning. The `model_provider` selects the LangChain adapter class; `reasoning.params` is forwarded as-is to that adapter's constructor.
 
 ## Chain-of-Thought (CoT)
 
@@ -121,7 +126,18 @@ graph:
 
 ## Native Model Thinking
 
-The `reasoning` field on an agent activates a model's built-in thinking capability. `llm_kwargs` is a raw dict of kwargs passed directly to the LangChain LLM constructor — the blueprint makes no assumptions about which parameters are valid. You are responsible for providing the correct kwargs for your provider and model.
+The `reasoning` field marks an agent as using a model's native thinking capability. `params` is a raw dict of kwargs passed directly to the LangChain chat model constructor. ABP does not validate whether those params are semantically correct for your model.
+
+Adapter selection remains explicit:
+
+```yaml
+model_providers:
+  claude:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+```
+
+The `provider` value chooses the generated LangChain class (`ChatAnthropic` here). The reasoning params are then passed through unchanged.
 
 ```yaml
 agents:
@@ -132,11 +148,11 @@ agents:
       You are an expert analyst. Think carefully before answering.
     reasoning:
       enabled: true
-      llm_kwargs:          # passed as-is to the LLM constructor
+      params:              # passed as-is to the LLM constructor
         thinking:
           type: enabled
           budget_tokens: 10000
-        temperature: 1     # Anthropic extended thinking requires temperature=1
+        temperature: 1
 ```
 
 `abp generate` will produce the following in `nodes.py`:
@@ -144,60 +160,85 @@ agents:
 ```python
 llm = ChatAnthropic(
     model="claude-opus-4-6",
-    thinking={'type': 'enabled', 'budget_tokens': 10000},
     temperature=1,
+    thinking={'type': 'enabled', 'budget_tokens': 10000},
 )
 ```
 
 ### Provider examples
 
-**Anthropic** — [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking):
+These examples are pass-through constructor kwargs. ABP does not hard-code frontier model names or capability lists.
+
+**Anthropic-style thinking:**
 ```yaml
 reasoning:
   enabled: true
-  llm_kwargs:
+  params:
     thinking:
       type: enabled
       budget_tokens: 10000
-    temperature: 1   # required by Anthropic API
+    temperature: 1
 ```
 
-**OpenAI o-series** — reasoning effort:
+**OpenAI Responses API reasoning via LangChain:**
 ```yaml
 reasoning:
   enabled: true
-  llm_kwargs:
-    reasoning_effort: medium   # low | medium | high
+  params:
+    reasoning:
+      effort: medium
+      summary: auto
 ```
 
-**Google** — Gemini thinking:
+**Google/Gemini-style thinking:**
 ```yaml
 reasoning:
   enabled: true
-  llm_kwargs:
-    thinking_config:
-      include_thoughts: true
-      thinking_budget: 8000
+  params:
+    thinking_budget: 8000
+    include_thoughts: false
 ```
 
-**Custom / fine-tuned models** — use whatever kwargs the model accepts:
+**Ollama / local reasoning models:**
 ```yaml
 reasoning:
   enabled: true
-  llm_kwargs:
+  params:
+    num_ctx: 8192
+    num_predict: 2048
+```
+
+**Custom / fine-tuned models:**
+```yaml
+reasoning:
+  enabled: true
+  params:
     think_mode: deep
     chain_of_thought_tokens: 5000
 ```
 
-### Temperature handling
+### Generic LLM Params
 
-When `temperature` is included in `llm_kwargs`, it overrides the agent-level `temperature` setting. When it is absent, the agent's `temperature` (or `settings.default_temperature`) is used as normal.
+Use `llm_params` for non-reasoning constructor kwargs:
+
+```yaml
+agents:
+  analyst:
+    model: "some-model"
+    model_provider: my_provider
+    llm_params:
+      timeout: 60
+      max_retries: 3
+```
+
+Merge order is deterministic: provider base args, agent defaults, `model_providers[*].extra`, `agent.llm_params`, then `reasoning.params`. Later values override earlier values. For example, `reasoning.params.temperature` overrides `agent.temperature`.
 
 ### Fields
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Mark this agent as a reasoning agent |
-| `llm_kwargs` | dict | `{}` | Raw kwargs forwarded to the LLM constructor |
+| `params` | dict | `{}` | Raw kwargs forwarded to the LLM constructor |
+| `llm_kwargs` | dict | `{}` | Legacy alias for `params` |
 
-> **Warning:** If `reasoning.enabled: true` is set but `llm_kwargs` is empty, both `abp validate` and `abp generate` will print a warning — no reasoning parameters will be sent to the model.
+> **Warning:** If `reasoning.enabled: true` is set but `params` is empty, both `abp validate` and `abp generate` will print a warning. If no `model_provider`, `settings.default_model_provider`, or `provider/model` prefix is present, ABP will warn that the OpenAI adapter is being used by default.

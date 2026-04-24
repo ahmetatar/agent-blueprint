@@ -37,7 +37,7 @@ agents:
     temperature: 0.6
     reasoning:
       enabled: true
-      llm_kwargs:
+      params:
         # DeepSeek-R1 reasons natively via <think>…</think> blocks in a single call.
         # No special "enable" flag — reasoning is always on for this model family.
         # num_ctx gives enough context window for the full thinking trace + response.

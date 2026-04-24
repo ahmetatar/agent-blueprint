@@ -1,14 +1,13 @@
 """LangGraph code generator."""
 
 import re
-from importlib.resources import files
-from pathlib import Path
+import keyword
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.generators.base import BaseGenerator
-from agent_blueprint.ir.compiler import AgentGraph
+from agent_blueprint.ir.compiler import AgentGraph, IRNode
 
 _TEMPLATES = [
     ("__init__.py.j2", "__init__.py"),
@@ -54,6 +53,70 @@ def _to_python(value: object) -> str:
     return repr(value)
 
 
+def _llm_class(node: IRNode) -> str:
+    mapping = {
+        "anthropic": "ChatAnthropic",
+        "google": "ChatGoogleGenerativeAI",
+        "ollama": "ChatOllama",
+        "azure_openai": "AzureChatOpenAI",
+        "bedrock": "ChatBedrock",
+        "openai_compatible": "ChatOpenAI",
+    }
+    return mapping.get(node.resolved_provider, "ChatOpenAI")
+
+
+def _llm_kwargs(node: IRNode, temperature: float | None) -> dict[str, object]:
+    """Build constructor kwargs without interpreting provider-specific extras."""
+    p = node.resolved_provider
+    m = node.resolved_model
+    pd = node.resolved_provider_def
+    kwargs: dict[str, object] = {}
+
+    if p == "azure_openai":
+        kwargs["azure_deployment"] = pd.deployment if pd else m
+        kwargs["azure_endpoint"] = pd.base_url if pd else ""
+        kwargs["api_version"] = (pd.api_version if pd else None) or "2024-02-01"
+    elif p == "bedrock":
+        kwargs["model_id"] = m
+        kwargs["region_name"] = (pd.region if pd else None) or "us-east-1"
+    else:
+        kwargs["model"] = m
+        if p == "ollama":
+            kwargs["base_url"] = (pd.base_url if pd else None) or "http://localhost:11434"
+        elif p == "openai_compatible" and pd:
+            kwargs["base_url"] = pd.base_url
+
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if node.agent and node.agent.max_tokens is not None:
+        kwargs["max_tokens"] = node.agent.max_tokens
+    if pd:
+        kwargs.update(pd.extra)
+    if node.agent:
+        kwargs.update(node.agent.llm_params)
+        if node.agent.reasoning and node.agent.reasoning.enabled:
+            kwargs.update(node.agent.reasoning.effective_params())
+    return kwargs
+
+
+def _render_kwargs(kwargs: dict[str, object]) -> str:
+    """Render kwargs while allowing arbitrary user-supplied key names via **dict."""
+    parts: list[str] = []
+    unpacked: dict[str, object] = {}
+    for key, value in kwargs.items():
+        if key.isidentifier() and not keyword.iskeyword(key):
+            parts.append(f"{key}={value!r}")
+        else:
+            unpacked[key] = value
+    if unpacked:
+        parts.append(f"**{unpacked!r}")
+    return ", ".join(parts)
+
+
+def _llm_call_args(node: IRNode, temperature: float | None) -> str:
+    return _render_kwargs(_llm_kwargs(node, temperature))
+
+
 def _impl_parts(tool_name: str, impl_path: str) -> dict:
     """Parse an impl dotted path into an import statement and a local alias.
 
@@ -89,6 +152,8 @@ class LangGraphGenerator(BaseGenerator):
         self._env.filters["escape_string"] = _escape_string
         self._env.filters["to_python"] = _to_python
         self._env.globals["impl_parts"] = _impl_parts
+        self._env.globals["llm_class"] = _llm_class
+        self._env.globals["llm_call_args"] = _llm_call_args
 
     def generate(
         self,

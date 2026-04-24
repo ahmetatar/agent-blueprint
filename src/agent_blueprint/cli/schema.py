@@ -21,7 +21,7 @@ def schema(
     format: OutputFormat = typer.Option(OutputFormat.json, "--format", "-f", help="Output format"),
     output: str | None = typer.Option(None, "--output", "-o", help="Write to file instead of stdout"),
 ) -> None:
-    """Export the blueprint JSON Schema for editor/IDE integration."""
+    """Export the blueprint JSON Schema for IDE integration."""
     schema_dict = BlueprintSpec.model_json_schema()
 
     if format == OutputFormat.json:

@@ -255,12 +255,16 @@ agents:
       enabled: true
       trigger: before_tool_call     # before_tool_call | after_tool_call | before_response | always
       tools: [dangerous_tool]       # Only require approval for specific tools
+    llm_params:                     # Optional raw kwargs for the LangChain chat class
+      timeout: 60
     reasoning:
-      enabled: true                 # Enable extended thinking (Anthropic only)
-      budget_tokens: 8000
+      enabled: true                 # Mark this as a native reasoning/thinking agent
+      params:                       # Raw kwargs passed through to the selected adapter
+        reasoning:
+          effort: high
 ```
 
-> See [Model Providers](docs/model-providers.md) for provider configuration and [Reasoning Patterns](docs/reasoning.md) for reasoning strategies.
+> See [Model Providers](docs/model-providers.md) for adapter selection and [Reasoning Patterns](docs/reasoning.md) for native thinking and graph-level reasoning strategies.
 
 ### `tools`
 
@@ -343,7 +347,6 @@ memory:
 | `abp generate <file>` | Generate framework code (`--target langgraph\|plain`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |
 | `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
-| `abp editor` | Open visual Blueprint editor in browser (`--port 7842`) |
 | `abp inspect <file>` | Visualize graph as Mermaid diagram |
 | `abp schema` | Export JSON Schema (`--format json\|yaml`) |
 | `abp github` | Open the GitHub repository |
@@ -367,24 +370,6 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 | `--thread-id` | `default` | Conversation thread ID |
 | `--install` | `false` | Run `pip install -r requirements.txt` before executing |
 | `--env` | `.env` | Path to a `.env` file to load |
-
-### `abp editor`
-
-Open the visual Blueprint editor in your browser — design agents and edges interactively, then export to YAML or generate code directly:
-
-```bash
-abp editor [--blueprint blueprint.yml] [--port 7842] [--no-browser]
-```
-
-![Agent Blueprint Editor](docs/editor-screenshot.png)
-
-The editor provides a drag-and-drop canvas where you can add nodes, connect them, edit properties, preview YAML, and run blueprints directly.
-
-**Requires UI extras:**
-
-```bash
-pip install 'agent-blueprint[ui]'
-```
 
 ---
 

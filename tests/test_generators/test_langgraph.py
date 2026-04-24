@@ -7,6 +7,7 @@ import pytest
 
 from agent_blueprint.generators.langgraph import LangGraphGenerator
 from agent_blueprint.ir.compiler import compile_blueprint
+from agent_blueprint.models.agents import ReasoningConfig
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
@@ -167,6 +168,19 @@ class TestLangGraphGenerator:
         nodes_py = files["nodes.py"]
         assert "thinking={'type': 'enabled', 'budget_tokens': 10000}" in nodes_py
         assert "temperature=1" in nodes_py
+
+    def test_reasoning_params_are_passed_through_for_openai(self):
+        ir = load_ir("basic_chatbot.yml")
+        node = ir.get_node("assistant")
+        assert node is not None
+        assert node.agent is not None
+        node.agent.reasoning = ReasoningConfig(
+            enabled=True,
+            params={"reasoning": {"effort": "high"}},
+        )
+        files = self.gen.generate(ir)
+        expected = "ChatOpenAI(model='gpt-4o', temperature=0.7, reasoning={'effort': 'high'})"
+        assert expected in files["nodes.py"]
 
     def test_reasoning_nodes_py_is_valid_python(self):
         ir = load_ir("reasoning_agent.yml")

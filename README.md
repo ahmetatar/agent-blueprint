@@ -458,13 +458,20 @@ Add to `.vscode/settings.json`:
 git clone https://github.com/ahmetatar/agent-blueprint
 cd agent-blueprint
 pip install -e ".[dev]"
+pre-commit install
+pre-commit install --hook-type commit-msg
 
 # Run tests
 python3 -m pytest tests/ -v
 
 # Lint
-ruff check src/
+ruff check .
+
+# Type check
+mypy src
 ```
+
+See [CONTRIBUTING.md](/Users/aatar/Desktop/Repos/agent-blueprint/CONTRIBUTING.md) for contribution rules, Conventional Commits, PR expectations, and project-specific testing requirements.
 
 ### Project Structure
 

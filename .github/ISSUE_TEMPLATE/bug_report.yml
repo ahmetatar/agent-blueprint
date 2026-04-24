@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible defect in agent-blueprint
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the minimal blueprint, CLI command, and steps to reproduce.
+      placeholder: |
+        1. Run ...
+        2. Validate ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, OS, package version, and relevant provider/framework details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Paste the relevant error, traceback, or generated output diff.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched for existing issues before opening this report
+          required: true
+        - label: I included a minimal reproducible example
+          required: true

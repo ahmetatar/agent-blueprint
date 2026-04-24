@@ -34,6 +34,9 @@ abp = "agent_blueprint.cli.app:app"
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2",
+    "commitizen>=3.27",
+    "pre-commit>=3.7",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
@@ -56,3 +59,10 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.3.0"
+tag_format = "v$version"
+version_scheme = "pep440"
+update_changelog_on_bump = false

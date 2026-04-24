@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a feature, schema extension, or generator capability
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the API, schema, CLI, or generator behavior you want.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider?
+
+  - type: dropdown
+    id: impact_area
+    attributes:
+      label: Primary impact area
+      options:
+        - schema
+        - cli
+        - generator
+        - deploy
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked whether this should be discussed before implementation
+          required: true

@@ -79,6 +79,9 @@ After installation, the `abp` CLI is available:
 abp --help
 ```
 
+For package maintainers, see [Releasing](docs/releasing.md) for version bump,
+tag, TestPyPI, and PyPI publish workflow details.
+
 ---
 
 ## Quick Start

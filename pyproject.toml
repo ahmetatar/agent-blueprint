@@ -63,6 +63,8 @@ testpaths = ["tests"]
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "0.3.0"
+version_provider = "pep621"
 tag_format = "v$version"
 version_scheme = "pep440"
-update_changelog_on_bump = false
+annotated_tag = true
+update_changelog_on_bump = true

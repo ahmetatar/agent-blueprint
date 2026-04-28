@@ -2,7 +2,7 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published]
+    types: [prereleased, published]
 
 jobs:
   build:
@@ -35,9 +35,30 @@ jobs:
           name: python-dist
           path: dist/*
 
-  publish:
+  publish-testpypi:
     needs: build
     runs-on: ubuntu-latest
+    if: ${{ github.event.release.prerelease }}
+    environment: testpypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.release.prerelease }}
     environment: pypi
     permissions:
       id-token: write

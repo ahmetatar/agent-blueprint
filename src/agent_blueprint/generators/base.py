@@ -1,7 +1,6 @@
 """Base generator protocol."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 from agent_blueprint.ir.compiler import AgentGraph
 

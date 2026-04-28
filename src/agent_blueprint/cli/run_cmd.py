@@ -63,7 +63,7 @@ def run(
 
     if target != "langgraph":
         err_console.print(
-            f"[bold red]abp run[/] only supports [cyan]langgraph[/] target for now"
+            "[bold red]abp run[/] only supports [cyan]langgraph[/] target for now"
         )
         raise typer.Exit(1)
 

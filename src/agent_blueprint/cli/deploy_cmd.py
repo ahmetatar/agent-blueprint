@@ -187,7 +187,7 @@ def deploy(
         if result.url:
             lines.append(f"  Endpoint   [link={result.url}]{result.url}[/link]")
             lines.append(f"\n  [dim]POST {result.url}/invoke[/dim]")
-            lines.append(f"  [dim]  {{\"input\": \"Hello\", \"thread_id\": \"default\"}}[/dim]")
+            lines.append("  [dim]  {\"input\": \"Hello\", \"thread_id\": \"default\"}[/dim]")
         console.print(Panel(
             "\n".join(lines),
             title=f"[bold green]Deployed[/] — {bp_name}",

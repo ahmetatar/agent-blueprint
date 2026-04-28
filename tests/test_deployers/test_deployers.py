@@ -1,10 +1,7 @@
 """Tests for cloud deployers — prerequisite checking with mocked subprocess."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-import subprocess
+from unittest.mock import patch
 
-import pytest
 
 from agent_blueprint.deployers.azure import AzureDeployer
 from agent_blueprint.deployers.aws import AWSDeployer

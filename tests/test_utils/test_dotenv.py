@@ -1,9 +1,7 @@
 """Tests for .env auto-loading in load_blueprint_yaml."""
 
-import os
 from pathlib import Path
 
-import pytest
 
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 

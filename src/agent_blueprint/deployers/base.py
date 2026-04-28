@@ -49,7 +49,7 @@ class BaseDeployer(ABC):
         dry_run: bool = False,
         capture: bool = False,
         input: str | None = None,
-    ) -> subprocess.CompletedProcess | None:
+    ) -> subprocess.CompletedProcess[str] | None:
         """Print and optionally run a shell command."""
         print(f"  $ {shlex.join(cmd)}")
         if dry_run:

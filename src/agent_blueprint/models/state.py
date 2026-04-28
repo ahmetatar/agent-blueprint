@@ -7,15 +7,15 @@ from pydantic import BaseModel, Field
 
 
 class ReducerType(str, Enum):
-    append = "append"
-    replace = "replace"
-    merge = "merge"
+    APPEND = "append"
+    REPLACE = "replace"
+    MERGE = "merge"
 
 
 class FieldDef(BaseModel):
     type: str
     default: Any = None
-    reducer: ReducerType = ReducerType.replace
+    reducer: ReducerType = ReducerType.REPLACE
     enum: list[str] | None = None
     nullable: bool = False
     description: str | None = None

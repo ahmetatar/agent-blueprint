@@ -3,7 +3,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -30,7 +30,7 @@ def _get_nested(data: dict[str, Any], path: str) -> Any:
 def _interpolate_value(value: Any, root: dict[str, Any]) -> Any:
     """Recursively resolve ${...} expressions in a value."""
     if isinstance(value, str):
-        def replace_match(m: re.Match) -> str:  # type: ignore[type-arg]
+        def replace_match(m: re.Match[str]) -> str:
             path = m.group(1)
             # ${env.VAR_NAME} → read from environment variables at load time
             if path.startswith("env."):
@@ -107,5 +107,5 @@ def load_blueprint_yaml(path: Path) -> dict[str, Any]:
 
     plain: dict[str, Any] = _to_plain(raw)
     # Interpolate variables using the full document as context
-    interpolated: dict[str, Any] = _interpolate_value(plain, plain)  # type: ignore[assignment]
+    interpolated = cast(dict[str, Any], _interpolate_value(plain, plain))
     return interpolated

@@ -61,6 +61,9 @@ def generate(
         console.print(f"[bold yellow]⚠  Warning:[/] {w}")
 
     # Select generator
+    from agent_blueprint.generators.base import BaseGenerator
+
+    generator: BaseGenerator
     if target == TargetFramework.langgraph:
         from agent_blueprint.generators.langgraph import LangGraphGenerator
         generator = LangGraphGenerator()

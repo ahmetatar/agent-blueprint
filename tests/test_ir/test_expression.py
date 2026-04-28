@@ -56,9 +56,7 @@ class TestCompileExpression:
         expr = parse_expression("state.route == 'billing'")
         python_code = expr.to_dict_access("state")
         # Verify dict-based eval works
-        state = {"route": "billing"}
-        result = eval(python_code)
+        result = eval(python_code, {}, {"state": {"route": "billing"}})
         assert result is True
-        state = {"route": "technical"}
-        result = eval(python_code)
+        result = eval(python_code, {}, {"state": {"route": "technical"}})
         assert result is False

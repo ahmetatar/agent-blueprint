@@ -12,6 +12,12 @@ from rich.panel import Panel
 
 from agent_blueprint.exceptions import BlueprintValidationError, GeneratorError
 from agent_blueprint.models.blueprint import BlueprintSpec
+from agent_blueprint.models.deploy import (
+    AWSDeployConfig,
+    AzureDeployConfig,
+    DockerDeployConfig,
+    GCPDeployConfig,
+)
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
 console = Console()
@@ -78,7 +84,6 @@ def deploy(
 
     # docker/podman: allow missing config — fall back to defaults
     if platform_config is None and resolved_platform in ("docker", "podman"):
-        from agent_blueprint.models.deploy import DockerDeployConfig
         platform_config = DockerDeployConfig()
     elif platform_config is None:
         err_console.print(
@@ -98,21 +103,39 @@ def deploy(
         raise typer.Exit(1) from e
 
     # 5. Select deployer
+    from agent_blueprint.deployers.base import BaseDeployer
+
     bp_name = spec.blueprint.name
+    deployer: BaseDeployer
     if resolved_platform == "azure":
         from agent_blueprint.deployers.azure import AzureDeployer
+        if not isinstance(platform_config, AzureDeployConfig):
+            err_console.print("[bold red]Invalid deploy.azure config.[/]")
+            raise typer.Exit(1)
         deployer = AzureDeployer(platform_config, bp_name)
     elif resolved_platform == "aws":
         from agent_blueprint.deployers.aws import AWSDeployer
+        if not isinstance(platform_config, AWSDeployConfig):
+            err_console.print("[bold red]Invalid deploy.aws config.[/]")
+            raise typer.Exit(1)
         deployer = AWSDeployer(platform_config, bp_name)
     elif resolved_platform == "docker":
         from agent_blueprint.deployers.docker import DockerDeployer
+        if not isinstance(platform_config, DockerDeployConfig):
+            err_console.print("[bold red]Invalid deploy.docker config.[/]")
+            raise typer.Exit(1)
         deployer = DockerDeployer(platform_config, bp_name)
     elif resolved_platform == "podman":
         from agent_blueprint.deployers.docker import PodmanDeployer
+        if not isinstance(platform_config, DockerDeployConfig):
+            err_console.print("[bold red]Invalid deploy.podman config.[/]")
+            raise typer.Exit(1)
         deployer = PodmanDeployer(platform_config, bp_name)
     else:
         from agent_blueprint.deployers.gcp import GCPDeployer
+        if not isinstance(platform_config, GCPDeployConfig):
+            err_console.print("[bold red]Invalid deploy.gcp config.[/]")
+            raise typer.Exit(1)
         deployer = GCPDeployer(platform_config, bp_name)
 
     # 6. Check prerequisites
@@ -187,7 +210,7 @@ def deploy(
         if result.url:
             lines.append(f"  Endpoint   [link={result.url}]{result.url}[/link]")
             lines.append(f"\n  [dim]POST {result.url}/invoke[/dim]")
-            lines.append(f"  [dim]  {{\"input\": \"Hello\", \"thread_id\": \"default\"}}[/dim]")
+            lines.append("  [dim]  {\"input\": \"Hello\", \"thread_id\": \"default\"}[/dim]")
         console.print(Panel(
             "\n".join(lines),
             title=f"[bold green]Deployed[/] — {bp_name}",

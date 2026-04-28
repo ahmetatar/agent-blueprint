@@ -61,6 +61,9 @@ def generate(
         console.print(f"[bold yellow]⚠  Warning:[/] {w}")
 
     # Select generator
+    from agent_blueprint.generators.base import BaseGenerator
+
+    generator: BaseGenerator
     if target == TargetFramework.langgraph:
         from agent_blueprint.generators.langgraph import LangGraphGenerator
         generator = LangGraphGenerator()
@@ -98,7 +101,7 @@ def generate(
         title=f"[bold green]Generated[/] — {spec.blueprint.name} ({target.value})",
         border_style="green",
     ))
-    console.print(f"\nNext steps:")
+    console.print("\nNext steps:")
     console.print(f"  cd {output_dir}")
-    console.print(f"  pip install -r requirements.txt")
-    console.print(f"  python main.py")
+    console.print("  pip install -r requirements.txt")
+    console.print("  python main.py")

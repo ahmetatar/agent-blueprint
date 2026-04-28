@@ -1,7 +1,6 @@
 """GitHub command - opens the project's GitHub repository."""
 
 import webbrowser
-import typer
 from rich.console import Console
 
 console = Console()

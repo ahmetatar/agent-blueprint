@@ -117,7 +117,7 @@ def _llm_call_args(node: IRNode, temperature: float | None) -> str:
     return _render_kwargs(_llm_constructor_kwargs(node, temperature))
 
 
-def _impl_parts(tool_name: str, impl_path: str) -> dict:
+def _impl_parts(tool_name: str, impl_path: str) -> dict[str, str]:
     """Parse an impl dotted path into an import statement and a local alias.
 
     Example:

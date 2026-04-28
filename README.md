@@ -86,10 +86,16 @@ abp --help
 ### 1. Create a blueprint
 
 ```bash
+abp init --wizard --output support-team.agents.yaml
+# or scaffold a starter file directly:
 abp init --template=blueprint --output=my-agent.agents.yaml
 # or create a markdown request template for Codex/Claude Code:
 abp init --template=spec --output=my-agent.spec.md
 ```
+
+`--wizard` walks through the system shape interactively: single-agent vs multi-agent,
+specialist names, model defaults, and memory backend. It then writes a validated
+blueprint YAML for you.
 
 This creates `my-agent.agents.yaml`:
 

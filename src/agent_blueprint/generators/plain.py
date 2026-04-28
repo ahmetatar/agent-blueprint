@@ -2,7 +2,6 @@
 
 import re
 
-from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.generators.base import BaseGenerator
 from agent_blueprint.ir.compiler import AgentGraph
 
@@ -41,15 +40,15 @@ class PlainPythonGenerator(BaseGenerator):
             lines += [
                 f"def {fn_name}(messages: list[dict]) -> str:",
                 f'    """Node: {node.description}"""',
-                f'    system = """',
+                '    system = """',
                 f'{system_prompt.rstrip()}',
-                f'"""',
-                f"    full_messages = [{{\"role\": \"system\", \"content\": system}}] + messages",
-                f"    response = client.chat.completions.create(",
+                '"""',
+                "    full_messages = [{\"role\": \"system\", \"content\": system}] + messages",
+                "    response = client.chat.completions.create(",
                 f'        model="{node.agent.model}",',
-                f"        messages=full_messages,",
-                f"    )",
-                f"    return response.choices[0].message.content or \"\"",
+                "        messages=full_messages,",
+                "    )",
+                "    return response.choices[0].message.content or \"\"",
                 "",
             ]
 
@@ -59,7 +58,7 @@ class PlainPythonGenerator(BaseGenerator):
             entry_fn = f"run_{_safe_id(ir.entry_point)}"
             lines += [
                 "def main(user_input: str) -> str:",
-                f"    messages = [{{\"role\": \"user\", \"content\": user_input}}]",
+                "    messages = [{\"role\": \"user\", \"content\": user_input}]",
                 f"    return {entry_fn}(messages)",
                 "",
                 'if __name__ == "__main__":',

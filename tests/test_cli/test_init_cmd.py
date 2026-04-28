@@ -1,6 +1,7 @@
 """Tests for abp init templates."""
 
 from pathlib import Path
+import re
 
 from typer.testing import CliRunner
 
@@ -8,6 +9,11 @@ from agent_blueprint.cli.app import app
 
 
 runner = CliRunner()
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_RE.sub("", text)
 
 
 class TestInitCommand:
@@ -65,8 +71,9 @@ class TestInitCommand:
 
     def test_help_shows_template_option(self):
         result = runner.invoke(app, ["init", "--help"])
+        output = strip_ansi(result.output)
 
         assert result.exit_code == 0
-        assert "--template" in result.output
-        assert "blueprint" in result.output
-        assert "spec" in result.output
+        assert "--template" in output
+        assert "blueprint" in output
+        assert "spec" in output

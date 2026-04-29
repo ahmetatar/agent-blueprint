@@ -8,7 +8,7 @@ import re
 from difflib import unified_diff
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -128,16 +128,17 @@ def trace_replay_view(manifest: dict[str, Any]) -> dict[str, Any]:
     """Project a manifest into a normalized, diff-friendly replay view."""
     run = manifest.get("run", {}) if isinstance(manifest, dict) else {}
     replay = manifest.get("replay", {}) if isinstance(manifest, dict) else {}
-    return normalize_for_trace({
+    normalized = normalize_for_trace({
         "schema_version": manifest.get("schema_version") if isinstance(manifest, dict) else None,
         "run": {
-            "blueprint": run.get("blueprint"),
-            "blueprint_version": run.get("blueprint_version"),
-            "scenario_id": run.get("scenario_id"),
+            "blueprint": run.get("blueprint") if isinstance(run, dict) else None,
+            "blueprint_version": run.get("blueprint_version") if isinstance(run, dict) else None,
+            "scenario_id": run.get("scenario_id") if isinstance(run, dict) else None,
         },
         "trace": manifest.get("trace", []) if isinstance(manifest, dict) else [],
         "replay": replay,
     })
+    return cast(dict[str, Any], normalized)
 
 
 def trace_replay_json(manifest: dict[str, Any]) -> str:

@@ -7,7 +7,9 @@ from pydantic import ValidationError
 from rich.console import Console
 from agent_blueprint.exceptions import BlueprintCompilationError, BlueprintValidationError
 from agent_blueprint.ir.compiler import compile_blueprint
+from agent_blueprint.ir.compiler import AgentGraph
 from agent_blueprint.linting import LintSeverity, apply_auto_fixes, lint_blueprint
+from agent_blueprint.linting import LintFinding
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
@@ -40,7 +42,7 @@ def lint(
         raise typer.Exit(1)
 
 
-def _load_spec_and_ir(blueprint: Path) -> tuple[BlueprintSpec, object]:
+def _load_spec_and_ir(blueprint: Path) -> tuple[BlueprintSpec, AgentGraph]:
     try:
         raw = load_blueprint_yaml(blueprint)
         spec = BlueprintSpec.model_validate(raw)
@@ -57,7 +59,7 @@ def _load_spec_and_ir(blueprint: Path) -> tuple[BlueprintSpec, object]:
     return spec, ir
 
 
-def _render_findings(blueprint: Path, findings: list, *, quiet: bool) -> None:
+def _render_findings(blueprint: Path, findings: list[LintFinding], *, quiet: bool) -> None:
     errors = [finding for finding in findings if finding.severity == LintSeverity.error]
     warnings = [finding for finding in findings if finding.severity == LintSeverity.warning]
 

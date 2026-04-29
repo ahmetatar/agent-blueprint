@@ -85,3 +85,162 @@ deploy:
     acr_name: "myregistry"
     container_app_env: "my-env"
 """
+
+
+class TestHarnessFileLoading:
+    def test_loads_harness_from_external_file(self, tmp_path):
+        (tmp_path / "harness.yml").write_text(
+            """\
+defaults:
+  llm_mode: mock
+scenarios:
+  - id: refund_happy_path
+    input:
+      message: "refund"
+    expected:
+      route: billing
+""",
+            encoding="utf-8",
+        )
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+harness:
+  file: "harness.yml"
+""",
+        )
+
+        raw = load_blueprint_yaml(blueprint)
+        assert raw["harness"]["defaults"]["llm_mode"] == "mock"
+        assert raw["harness"]["scenarios"][0]["id"] == "refund_happy_path"
+        assert "file" not in raw["harness"]
+
+    def test_merges_inline_harness_over_external_defaults(self, tmp_path):
+        (tmp_path / "harness.yml").write_text(
+            """\
+defaults:
+  llm_mode: replay
+  tool_mode: replay
+scenarios:
+  - id: external_case
+    input: {message: "external"}
+    expected: {route: billing}
+""",
+            encoding="utf-8",
+        )
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+harness:
+  file: "harness.yml"
+  defaults:
+    tool_mode: stub
+  scenarios:
+    - id: inline_case
+      input:
+        message: "inline"
+      expected:
+        route: support
+""",
+        )
+
+        raw = load_blueprint_yaml(blueprint)
+        assert raw["harness"]["defaults"]["llm_mode"] == "replay"
+        assert raw["harness"]["defaults"]["tool_mode"] == "stub"
+        assert [scenario["id"] for scenario in raw["harness"]["scenarios"]] == [
+            "external_case",
+            "inline_case",
+        ]
+
+    def test_supports_multiple_harness_files(self, tmp_path):
+        (tmp_path / "a.yml").write_text(
+            """\
+scenarios:
+  - id: a
+    input: {}
+    expected: {}
+""",
+            encoding="utf-8",
+        )
+        (tmp_path / "b.yml").write_text(
+            """\
+scenarios:
+  - id: b
+    input: {}
+    expected: {}
+""",
+            encoding="utf-8",
+        )
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+harness:
+  files:
+    - "a.yml"
+    - "b.yml"
+""",
+        )
+
+        raw = load_blueprint_yaml(blueprint)
+        assert [scenario["id"] for scenario in raw["harness"]["scenarios"]] == ["a", "b"]
+
+    def test_resolves_replay_trace_paths_relative_to_harness_sources(self, tmp_path):
+        traces = tmp_path / "traces"
+        traces.mkdir()
+        (traces / "golden.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "harness.yml").write_text(
+            """\
+defaults:
+  replay_trace: "traces/golden.json"
+scenarios:
+  - id: replay_case
+    input: {}
+    expected: {}
+    replay_trace: "traces/golden.json"
+""",
+            encoding="utf-8",
+        )
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+harness:
+  file: "harness.yml"
+""",
+        )
+
+        raw = load_blueprint_yaml(blueprint)
+        expected = str((traces / "golden.json").resolve())
+        assert raw["harness"]["defaults"]["replay_trace"] == expected
+        assert raw["harness"]["scenarios"][0]["replay_trace"] == expected

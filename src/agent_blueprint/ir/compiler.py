@@ -6,13 +6,16 @@ from typing import Any
 from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.expression import CompiledExpression, parse_expression
 from agent_blueprint.models.agents import AgentDef, RagMode
-from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings
+from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
+from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.graph import NodeDef
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef
+
+_UNSUPPORTED_NODE_TYPES = {"parallel", "subgraph"}
 
 
 @dataclass
@@ -58,6 +61,9 @@ class AgentGraph:
     memory: MemoryConfig
     all_tools: dict[str, ToolDef]
     retrievers: dict[str, RetrieverDef]
+    input_schema: IOSchema | None = None
+    output_schema: IOSchema | None = None
+    harness: HarnessDef | None = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -91,6 +97,9 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         memory=spec.memory,
         all_tools=spec.tools,
         retrievers=spec.retrievers,
+        input_schema=spec.input,
+        output_schema=spec.output,
+        harness=spec.harness,
         warnings=warnings,
     )
 
@@ -140,6 +149,12 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
     nodes: list[IRNode] = []
 
     for node_id, node_def in spec.graph.nodes.items():
+        if node_def.type.value in _UNSUPPORTED_NODE_TYPES:
+            raise BlueprintCompilationError(
+                f"Node '{node_id}' uses unsupported node type '{node_def.type.value}'. "
+                "This workflow semantic is declared in the schema but not implemented yet."
+            )
+
         agent: AgentDef | None = None
         tool_defs: dict[str, ToolDef] = {}
         resolved_provider = "openai"

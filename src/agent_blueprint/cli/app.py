@@ -16,6 +16,7 @@ from agent_blueprint.cli import generate as generate_cmd
 from agent_blueprint.cli import inspect_cmd
 from agent_blueprint.cli import init_cmd
 from agent_blueprint.cli import run_cmd
+from agent_blueprint.cli import test_cmd
 from agent_blueprint.cli import deploy_cmd
 from agent_blueprint.cli import github_cmd
 
@@ -81,6 +82,7 @@ app.command("generate")(generate_cmd.generate)
 app.command("inspect")(inspect_cmd.inspect)
 app.command("init")(init_cmd.init)
 app.command("run")(run_cmd.run)
+app.command("test")(test_cmd.test)
 app.command("deploy")(deploy_cmd.deploy)
 app.command("github")(github_cmd.github)
 

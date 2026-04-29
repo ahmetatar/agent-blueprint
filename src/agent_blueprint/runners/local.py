@@ -1,16 +1,27 @@
 """LocalRunner — generate to a temp dir and execute in a subprocess."""
 
 import atexit
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.ir.compiler import AgentGraph
 from agent_blueprint.models.tools import ToolType
+
+
+@dataclass
+class LocalRunResult:
+    returncode: int
+    stdout: str
+    stderr: str
+    trace_file: Path | None
+    trace_manifest: dict | None
 
 
 class LocalRunner:
@@ -37,6 +48,24 @@ class LocalRunner:
 
         Returns the subprocess exit code.
         """
+        result = self.run_capture(
+            user_input=user_input,
+            install=install,
+            env_file=env_file,
+            keep_temp=keep_temp,
+        )
+        return result.returncode
+
+    def run_capture(
+        self,
+        user_input: str | None = None,
+        *,
+        install: bool = False,
+        env_file: Path | None = None,
+        keep_temp: bool = False,
+        extra_env: dict[str, str] | None = None,
+    ) -> LocalRunResult:
+        """Generate, optionally install deps, then execute and capture outputs."""
         self._tempdir = Path(tempfile.mkdtemp(prefix="abp_run_"))
         if not keep_temp:
             atexit.register(self._cleanup)
@@ -47,9 +76,37 @@ class LocalRunner:
         if install:
             rc = self._install_deps()
             if rc != 0:
-                return rc
+                return LocalRunResult(
+                    returncode=rc,
+                    stdout="",
+                    stderr="",
+                    trace_file=None,
+                    trace_manifest=None,
+                )
 
-        return self._execute(user_input=user_input, env_file=env_file)
+        proc = self._execute(
+            user_input=user_input,
+            env_file=env_file,
+            extra_env=extra_env,
+            capture_output=True,
+        )
+        trace_file = None
+        trace_manifest = None
+        if self._tempdir is not None:
+            candidate = self._tempdir / "abp_trace.json"
+            if candidate.exists():
+                trace_file = candidate
+                try:
+                    trace_manifest = json.loads(candidate.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    trace_manifest = None
+        return LocalRunResult(
+            returncode=proc.returncode,
+            stdout=proc.stdout or "",
+            stderr=proc.stderr or "",
+            trace_file=trace_file,
+            trace_manifest=trace_manifest,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -96,18 +153,36 @@ class LocalRunner:
         )
         return result.returncode
 
-    def _execute(self, *, user_input: str | None, env_file: Path | None) -> int:
+    def _execute(
+        self,
+        *,
+        user_input: str | None,
+        env_file: Path | None,
+        extra_env: dict[str, str] | None = None,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         assert self._tempdir is not None
 
-        env = self._build_env(env_file)
+        env = self._build_env(env_file, extra_env=extra_env)
         cmd = [sys.executable, "_abp_runner.py"]
         if user_input is not None:
             cmd.append(user_input)
 
-        result = subprocess.run(cmd, cwd=str(self._tempdir), env=env, check=False)
-        return result.returncode
+        return subprocess.run(
+            cmd,
+            cwd=str(self._tempdir),
+            env=env,
+            check=False,
+            capture_output=capture_output,
+            text=True,
+        )
 
-    def _build_env(self, env_file: Path | None) -> dict[str, str]:
+    def _build_env(
+        self,
+        env_file: Path | None,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         env = os.environ.copy()
 
         # Load .env file if provided and exists
@@ -127,6 +202,10 @@ class LocalRunner:
         env["PYTHONPATH"] = os.pathsep.join(parts)
 
         env["ABP_THREAD_ID"] = self._thread_id
+        env.setdefault("ABP_TOOL_APPROVAL_MODE", "deny")
+        env.setdefault("ABP_TRACE_FILE", str(self._tempdir / "abp_trace.json"))
+        if extra_env:
+            env.update(extra_env)
         return env
 
     def _cleanup(self) -> None:

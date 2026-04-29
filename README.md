@@ -377,6 +377,7 @@ memory:
 | `abp validate <file>` | Validate a blueprint against the schema (`--quiet` for CI) |
 | `abp generate <file>` | Generate framework code (`--target langgraph\|plain`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |
+| `abp test <file>` | Run harness scenarios declared for the blueprint (`--scenario`, `--install`) |
 | `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
 | `abp inspect <file>` | Visualize graph as Mermaid diagram |
 | `abp schema` | Export JSON Schema (`--format json\|yaml`) |
@@ -401,6 +402,25 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 | `--thread-id` | `default` | Conversation thread ID |
 | `--install` | `false` | Run `pip install -r requirements.txt` before executing |
 | `--env` | `.env` | Path to a `.env` file to load |
+
+### `abp test`
+
+```bash
+# Run all harness scenarios
+abp test my-agent.yml
+
+# Run one scenario
+abp test my-agent.yml --scenario refund_happy_path
+```
+
+Current support:
+- harness semantics, trace schema, and scenario model are defined at the ABP layer
+- the current execution adapter for `abp test` is LangGraph-backed because LangGraph is the only fully implemented runtime target today
+- future targets such as CrewAI should implement the same ABP harness and trace contract rather than introducing target-specific behavior
+
+Current limitation:
+- `llm_mode` / `tool_mode` are already part of the ABP harness contract, but full mock/stub/replay execution behavior is not complete yet
+- unsupported assertions are reported explicitly rather than being silently ignored
 
 ---
 
@@ -438,6 +458,24 @@ my-agent-langgraph/
 ```
 
 The generated code is **human-readable and fully editable**. It's a starting point, not a black box.
+
+## Portability Note
+
+ABP is designed to be framework-agnostic at the semantic layer, not necessarily at every runtime adapter implementation step.
+
+What is ABP-level:
+- blueprint schema
+- IR/compiler semantics
+- trace schema and event names
+- harness scenario model
+- approval / HITL / contract concepts
+
+What is currently LangGraph-backed:
+- local runtime execution
+- emitted runtime hooks used by `abp run`
+- the current `abp test` scenario executor
+
+This means the contract is intended to stay stable as new targets arrive. When a future target such as CrewAI becomes executable, it should implement the same ABP-level trace and harness semantics so that blueprints and harness definitions remain portable.
 
 ---
 

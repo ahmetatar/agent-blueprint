@@ -8,9 +8,12 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.generators.base import BaseGenerator
 from agent_blueprint.ir.compiler import AgentGraph, IRNode
+from agent_blueprint.trace import TRACE_SCHEMA_VERSION
 
 _TEMPLATES = [
     ("__init__.py.j2", "__init__.py"),
+    ("_abp_trace.py.j2", "_abp_trace.py"),
+    ("_abp_harness.py.j2", "_abp_harness.py"),
     ("state.py.j2", "state.py"),
     ("tools.py.j2", "tools.py"),
     ("nodes.py.j2", "nodes.py"),
@@ -154,6 +157,7 @@ class LangGraphGenerator(BaseGenerator):
         self._env.globals["impl_parts"] = _impl_parts
         self._env.globals["llm_class"] = _llm_class
         self._env.globals["llm_call_args"] = _llm_call_args
+        self._env.globals["trace_schema_version"] = TRACE_SCHEMA_VERSION
 
     def generate(
         self,

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -101,3 +102,50 @@ class TestCompilerWarnings:
         spec = load_spec("basic_chatbot.yml")
         ir = compile_blueprint(spec)
         assert ir.warnings == []
+
+
+class TestHarnessCompilerSupport:
+    def test_harness_is_carried_into_ir(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "harness": {
+                "defaults": {"llm_mode": "mock", "tool_mode": "stub", "seed": 42},
+                "scenarios": [
+                    {
+                        "id": "refund_happy_path",
+                        "input": {"message": "refund"},
+                        "expected": {
+                            "route": "billing",
+                            "tools_called": ["lookup_invoice"],
+                            "output_contract": "refund_response",
+                            "state_assertions": ["state.route == 'billing'"],
+                        },
+                    }
+                ],
+            },
+        })
+        ir = compile_blueprint(spec)
+        assert ir.harness is not None
+        assert ir.harness.defaults.llm_mode == "mock"
+        assert ir.harness.scenarios[0].id == "refund_happy_path"
+        assert ir.harness.scenarios[0].expected.route == "billing"
+
+
+class TestUnsupportedNodeTypes:
+    @pytest.mark.parametrize("node_type", ["parallel", "subgraph"])
+    def test_compile_fails_loudly_for_unsupported_node_types(self, node_type):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "n",
+                "nodes": {"n": {"type": node_type}},
+                "edges": [],
+            },
+        })
+
+        with pytest.raises(BlueprintCompilationError) as exc_info:
+            compile_blueprint(spec)
+
+        assert "Node 'n'" in str(exc_info.value)
+        assert f"unsupported node type '{node_type}'" in str(exc_info.value)

@@ -3,28 +3,220 @@
 # {{ ir.description or "" }}
 
 import json
+import os
 import sys
+from datetime import datetime, UTC
+from typing import Any
 from langchain_core.messages import HumanMessage
+from langgraph.errors import GraphRecursionError
 
+from _abp_trace import emit_trace_event, finalize_trace, start_trace
 from graph import graph
 
+INPUT_SCHEMA = {
+{% if ir.input_schema %}
+{% for field_name, field_def in ir.input_schema.schema_def.items() %}
+    "{{ field_name }}": {
+        "type": "{{ field_def.type }}",
+        "required": {{ field_def.required | to_python }},
+        "nullable": {{ field_def.nullable | to_python }},
+        "default": {{ field_def.default | to_python }},
+        "enum": {{ field_def.enum | to_python }},
+    },
+{% endfor %}
+{% endif %}
+}
 
-def run(user_input: str, thread_id: str = "default") -> str:
+OUTPUT_SCHEMA = {
+{% if ir.output_schema %}
+{% for field_name, field_def in ir.output_schema.schema_def.items() %}
+    "{{ field_name }}": {
+        "type": "{{ field_def.type }}",
+        "required": {{ field_def.required | to_python }},
+        "nullable": {{ field_def.nullable | to_python }},
+        "default": {{ field_def.default | to_python }},
+        "enum": {{ field_def.enum | to_python }},
+    },
+{% endfor %}
+{% endif %}
+}
+
+
+def _validate_input_value(field_name: str, value: Any, field_def: dict[str, Any]) -> Any:
+    if value is None:
+        if field_def["nullable"]:
+            return None
+        raise ValueError(f"Input contract error: field '{field_name}' cannot be null")
+
+    expected_type = field_def["type"].lower()
+    valid = True
+    if expected_type in {"string", "str"}:
+        valid = isinstance(value, str)
+    elif expected_type in {"integer", "int"}:
+        valid = isinstance(value, int) and not isinstance(value, bool)
+    elif expected_type in {"number", "float"}:
+        valid = (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
+    elif expected_type in {"boolean", "bool"}:
+        valid = isinstance(value, bool)
+    elif expected_type == "list":
+        valid = isinstance(value, list)
+    elif expected_type == "dict":
+        valid = isinstance(value, dict)
+
+    if not valid:
+        raise ValueError(
+            f"Input contract error: field '{field_name}' must be of type '{field_def['type']}'"
+        )
+
+    allowed_values = field_def.get("enum")
+    if allowed_values is not None and value not in allowed_values:
+        raise ValueError(
+            f"Input contract error: field '{field_name}' must be one of {allowed_values}"
+        )
+
+    return value
+
+
+def _normalize_payload(user_input: Any) -> Any:
+    if not INPUT_SCHEMA:
+        return user_input
+    if isinstance(user_input, str):
+        try:
+            return json.loads(user_input)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Input contract error: expected a JSON object payload matching blueprint.input schema"
+            ) from exc
+    return user_input
+
+
+def _validate_input_payload(user_input: Any) -> dict[str, Any]:
+    payload = _normalize_payload(user_input)
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "Input contract error: expected an object payload matching blueprint.input schema"
+        )
+
+    unknown_fields = sorted(set(payload.keys()) - set(INPUT_SCHEMA.keys()))
+    if unknown_fields:
+        raise ValueError(
+            f"Input contract error: unknown input field(s): {', '.join(unknown_fields)}"
+        )
+
+    validated: dict[str, Any] = {}
+    for field_name, field_def in INPUT_SCHEMA.items():
+        if field_name in payload:
+            raw_value = payload[field_name]
+        elif field_def["default"] is not None or not field_def["required"]:
+            raw_value = field_def["default"]
+        else:
+            raise ValueError(f"Input contract error: missing required field '{field_name}'")
+        validated[field_name] = _validate_input_value(field_name, raw_value, field_def)
+    return validated
+
+
+def _build_initial_state(user_input: Any) -> dict[str, Any]:
+    if not INPUT_SCHEMA:
+        return {"messages": [HumanMessage(content=str(user_input))]}
+
+    validated = _validate_input_payload(user_input)
+    initial_state = dict(validated)
+
+    if "messages" not in initial_state:
+        for candidate in ("user_input", "input", "message"):
+            value = initial_state.get(candidate)
+            if value is not None:
+                initial_state["messages"] = [HumanMessage(content=str(value))]
+                break
+
+    return initial_state
+
+
+def _validate_output_payload(result: dict[str, Any]) -> dict[str, Any]:
+    validated: dict[str, Any] = {}
+    for field_name, field_def in OUTPUT_SCHEMA.items():
+        if field_name in result:
+            raw_value = result[field_name]
+        elif field_def["default"] is not None or not field_def["required"]:
+            raw_value = field_def["default"]
+        else:
+            raise ValueError(f"Output contract error: missing required field '{field_name}'")
+        validated[field_name] = _validate_input_value(field_name, raw_value, field_def)
+    return validated
+
+
+def _default_run_id(thread_id: str) -> str:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"{timestamp}_{thread_id}"
+
+
+def run(user_input: Any, thread_id: str = "default") -> Any:
     """Run the agent with a user message and return the final response."""
-    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": {{ ir.settings.max_graph_steps }}}
-    result = graph.invoke(
-        {"messages": [HumanMessage(content=user_input)]},
-        config=config,
+    start_trace(
+        run_id=os.environ.get("ABP_RUN_ID", _default_run_id(thread_id)),
+        blueprint="{{ ir.name }}",
+        blueprint_version="{{ ir.version }}",
+        mode=os.environ.get("ABP_TRACE_MODE", "live"),
+        scenario_id=os.environ.get("ABP_SCENARIO_ID") or None,
+        seed=int(os.environ["ABP_TRACE_SEED"]) if os.environ.get("ABP_TRACE_SEED") else None,
+        metadata={"thread_id": thread_id},
     )
+    try:
+        initial_state = _build_initial_state(user_input)
+    except ValueError as exc:
+        emit_trace_event(
+            "contract_failed",
+            error=str(exc),
+            metadata={"stage": "input"},
+        )
+        finalize_trace(status="failed", error=str(exc))
+        raise
+
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": {{ ir.settings.max_graph_steps }}}
+    try:
+        result = graph.invoke(
+            initial_state,
+            config=config,
+        )
+    except GraphRecursionError as exc:
+        error = (
+            "ABP runtime step limit exceeded: "
+            "the graph ran past settings.max_graph_steps={{ ir.settings.max_graph_steps }}. "
+            "Increase the limit or fix the workflow so it terminates earlier."
+        )
+        finalize_trace(status="failed", error=error)
+        raise RuntimeError(error) from exc
+    except Exception as exc:
+        finalize_trace(status="failed", error=str(exc))
+        raise
     if result is None:
-        raise RuntimeError(
+        error = (
             "graph.invoke() returned None — the graph produced no output. "
             "This usually means an unhandled exception occurred inside the graph. "
             "Try running with LANGCHAIN_VERBOSE=true or check your API keys."
         )
+        finalize_trace(status="failed", error=error)
+        raise RuntimeError(error)
+    if OUTPUT_SCHEMA:
+        try:
+            validated_output = _validate_output_payload(result)
+        except ValueError as exc:
+            emit_trace_event(
+                "contract_failed",
+                error=str(exc),
+                output_state=result,
+                metadata={"stage": "output"},
+            )
+            finalize_trace(status="failed", error=str(exc), output_state=result)
+            raise
+        finalize_trace(status="success", output_state=result)
+        return validated_output
     messages = result.get("messages", [])
     if messages:
-        return messages[-1].content
+        response = messages[-1].content
+        finalize_trace(status="success", output_state=result)
+        return response
+    finalize_trace(status="success", output_state=result)
     return ""
 
 

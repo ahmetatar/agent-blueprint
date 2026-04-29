@@ -76,6 +76,20 @@ class TestLocalRunnerEnv:
         env = runner._build_env(None)
         assert env["ABP_THREAD_ID"] == "sess-42"
 
+    def test_tool_approval_mode_defaults_to_deny(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ABP_TOOL_APPROVAL_MODE", raising=False)
+        runner = self._make_runner()
+        runner._tempdir = tmp_path
+        env = runner._build_env(None)
+        assert env["ABP_TOOL_APPROVAL_MODE"] == "deny"
+
+    def test_trace_file_defaults_inside_tempdir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ABP_TRACE_FILE", raising=False)
+        runner = self._make_runner()
+        runner._tempdir = tmp_path
+        env = runner._build_env(None)
+        assert env["ABP_TRACE_FILE"] == str(tmp_path / "abp_trace.json")
+
     def test_env_file_loaded(self, tmp_path):
         env_file = tmp_path / ".env"
         env_file.write_text("MY_SECRET=hello\nOTHER=world\n")

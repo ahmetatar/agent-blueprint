@@ -54,6 +54,118 @@ class TestValidBlueprints:
         assert spec.agents["assistant"].rag is not None
         assert spec.agents["assistant"].rag.retrieval_tool == "search_kb"
 
+    def test_harness_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "harness": {
+                "defaults": {
+                    "llm_mode": "mock",
+                    "tool_mode": "stub",
+                    "seed": 42,
+                    "freeze_env": ["OPENAI_API_KEY"],
+                    "normalize": {
+                        "whitespace": True,
+                        "timestamps": True,
+                        "ids": True,
+                    },
+                },
+                "scenarios": [
+                    {
+                        "id": "refund_happy_path",
+                        "input": {"message": "I want a refund"},
+                        "expected": {
+                            "route": "billing",
+                            "tools_called": ["lookup_invoice", "issue_refund"],
+                            "output_contract": "refund_response",
+                            "state_assertions": ["state.route == 'billing'"],
+                            "artifacts": ["none"],
+                            "approvals_triggered": True,
+                        },
+                    }
+                ],
+            },
+        })
+        assert spec.harness is not None
+        assert spec.harness.defaults.llm_mode == "mock"
+        assert spec.harness.defaults.tool_mode == "stub"
+        assert spec.harness.scenarios[0].expected.route == "billing"
+        assert spec.harness.scenarios[0].expected.tools_called == ["lookup_invoice", "issue_refund"]
+
+    def test_harness_file_fields_are_accepted_for_non_breaking_compatibility(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "harness": {
+                "file": "harness/refund.yml",
+                "files": ["harness/common.yml"],
+                "scenarios": [
+                    {
+                        "id": "inline_case",
+                        "input": {},
+                        "expected": {},
+                    }
+                ],
+            },
+        })
+        assert spec.harness is not None
+        assert spec.harness.file == "harness/refund.yml"
+        assert spec.harness.files == ["harness/common.yml"]
+
+    def test_harness_fixture_blocks_load(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"agent": "assistant"}}, "edges": []},
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "harness": {
+                "defaults": {
+                    "fixtures": {
+                        "llm_outputs": {
+                            "n": [{"content": "default reply"}],
+                        },
+                        "tool_outputs": {
+                            "lookup_invoice": {"result": {"status": "paid"}},
+                        },
+                    }
+                },
+                "scenarios": [
+                    {
+                        "id": "fixture_case",
+                        "input": {"message": "hello"},
+                        "expected": {},
+                        "fixtures": {
+                            "tool_outputs": {
+                                "issue_refund": [{"result": {"approved": True}}],
+                            }
+                        },
+                    }
+                ],
+            },
+        })
+        assert spec.harness is not None
+        assert spec.harness.defaults.fixtures.llm_outputs["n"][0]["content"] == "default reply"
+        assert spec.harness.scenarios[0].fixtures.tool_outputs["issue_refund"][0]["result"]["approved"] is True
+
+    def test_harness_replay_trace_fields_load(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "harness": {
+                "defaults": {"replay_trace": "/tmp/golden-trace.json"},
+                "scenarios": [
+                    {
+                        "id": "replay_case",
+                        "input": {},
+                        "expected": {},
+                        "replay_trace": "/tmp/scenario-trace.json",
+                    }
+                ],
+            },
+        })
+        assert spec.harness is not None
+        assert spec.harness.defaults.replay_trace == "/tmp/golden-trace.json"
+        assert spec.harness.scenarios[0].replay_trace == "/tmp/scenario-trace.json"
+
 
 class TestMcpTools:
     def test_mcp_blueprint_loads(self):
@@ -151,3 +263,17 @@ class TestInvalidBlueprints:
                 "graph": {"entry_point": "n", "nodes": {"n": {"agent": "a"}}, "edges": []},
             })
         assert "retrieval tool" in str(exc_info.value)
+
+    def test_harness_duplicate_scenario_ids_raise(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "harness": {
+                    "scenarios": [
+                        {"id": "dup", "input": {}, "expected": {}},
+                        {"id": "dup", "input": {}, "expected": {}},
+                    ]
+                },
+            })
+        assert "duplicate id" in str(exc_info.value)

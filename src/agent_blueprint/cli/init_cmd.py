@@ -70,10 +70,6 @@ agents:
     system_prompt: |
       You are a routing agent. Determine which specialist should handle the request.
       Respond with a JSON object: {{"route": "specialist_a" | "specialist_b"}}
-    output_schema:
-      route:
-        type: string
-        enum: [specialist_a, specialist_b]
 
   specialist_a:
     model: "${{settings.default_model}}"
@@ -109,6 +105,21 @@ graph:
       to: END
     - from: specialist_b
       to: END
+
+contracts:
+  nodes:
+    router:
+      produces: [route]
+      output_contract: router_route
+  outputs:
+    router_route:
+      type: object
+      required: [route]
+      additionalProperties: false
+      properties:
+        route:
+          type: string
+          enum: [specialist_a, specialist_b]
 
 memory:
   backend: in_memory

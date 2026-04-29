@@ -77,6 +77,225 @@ def _emit_human_review_event(
     print(json.dumps(payload, sort_keys=True), file=sys.stderr)
 
 
+def _contract_error(
+    node_id: str,
+    message: str,
+    *,
+    state: Any | None = None,
+    updates: Any | None = None,
+    stage: str,
+    contract_kind: str,
+) -> None:
+    emit_trace_event(
+        "contract_failed",
+        node=node_id,
+        input_state=state,
+        output_state=updates,
+        error=message,
+        metadata={"stage": stage, "contract_kind": contract_kind},
+    )
+    clear_current_node()
+    raise ValueError(message)
+
+
+def _require_state_fields(node_id: str, state: AgentState, field_names: list[str]) -> None:
+    missing = [
+        field_name
+        for field_name in field_names
+        if field_name not in state or state.get(field_name) is None
+    ]
+    if missing:
+        quoted = ", ".join(repr(field_name) for field_name in missing)
+        _contract_error(
+            node_id,
+            f"Node contract error: node '{node_id}' requires state field(s) {quoted} before execution",
+            state=state,
+            stage="node_precondition",
+            contract_kind="requires",
+        )
+
+
+def _require_produced_fields(node_id: str, state: AgentState, updates: dict[str, Any], field_names: list[str]) -> None:
+    missing = [field_name for field_name in field_names if field_name not in updates]
+    if missing:
+        quoted = ", ".join(repr(field_name) for field_name in missing)
+        _contract_error(
+            node_id,
+            f"Node contract error: node '{node_id}' did not produce required field(s) {quoted}",
+            state=state,
+            updates=updates,
+            stage="node_postcondition",
+            contract_kind="produces",
+        )
+
+
+def _ensure_fields_not_mutated(
+    node_id: str,
+    state: AgentState,
+    updates: dict[str, Any],
+    field_names: list[str],
+    *,
+    contract_kind: str,
+) -> None:
+    mutated = [
+        field_name
+        for field_name in field_names
+        if field_name in updates and updates[field_name] != state.get(field_name)
+    ]
+    if mutated:
+        quoted = ", ".join(repr(field_name) for field_name in mutated)
+        if contract_kind == "immutable_fields":
+            message = (
+                f"State contract error: node '{node_id}' attempted to mutate immutable field(s) {quoted}"
+            )
+        else:
+            message = (
+                f"Node contract error: node '{node_id}' attempted to mutate forbidden field(s) {quoted}"
+            )
+        _contract_error(
+            node_id,
+            message,
+            state=state,
+            updates=updates,
+            stage="node_postcondition",
+            contract_kind=contract_kind,
+        )
+
+
+def _validate_schema_value(path: str, value: Any, schema: dict[str, Any]) -> Any:
+    if value is None:
+        if schema.get("nullable", False):
+            return None
+        raise ValueError(f"{path} cannot be null")
+
+    expected_type = str(schema.get("type", "")).lower()
+
+    if expected_type in {"string", "str"}:
+        if not isinstance(value, str):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        validated = value
+    elif expected_type in {"integer", "int"}:
+        if not (isinstance(value, int) and not isinstance(value, bool)):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        validated = value
+    elif expected_type in {"number", "float"}:
+        if not ((isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        validated = value
+    elif expected_type in {"boolean", "bool"}:
+        if not isinstance(value, bool):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        validated = value
+    elif expected_type in {"list", "array"}:
+        if not isinstance(value, list):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        item_schema = schema.get("items")
+        if item_schema:
+            validated = [
+                _validate_schema_value(f"{path}[{index}]", item, item_schema)
+                for index, item in enumerate(value)
+            ]
+        else:
+            validated = value
+    elif expected_type in {"object", "dict"}:
+        if not isinstance(value, dict):
+            raise ValueError(f"{path} must be of type '{schema['type']}'")
+        properties = schema.get("properties", {})
+        required_fields = schema.get("required", [])
+        additional = schema.get("additionalProperties", schema.get("additional_properties", None))
+        validated = {}
+
+        for field_name in required_fields:
+            if field_name not in value:
+                raise ValueError(f"{path}.{field_name} is required")
+
+        for field_name, field_schema in properties.items():
+            if field_name in value:
+                validated[field_name] = _validate_schema_value(
+                    f"{path}.{field_name}",
+                    value[field_name],
+                    field_schema,
+                )
+            elif "default" in field_schema and field_schema.get("default") is not None:
+                validated[field_name] = field_schema["default"]
+
+        extra_fields = sorted(set(value.keys()) - set(properties.keys()))
+        if additional is False and extra_fields:
+            rendered = ", ".join(extra_fields)
+            raise ValueError(f"{path} has unknown field(s): {rendered}")
+
+        if additional is True or additional is None:
+            for field_name in extra_fields:
+                validated[field_name] = value[field_name]
+        elif isinstance(additional, dict):
+            for field_name in extra_fields:
+                validated[field_name] = _validate_schema_value(
+                    f"{path}.{field_name}",
+                    value[field_name],
+                    additional,
+                )
+        return validated
+    else:
+        validated = value
+
+    allowed_values = schema.get("enum")
+    if allowed_values is not None and validated not in allowed_values:
+        raise ValueError(f"{path} must be one of {allowed_values}")
+
+    return validated
+
+
+def _extract_structured_output_candidate(new_messages: list[Any]) -> Any:
+    for msg in reversed(new_messages):
+        tool_calls = getattr(msg, "tool_calls", None)
+        if tool_calls:
+            for tc in reversed(tool_calls):
+                args = tc.get("args", {})
+                if args:
+                    return args
+        content = getattr(msg, "content", None)
+        if isinstance(content, str) and content.strip():
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _validate_node_output_contract(
+    node_id: str,
+    state: AgentState,
+    new_messages: list[Any],
+    schema: dict[str, Any],
+    *,
+    contract_kind: str,
+    required: bool,
+) -> Any:
+    candidate = _extract_structured_output_candidate(new_messages)
+    if candidate is None:
+        if required:
+            _contract_error(
+                node_id,
+                f"Node output contract error: node '{node_id}' did not produce structured output",
+                state=state,
+                updates={"messages": new_messages},
+                stage="node_output_contract",
+                contract_kind=contract_kind,
+            )
+        return None
+    try:
+        return _validate_schema_value(f"node '{node_id}' output", candidate, schema)
+    except ValueError as exc:
+        _contract_error(
+            node_id,
+            f"Node output contract error: {exc}",
+            state=state,
+            updates={"messages": new_messages},
+            stage="node_output_contract",
+            contract_kind=contract_kind,
+        )
+
+
 def _human_review_allowed(node_id: str, trigger: str) -> bool:
     mode = os.environ.get("ABP_HITL_MODE", "deny").strip().lower()
     if mode == "allow":
@@ -157,6 +376,9 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% endif %}
     set_current_node("{{ node.id }}")
     emit_trace_event("node_started", node="{{ node.id }}", input_state=state)
+{% if node.contract and node.contract.requires %}
+    _require_state_fields("{{ node.id }}", state, {{ node.contract.requires | to_python }})
+{% endif %}
     {% set temperature = node.agent.temperature if node.agent.temperature is not none else ir.settings.default_temperature %}
     {{ make_llm(node, temperature) }}
 {% if node.tool_defs %}
@@ -225,15 +447,43 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     new_messages.append(response)
 {% endif %}
     updates["messages"] = new_messages
-{% for field_name, field_def in node.agent.output_schema.items() %}
-    # Extract {{ field_name }} from last structured tool call
-    for msg in reversed(new_messages):
-        if hasattr(msg, "tool_calls"):
-            for tc in msg.tool_calls:
-                if "{{ field_name }}" in tc.get("args", {}):
-                    updates["{{ field_name }}"] = tc["args"]["{{ field_name }}"]
-                    break
-{% endfor %}
+{% if node.contract and node.contract.output_contract and ir.contracts %}
+    validated_output = _validate_node_output_contract(
+        "{{ node.id }}",
+        state,
+        new_messages,
+        {{ ir.contracts.outputs[node.contract.output_contract].model_dump(by_alias=True) | to_python }},
+        contract_kind="output_contract",
+        required=True,
+    )
+    if isinstance(validated_output, dict):
+        updates.update(validated_output)
+{% if node.contract.produces and node.contract.produces | length == 1 %}
+    elif validated_output is not None:
+        updates["{{ node.contract.produces[0] }}"] = validated_output
+{% endif %}
+{% endif %}
+{% if ir.contracts and ir.contracts.state.immutable_fields %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ ir.contracts.state.immutable_fields | to_python }},
+        contract_kind="immutable_fields",
+    )
+{% endif %}
+{% if node.contract and node.contract.forbids_mutation %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ node.contract.forbids_mutation | to_python }},
+        contract_kind="forbids_mutation",
+    )
+{% endif %}
+{% if node.contract and node.contract.produces %}
+    _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
+{% endif %}
     emit_trace_event("node_finished", node="{{ node.id }}", input_state=state, output_state=updates)
     clear_current_node()
     return updates

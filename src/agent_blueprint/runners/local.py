@@ -9,6 +9,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.ir.compiler import AgentGraph
@@ -21,7 +22,7 @@ class LocalRunResult:
     stdout: str
     stderr: str
     trace_file: Path | None
-    trace_manifest: dict | None
+    trace_manifest: dict[str, Any] | None
 
 
 class LocalRunner:
@@ -196,6 +197,7 @@ class LocalRunner:
 
         # PYTHONPATH: CWD first (so impl: "myapp.x" resolves), then tempdir
         cwd = str(Path.cwd())
+        assert self._tempdir is not None
         tempdir = str(self._tempdir)
         existing = env.get("PYTHONPATH", "")
         parts = [p for p in [cwd, tempdir, existing] if p]

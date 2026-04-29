@@ -10,6 +10,7 @@ import sys
 import types
 
 import pytest
+from pydantic import ValidationError
 
 from agent_blueprint.generators.langgraph import LangGraphGenerator
 from agent_blueprint.ir.compiler import compile_blueprint
@@ -722,6 +723,56 @@ class TestLangGraphGenerator:
         assert "ABP_HITL_MODE" in nodes_py
         assert "human_review_requested" in nodes_py
 
+    def test_nodes_py_generates_node_output_contract_validation(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "node-output-contract-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "route": {"type": "string", "nullable": True, "default": None},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {
+                "nodes": {"assistant": {"output_contract": "route_payload", "produces": ["route"]}},
+                "outputs": {
+                    "route_payload": {
+                        "type": "object",
+                        "required": ["route"],
+                        "properties": {"route": {"type": "string"}},
+                        "additionalProperties": False,
+                    }
+                },
+            },
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+        nodes_py = files["nodes.py"]
+        assert "_validate_node_output_contract" in nodes_py
+        assert "contract_kind=\"output_contract\"" in nodes_py
+
+    def test_legacy_output_schema_is_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "legacy-output-schema-test"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "department": {"type": "string", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {
+                    "assistant": {
+                        "model": "gpt-4o",
+                        "output_schema": {
+                            "department": {"type": "string", "enum": ["billing", "technical"]},
+                        },
+                    }
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            })
+        assert "output_schema is no longer supported" in str(exc_info.value)
+
     def test_human_in_the_loop_before_tool_call_blocks_tool_execution(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ABP_HITL_MODE", raising=False)
         module = _load_generated_nodes_module(
@@ -868,6 +919,237 @@ class TestLangGraphGenerator:
         assert manifest["trace"][0]["node"] == "assistant"
         assert "input_state_hash" in manifest["trace"][0]
         assert "output_state_hash" in manifest["trace"][1]
+
+    def test_node_requires_contract_fails_before_execution(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-requires-test"},
+                "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {"assistant": {"requires": ["messages"]}},
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-requires-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="requires state field"):
+            module.node_assistant({})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["contract_kind"] == "requires"
+
+    def test_node_forbids_mutation_contract_fails_at_runtime(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-forbids-mutation-test"},
+                "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {"assistant": {"forbids_mutation": ["messages"]}},
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": "plain response"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-forbids-mutation-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="forbidden field"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["contract_kind"] == "forbids_mutation"
+
+    def test_state_immutable_fields_fail_on_mutation(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "state-immutable-test"},
+                "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "state": {"immutable_fields": ["messages"]},
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": "plain response"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="state-immutable-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="immutable field"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["contract_kind"] == "immutable_fields"
+
+    def test_node_produces_contract_fails_when_output_missing(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-produces-test"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {"assistant": {"produces": ["route"]}},
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": "plain response"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-produces-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="did not produce required field"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["contract_kind"] == "produces"
+
+    def test_node_output_contract_merges_validated_structured_output(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-output-contract-valid"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                        "confidence": {"type": "number", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "route_payload",
+                            "produces": ["route", "confidence"],
+                        }
+                    },
+                    "outputs": {
+                        "route_payload": {
+                            "type": "object",
+                            "required": ["route", "confidence"],
+                            "properties": {
+                                "route": {"type": "string"},
+                                "confidence": {"type": "number"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"route":"billing","confidence":0.91}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-output-contract-valid",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["route"] == "billing"
+        assert result["confidence"] == 0.91
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_node_output_contract_fails_on_invalid_shape(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-output-contract-invalid"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "route_payload",
+                            "produces": ["route"],
+                        }
+                    },
+                    "outputs": {
+                        "route_payload": {
+                            "type": "object",
+                            "required": ["route"],
+                            "properties": {"route": {"type": "string"}},
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"route":7}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-output-contract-invalid",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="Node output contract error"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["contract_kind"] == "output_contract"
 
     def test_generated_nodes_use_mock_llm_fixtures_when_enabled(self, tmp_path, monkeypatch):
         module = _load_generated_nodes_module(

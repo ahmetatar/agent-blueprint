@@ -14,7 +14,10 @@ from agent_blueprint.cli import validate as validate_cmd
 from agent_blueprint.cli import schema as schema_cmd
 from agent_blueprint.cli import generate as generate_cmd
 from agent_blueprint.cli import inspect_cmd
+from agent_blueprint.cli import fix_cmd
 from agent_blueprint.cli import init_cmd
+from agent_blueprint.cli import lint_cmd
+from agent_blueprint.cli import doctor_cmd
 from agent_blueprint.cli import run_cmd
 from agent_blueprint.cli import test_cmd
 from agent_blueprint.cli import deploy_cmd
@@ -80,7 +83,10 @@ app.command("validate")(validate_cmd.validate)
 app.command("schema")(schema_cmd.schema)
 app.command("generate")(generate_cmd.generate)
 app.command("inspect")(inspect_cmd.inspect)
+app.command("fix")(fix_cmd.fix)
 app.command("init")(init_cmd.init)
+app.command("lint")(lint_cmd.lint)
+app.command("doctor")(doctor_cmd.doctor)
 app.command("run")(run_cmd.run)
 app.command("test")(test_cmd.test)
 app.command("deploy")(deploy_cmd.deploy)

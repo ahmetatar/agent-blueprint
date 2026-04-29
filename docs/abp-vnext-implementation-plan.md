@@ -469,6 +469,7 @@ Expand orchestration power after correctness and testability are in place.
 - parallel execution
 - subgraph reuse
 - retry and fallback DSL
+- condition grammar and semantic analysis
 
 ### Issues
 
@@ -522,6 +523,24 @@ Implement:
 Acceptance criteria:
 
 - contract failure, tool error, or policy failure can route predictably
+
+#### M5.5 Formalize condition expression grammar and semantic analysis
+
+Implement:
+
+- publish the supported condition expression grammar explicitly
+- distinguish compile-supported syntax from statically analyzable syntax
+- add deeper overlap and ambiguity analysis for compound boolean conditions
+- define target-portability guarantees for condition evaluation semantics
+- document unsupported or intentionally deferred constructs
+
+Acceptance criteria:
+
+- docs state exactly which boolean and comparison constructs ABP supports
+- parser behavior and documentation match
+- lint can explain when a condition is valid but only partially analyzable
+- ambiguous compound routes are surfaced more accurately than simple equality-only heuristics
+- target generators use the same normalized condition semantics
 
 ## M6: Evals
 
@@ -649,6 +668,7 @@ Use these directly or with small edits.
 - Implement `parallel` node execution semantics
 - Implement reusable `subgraph` node semantics
 - Add retry and fallback DSL to graph nodes
+- Formalize condition expression grammar and deep ambiguity analysis
 - Add `evals` schema and `abp eval` command
 - Add PRD-ready example blueprint with harness coverage
 

@@ -86,6 +86,29 @@ def _load_yaml_plain(path: Path) -> dict[str, Any]:
     return plain
 
 
+def load_blueprint_document(path: Path) -> CommentedMap:
+    """Load a blueprint YAML file as a mutable ruamel document."""
+    if not path.exists():
+        raise BlueprintValidationError(f"Blueprint file not found: {path}")
+    if path.suffix not in {".yml", ".yaml"}:
+        raise BlueprintValidationError(
+            f"Expected a .yml or .yaml file, got: {path.suffix}"
+        )
+    with path.open("r", encoding="utf-8") as f:
+        raw = yaml.load(f)
+    if raw is None:
+        raise BlueprintValidationError(f"YAML file is empty: {path}")
+    if not isinstance(raw, CommentedMap):
+        raise BlueprintValidationError(f"Expected a YAML mapping at top level: {path}")
+    return raw
+
+
+def dump_blueprint_document(path: Path, document: CommentedMap) -> None:
+    """Write a ruamel YAML document back to disk."""
+    with path.open("w", encoding="utf-8") as f:
+        yaml.dump(document, f)
+
+
 def _resolve_harness_refs(
     document: dict[str, Any],
     *,

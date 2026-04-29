@@ -105,6 +105,39 @@ class TestCompilerWarnings:
 
 
 class TestHarnessCompilerSupport:
+    def test_contracts_are_carried_into_ir(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "array", "default": []},
+                    "route": {"type": "string", "default": None, "nullable": True},
+                }
+            },
+            "graph": {
+                "entry_point": "router",
+                "nodes": {"router": {"agent": "assistant"}},
+                "edges": [],
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {
+                "state": {"required_fields": ["messages"]},
+                "nodes": {"router": {"requires": ["messages"], "produces": ["route"]}},
+                "outputs": {
+                    "route_contract": {
+                        "type": "object",
+                        "required": ["route"],
+                        "properties": {"route": {"type": "string"}},
+                    }
+                },
+            },
+        })
+        ir = compile_blueprint(spec)
+        assert ir.contracts is not None
+        assert ir.contracts.state.required_fields == ["messages"]
+        assert ir.nodes[0].contract is not None
+        assert ir.nodes[0].contract.requires == ["messages"]
+
     def test_harness_is_carried_into_ir(self):
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "test"},

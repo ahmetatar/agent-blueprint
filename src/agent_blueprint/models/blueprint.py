@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from agent_blueprint.models.agents import AgentDef
+from agent_blueprint.models.contracts import ContractsDef
 from agent_blueprint.models.deploy import DeployConfig
 from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.harness import HarnessDef
@@ -62,6 +63,7 @@ class BlueprintSpec(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     input: IOSchema | None = None
     output: IOSchema | None = None
+    contracts: ContractsDef | None = None
     harness: HarnessDef | None = None
     deploy: DeployConfig | None = None
 
@@ -124,4 +126,47 @@ class BlueprintSpec(BaseModel):
                 raise ValueError(
                     f"Node '{node_name}' references undefined agent '{node.agent}'"
                 )
+
+        if self.contracts:
+            known_state_fields = set(self.state.fields)
+
+            for field_name in self.contracts.state.required_fields:
+                if field_name not in known_state_fields:
+                    raise ValueError(
+                        f"contracts.state.required_fields references undefined state field "
+                        f"'{field_name}'"
+                    )
+            for field_name in self.contracts.state.immutable_fields:
+                if field_name not in known_state_fields:
+                    raise ValueError(
+                        f"contracts.state.immutable_fields references undefined state field "
+                        f"'{field_name}'"
+                    )
+
+            for node_name, node_contract in self.contracts.nodes.items():
+                if node_name not in self.graph.nodes:
+                    raise ValueError(
+                        f"contracts.nodes references undefined graph node '{node_name}'"
+                    )
+
+                field_refs = (
+                    node_contract.requires
+                    + node_contract.produces
+                    + node_contract.forbids_mutation
+                )
+                for field_name in field_refs:
+                    if field_name not in known_state_fields:
+                        raise ValueError(
+                            f"contracts.nodes.{node_name} references undefined state field "
+                            f"'{field_name}'"
+                        )
+
+                if (
+                    node_contract.output_contract
+                    and node_contract.output_contract not in self.contracts.outputs
+                ):
+                    raise ValueError(
+                        f"contracts.nodes.{node_name}.output_contract references undefined "
+                        f"output contract '{node_contract.output_contract}'"
+                    )
         return self

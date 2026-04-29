@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_blueprint.models.memory import AgentMemoryConfig
 
@@ -75,3 +75,12 @@ class AgentDef(BaseModel):
     reasoning: ReasoningConfig | None = None
     rag: RagConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def reject_legacy_output_schema(self) -> "AgentDef":
+        if self.output_schema:
+            raise ValueError(
+                "agents.*.output_schema is no longer supported. "
+                "Use contracts.nodes.<node>.output_contract with contracts.outputs instead."
+            )
+        return self

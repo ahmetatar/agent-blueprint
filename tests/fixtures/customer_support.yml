@@ -25,10 +25,6 @@ agents:
     system_prompt: |
       You are a routing agent. Classify the customer request.
     tools: [classify_intent]
-    output_schema:
-      department:
-        type: string
-        enum: [billing, technical, general]
 
   billing_agent:
     name: "Billing Specialist"
@@ -86,6 +82,21 @@ graph:
       to: END
     - from: technical
       to: END
+
+contracts:
+  nodes:
+    router:
+      produces: [department]
+      output_contract: router_department
+  outputs:
+    router_department:
+      type: object
+      required: [department]
+      additionalProperties: false
+      properties:
+        department:
+          type: string
+          enum: [billing, technical, general]
 
 memory:
   backend: in_memory

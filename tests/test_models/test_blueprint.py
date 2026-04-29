@@ -16,6 +16,65 @@ def load(name: str) -> dict:
 
 
 class TestValidBlueprints:
+    def test_contracts_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "array", "default": []},
+                    "request_id": {"type": "string", "default": None, "nullable": True},
+                    "route": {"type": "string", "default": None, "nullable": True},
+                    "final_answer": {"type": "string", "default": None, "nullable": True},
+                    "research_findings": {"type": "array", "default": []},
+                }
+            },
+            "graph": {
+                "entry_point": "router",
+                "nodes": {
+                    "router": {"agent": "router_agent"},
+                    "writer": {"agent": "writer_agent"},
+                },
+                "edges": [],
+            },
+            "agents": {
+                "router_agent": {"model": "gpt-4o"},
+                "writer_agent": {"model": "gpt-4o"},
+            },
+            "contracts": {
+                "state": {
+                    "required_fields": ["messages"],
+                    "immutable_fields": ["request_id"],
+                    "invariants": ["state.route in [null, 'billing', 'support', 'sales']"],
+                },
+                "nodes": {
+                    "router": {
+                        "requires": ["messages"],
+                        "produces": ["route"],
+                        "forbids_mutation": ["final_answer"],
+                    },
+                    "writer": {
+                        "requires": ["research_findings"],
+                        "produces": ["final_answer"],
+                        "output_contract": "final_answer_contract",
+                    },
+                },
+                "outputs": {
+                    "final_answer_contract": {
+                        "type": "object",
+                        "required": ["answer", "confidence"],
+                        "properties": {
+                            "answer": {"type": "string"},
+                            "confidence": {"type": "number"},
+                        },
+                    }
+                },
+            },
+        })
+        assert spec.contracts is not None
+        assert spec.contracts.state.required_fields == ["messages"]
+        assert spec.contracts.nodes["router"].forbids_mutation == ["final_answer"]
+        assert spec.contracts.outputs["final_answer_contract"].type == "object"
+
     def test_basic_chatbot_loads(self):
         raw = load("basic_chatbot.yml")
         spec = BlueprintSpec.model_validate(raw)
@@ -221,6 +280,53 @@ class TestMcpTools:
 
 
 class TestInvalidBlueprints:
+    def test_contracts_unknown_graph_node_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "state": {"fields": {"messages": {"type": "array", "default": []}}},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "contracts": {"nodes": {"missing_node": {"requires": ["messages"]}}},
+            })
+        assert "missing_node" in str(exc_info.value)
+
+    def test_contracts_unknown_state_field_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "state": {"fields": {"messages": {"type": "array", "default": []}}},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "contracts": {"state": {"required_fields": ["missing_field"]}},
+            })
+        assert "missing_field" in str(exc_info.value)
+
+    def test_contracts_unknown_output_contract_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "state": {"fields": {"messages": {"type": "array", "default": []}}},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "contracts": {"nodes": {"n": {"output_contract": "missing_contract"}}},
+            })
+        assert "missing_contract" in str(exc_info.value)
+
+    def test_legacy_agent_output_schema_is_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "state": {"fields": {"messages": {"type": "array", "default": []}}},
+                "agents": {
+                    "assistant": {
+                        "model": "gpt-4o",
+                        "output_schema": {
+                            "route": {"type": "string"},
+                        },
+                    }
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            })
+        assert "output_schema is no longer supported" in str(exc_info.value)
+
     def test_missing_agent_reference(self):
         raw = load("invalid_missing_agent.yml")
         with pytest.raises(ValidationError) as exc_info:

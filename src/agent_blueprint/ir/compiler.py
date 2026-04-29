@@ -7,6 +7,7 @@ from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.expression import CompiledExpression, parse_expression
 from agent_blueprint.models.agents import AgentDef, RagMode
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
+from agent_blueprint.models.contracts import ContractsDef, NodeContractDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.graph import NodeDef
 from agent_blueprint.models.memory import MemoryConfig
@@ -41,6 +42,7 @@ class IRNode:
     node_def: NodeDef
     agent: AgentDef | None
     tool_defs: dict[str, ToolDef]
+    contract: NodeContractDef | None
     description: str
     resolved_provider: str = "openai"       # e.g. "openai", "anthropic", "ollama"
     resolved_model: str = "gpt-4o"          # model name without provider prefix
@@ -63,6 +65,7 @@ class AgentGraph:
     retrievers: dict[str, RetrieverDef]
     input_schema: IOSchema | None = None
     output_schema: IOSchema | None = None
+    contracts: ContractsDef | None = None
     harness: HarnessDef | None = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -99,6 +102,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         retrievers=spec.retrievers,
         input_schema=spec.input,
         output_schema=spec.output,
+        contracts=spec.contracts,
         harness=spec.harness,
         warnings=warnings,
     )
@@ -189,6 +193,7 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
             node_def=node_def,
             agent=agent,
             tool_defs=tool_defs,
+            contract=spec.contracts.nodes.get(node_id) if spec.contracts else None,
             description=description,
             resolved_provider=resolved_provider,
             resolved_model=resolved_model,

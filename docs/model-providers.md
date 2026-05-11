@@ -34,6 +34,9 @@ model_providers:
     provider: openai_compatible   # Any OpenAI-compatible endpoint (vLLM, LM Studio, etc.)
     base_url: "http://localhost:8000/v1"
     api_key_env: LOCAL_API_KEY    # optional
+    pricing:                      # optional, used by budget enforcement
+      input_per_1k_tokens_usd: 0.001
+      output_per_1k_tokens_usd: 0.002
     extra:                        # optional raw constructor kwargs
       timeout: 60
 ```
@@ -42,13 +45,13 @@ model_providers:
 
 | Provider | Required fields | Optional fields |
 |---|---|---|
-| `openai` | — | `api_key_env`, `extra` |
-| `anthropic` | — | `api_key_env`, `extra` |
-| `google` | — | `api_key_env`, `extra` |
-| `ollama` | `base_url` | `extra` |
-| `azure_openai` | `base_url`, `deployment` | `api_key_env`, `api_version`, `extra` |
-| `bedrock` | — | `region`, `aws_profile_env`, `extra` |
-| `openai_compatible` | `base_url` | `api_key_env`, `extra` |
+| `openai` | — | `api_key_env`, `pricing`, `extra` |
+| `anthropic` | — | `api_key_env`, `pricing`, `extra` |
+| `google` | — | `api_key_env`, `pricing`, `extra` |
+| `ollama` | `base_url` | `pricing`, `extra` |
+| `azure_openai` | `base_url`, `deployment` | `api_key_env`, `api_version`, `pricing`, `extra` |
+| `bedrock` | — | `region`, `aws_profile_env`, `pricing`, `extra` |
+| `openai_compatible` | `base_url` | `api_key_env`, `pricing`, `extra` |
 
 ## Usage in Agents
 
@@ -73,3 +76,37 @@ agents:
 ```
 
 `provider` selects the generated LangChain adapter class. ABP does not infer model capabilities from the model name. Provider-specific native reasoning or thinking params belong under `agents[*].reasoning.params` and are forwarded unchanged to the selected adapter.
+
+## Pricing Metadata for Budget Enforcement
+
+`pricing` is optional, but it becomes important when you use:
+
+```yaml
+policies:
+  budgets:
+    max_cost_usd: 1.50
+```
+
+If the runtime or fixture already supplies explicit `cost_usd`, ABP uses that.
+If not, ABP computes cost from:
+
+- `pricing.input_per_1k_tokens_usd`
+- `pricing.output_per_1k_tokens_usd`
+
+Example:
+
+```yaml
+model_providers:
+  openai_prod:
+    provider: openai
+    api_key_env: OPENAI_API_KEY
+    pricing:
+      input_per_1k_tokens_usd: 0.005
+      output_per_1k_tokens_usd: 0.015
+```
+
+This is mainly useful for:
+
+- CI budget checks
+- internal cost ceilings on long workflows
+- deterministic mock or replay tests that still enforce `max_cost_usd`

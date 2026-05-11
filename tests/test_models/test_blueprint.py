@@ -225,6 +225,51 @@ class TestValidBlueprints:
         assert spec.harness.defaults.replay_trace == "/tmp/golden-trace.json"
         assert spec.harness.scenarios[0].replay_trace == "/tmp/scenario-trace.json"
 
+    def test_policies_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "policy-test"},
+            "model_providers": {
+                "openai_priced": {
+                    "provider": "openai",
+                    "pricing": {
+                        "input_per_1k_tokens_usd": 0.005,
+                        "output_per_1k_tokens_usd": 0.015,
+                    },
+                }
+            },
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {
+                "assistant": {
+                    "model": "gpt-4o",
+                    "model_provider": "openai_priced",
+                    "tools": ["lookup_invoice"],
+                }
+            },
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {
+                "approvals": {"mode": "selective", "tools": ["lookup_invoice"], "on_violation": "block"},
+                "tool_usage": {
+                    "max_calls_per_node": 2,
+                    "max_calls_per_run": 5,
+                    "require_explicit_arguments": True,
+                    "on_unknown_tool": "fail",
+                },
+                "escalation": {"on_low_confidence": "assistant", "confidence_threshold": 0.75},
+                "budgets": {"max_tokens_per_run": 30000, "max_latency_seconds": 45, "max_cost_usd": 1.5},
+            },
+        })
+        assert spec.policies is not None
+        assert spec.policies.tool_usage.max_calls_per_node == 2
+        assert spec.policies.tool_usage.on_unknown_tool.value == "fail"
+        assert spec.policies.escalation.on_low_confidence == "assistant"
+        assert spec.policies.budgets.max_latency_seconds == 45
+        assert spec.model_providers["openai_priced"].pricing is not None
+
 
 class TestMcpTools:
     def test_mcp_blueprint_loads(self):
@@ -383,3 +428,24 @@ class TestInvalidBlueprints:
                 },
             })
         assert "duplicate id" in str(exc_info.value)
+
+    def test_policies_approval_tool_reference_must_exist(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "policy-test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "policies": {"approvals": {"tools": ["missing_tool"]}},
+            })
+        assert "policies.approvals.tools references undefined tool 'missing_tool'" in str(exc_info.value)
+
+    def test_policies_escalation_node_reference_must_exist(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "policy-test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "policies": {"escalation": {"on_low_confidence": "reviewer"}},
+            })
+        assert (
+            "policies.escalation.on_low_confidence references undefined graph node 'reviewer'"
+            in str(exc_info.value)
+        )

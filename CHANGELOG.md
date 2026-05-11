@@ -20,6 +20,7 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 - development workflow documentation now points contributors to explicit local checks
 - release publishing now supports prerelease uploads to TestPyPI and published releases to PyPI
 - root `abp` help now shows a branded welcome banner and supports no-arg help output
+- product tagline is standardized as `Declarative, framework-agnostic AI agent orchestration via YAML`
 
 ### Removed
 

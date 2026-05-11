@@ -11,6 +11,7 @@ from agent_blueprint.models.contracts import ContractsDef, NodeContractDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.graph import NodeDef
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
@@ -66,6 +67,7 @@ class AgentGraph:
     input_schema: IOSchema | None = None
     output_schema: IOSchema | None = None
     contracts: ContractsDef | None = None
+    policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -103,6 +105,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         input_schema=spec.input,
         output_schema=spec.output,
         contracts=spec.contracts,
+        policies=spec.policies,
         harness=spec.harness,
         warnings=warnings,
     )

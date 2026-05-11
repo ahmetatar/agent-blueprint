@@ -27,6 +27,18 @@ _ISO_TS_RE = re.compile(
 _CURRENT_RECORDER = None
 _CURRENT_NODE = None
 _LAST_TRACE_MANIFEST = None
+_BUDGET_STATE = {"total_tokens": 0, "cost_usd": 0.0}
+
+BUDGET_POLICY = {
+    "max_tokens_per_run": {{ (ir.policies.budgets.max_tokens_per_run if ir.policies else none) | to_python }},
+    "max_cost_usd": {{ (ir.policies.budgets.max_cost_usd if ir.policies else none) | to_python }},
+}
+
+NODE_PRICING = {
+{% for node in ir.nodes if node.agent %}
+    "{{ node.id }}": {{ (node.resolved_provider_def.pricing.model_dump() if node.resolved_provider_def and node.resolved_provider_def.pricing else none) | to_python }},
+{% endfor %}
+}
 
 
 def normalize_for_trace(value: Any) -> Any:
@@ -183,6 +195,7 @@ def start_trace(
     metadata: dict[str, Any] | None = None,
 ) -> TraceRecorder:
     global _CURRENT_RECORDER
+    reset_budget_state()
     recorder = TraceRecorder(
         run_id=run_id,
         blueprint=blueprint,
@@ -241,6 +254,179 @@ def set_current_node(node_id: str | None) -> None:
 
 def clear_current_node() -> None:
     set_current_node(None)
+
+
+def get_current_node() -> str | None:
+    return _CURRENT_NODE
+
+
+def reset_budget_state() -> None:
+    _BUDGET_STATE["total_tokens"] = 0
+    _BUDGET_STATE["cost_usd"] = 0.0
+
+
+def _budget_violation(
+    kind: str,
+    message: str,
+    *,
+    node: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    emit_trace_event(
+        "policy_violation",
+        node=node,
+        error=message,
+        metadata={"policy_kind": kind, **(metadata or {})},
+    )
+    raise RuntimeError(message)
+
+
+def _normalize_usage_metrics(usage: Any) -> dict[str, int] | None:
+    if usage is None:
+        return None
+    if hasattr(usage, "__dict__"):
+        usage = {
+            key: value
+            for key, value in vars(usage).items()
+            if not key.startswith("_")
+        }
+    if not isinstance(usage, dict):
+        return None
+
+    def _int_value(*keys: str) -> int | None:
+        for key in keys:
+            value = usage.get(key)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    input_tokens = _int_value("input_tokens", "prompt_tokens")
+    output_tokens = _int_value("output_tokens", "completion_tokens")
+    total_tokens = _int_value("total_tokens")
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    if total_tokens is None and input_tokens is None and output_tokens is None:
+        return None
+    return {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+        "total_tokens": total_tokens or 0,
+    }
+
+
+def _extract_usage_metrics(response: Any) -> dict[str, int] | None:
+    candidates = [
+        getattr(response, "usage_metadata", None),
+        getattr(response, "token_usage", None),
+    ]
+    response_metadata = getattr(response, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        candidates.extend([
+            response_metadata.get("token_usage"),
+            response_metadata.get("usage"),
+        ])
+    for candidate in candidates:
+        normalized = _normalize_usage_metrics(candidate)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _extract_explicit_cost(response: Any) -> float | None:
+    for value in (
+        getattr(response, "cost_usd", None),
+        getattr(response, "usage_cost_usd", None),
+    ):
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    response_metadata = getattr(response, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        for key in ("cost_usd", "usage_cost_usd"):
+            value = response_metadata.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def register_llm_budget_usage(node_id: str, response: Any) -> dict[str, Any]:
+    usage = _extract_usage_metrics(response)
+    explicit_cost = _extract_explicit_cost(response)
+    budget_metadata: dict[str, Any] = {}
+
+    max_tokens_per_run = BUDGET_POLICY["max_tokens_per_run"]
+    if max_tokens_per_run is not None:
+        if usage is None:
+            _budget_violation(
+                "max_tokens_per_run",
+                "Budget policy violation: token usage metadata is required to enforce max_tokens_per_run",
+                node=node_id,
+                metadata={"limit": max_tokens_per_run},
+            )
+        _BUDGET_STATE["total_tokens"] += usage["total_tokens"]
+        budget_metadata["total_tokens"] = _BUDGET_STATE["total_tokens"]
+        if _BUDGET_STATE["total_tokens"] > max_tokens_per_run:
+            _budget_violation(
+                "max_tokens_per_run",
+                f"Budget policy violation: run exceeded max_tokens_per_run={max_tokens_per_run}",
+                node=node_id,
+                metadata={"limit": max_tokens_per_run, "total_tokens": _BUDGET_STATE["total_tokens"]},
+            )
+    elif usage is not None:
+        _BUDGET_STATE["total_tokens"] += usage["total_tokens"]
+        budget_metadata["total_tokens"] = _BUDGET_STATE["total_tokens"]
+
+    max_cost_usd = BUDGET_POLICY["max_cost_usd"]
+    if max_cost_usd is not None:
+        if explicit_cost is not None:
+            computed_cost = explicit_cost
+        else:
+            pricing = NODE_PRICING.get(node_id)
+            if usage is None:
+                _budget_violation(
+                    "max_cost_usd",
+                    "Budget policy violation: token usage metadata is required to enforce max_cost_usd",
+                    node=node_id,
+                    metadata={"limit": max_cost_usd},
+                )
+            if pricing is None:
+                _budget_violation(
+                    "max_cost_usd",
+                    f"Budget policy violation: no pricing metadata is configured for node '{node_id}'",
+                    node=node_id,
+                    metadata={"limit": max_cost_usd},
+                )
+            computed_cost = (
+                (usage["input_tokens"] / 1000.0) * float(pricing["input_per_1k_tokens_usd"])
+                + (usage["output_tokens"] / 1000.0) * float(pricing["output_per_1k_tokens_usd"])
+            )
+        _BUDGET_STATE["cost_usd"] += computed_cost
+        budget_metadata["cost_usd"] = round(_BUDGET_STATE["cost_usd"], 8)
+        if _BUDGET_STATE["cost_usd"] > max_cost_usd:
+            _budget_violation(
+                "max_cost_usd",
+                f"Budget policy violation: run exceeded max_cost_usd={max_cost_usd}",
+                node=node_id,
+                metadata={"limit": max_cost_usd, "cost_usd": round(_BUDGET_STATE["cost_usd"], 8)},
+            )
+    elif explicit_cost is not None:
+        _BUDGET_STATE["cost_usd"] += explicit_cost
+        budget_metadata["cost_usd"] = round(_BUDGET_STATE["cost_usd"], 8)
+
+    if usage is not None:
+        budget_metadata["usage"] = usage
+    return budget_metadata
 
 
 def get_last_trace_manifest() -> dict[str, Any] | None:

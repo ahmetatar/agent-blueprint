@@ -40,6 +40,7 @@ class TraceEventType(str, Enum):
     node_finished = "node_finished"
     tool_called = "tool_called"
     tool_failed = "tool_failed"
+    policy_violation = "policy_violation"
     approval_requested = "approval_requested"
     approval_granted = "approval_granted"
     contract_failed = "contract_failed"

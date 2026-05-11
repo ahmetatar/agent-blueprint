@@ -42,6 +42,7 @@ def _load_generated_nodes_module(
     spec_data: dict,
     llm_script: list[dict],
     tool_names: list[str] | None = None,
+    tool_validation_body: list[str] | None = None,
 ):
     gen = LangGraphGenerator()
     spec = BlueprintSpec.model_validate(spec_data)
@@ -67,6 +68,13 @@ def _load_generated_nodes_module(
         f"    'assistant': [{', '.join(f'FakeTool({name!r})' for name in tool_entries)}],",
         "}",
         "TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS.get('assistant', [])}",
+        "",
+        "def validate_tool_arguments(tool_name, args):",
+        *(
+            [f"    {line}" for line in tool_validation_body]
+            if tool_validation_body
+            else ["    return None"]
+        ),
         "",
     ]
     (tmp_path / "tools.py").write_text("\n".join(tools_py), encoding="utf-8")
@@ -99,9 +107,12 @@ def _load_generated_nodes_module(
     fake_openai = types.ModuleType("langchain_openai")
 
     class FakeResponse:
-        def __init__(self, content="", tool_calls=None):
+        def __init__(self, content="", tool_calls=None, usage_metadata=None, cost_usd=None, response_metadata=None):
             self.content = content
             self.tool_calls = tool_calls or []
+            self.usage_metadata = usage_metadata
+            self.cost_usd = cost_usd
+            self.response_metadata = response_metadata or {}
 
     class ChatOpenAI:
         SCRIPT = list(llm_script)
@@ -118,6 +129,9 @@ def _load_generated_nodes_module(
             return FakeResponse(
                 content=item.get("content", ""),
                 tool_calls=item.get("tool_calls", []),
+                usage_metadata=item.get("usage"),
+                cost_usd=item.get("cost_usd"),
+                response_metadata=item.get("response_metadata", {}),
             )
 
     fake_openai.ChatOpenAI = ChatOpenAI
@@ -1523,6 +1537,680 @@ class TestLangGraphGenerator:
 
         with pytest.raises(NotImplementedError, match="dangerous_tool is not implemented yet"):
             module.dangerous_tool.invoke({"message": "ship it"})
+
+    def test_policy_config_is_emitted_into_generated_runtime(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "policy-runtime-test"},
+            "model_providers": {
+                "openai_priced": {
+                    "provider": "openai",
+                    "pricing": {
+                        "input_per_1k_tokens_usd": 0.005,
+                        "output_per_1k_tokens_usd": 0.015,
+                    },
+                }
+            },
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {
+                "assistant": {
+                    "model": "gpt-4o",
+                    "model_provider": "openai_priced",
+                    "tools": ["lookup_invoice"],
+                }
+            },
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {
+                "tool_usage": {
+                    "max_calls_per_node": 2,
+                    "max_calls_per_run": 3,
+                    "require_explicit_arguments": True,
+                    "on_unknown_tool": "fail",
+                },
+                "budgets": {
+                    "max_tokens_per_run": 3000,
+                    "max_latency_seconds": 1.5,
+                    "max_cost_usd": 0.25,
+                },
+            },
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+        assert 'TOOL_POLICY = {' in files["tools.py"]
+        assert '"max_calls_per_node": 2' in files["tools.py"]
+        assert '"max_calls_per_run": 3' in files["tools.py"]
+        assert '"require_explicit_arguments": True' in files["tools.py"]
+        assert "UNKNOWN_TOOL_POLICY = 'fail'" in files["tools.py"]
+        assert 'BUDGET_POLICY = {' in files["main.py"]
+        assert '"max_latency_seconds": 1.5' in files["main.py"]
+        assert '"max_tokens_per_run": 3000' in files["_abp_trace.py"]
+        assert '"max_cost_usd": 0.25' in files["_abp_trace.py"]
+        assert "'input_per_1k_tokens_usd': 0.005" in files["_abp_trace.py"]
+
+    def test_nodes_enforce_max_tokens_per_run(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "token-budget-test"},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {"assistant": {"agent": "assistant"}},
+                    "edges": [],
+                },
+                "policies": {"budgets": {"max_tokens_per_run": 5}},
+            },
+            llm_script=[
+                {"content": "first", "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}},
+                {"content": "second", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}},
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="token-budget-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+        assert result["messages"][-1].content == "first"
+
+        with pytest.raises(RuntimeError, match="run exceeded max_tokens_per_run=5"):
+            module.node_assistant({"messages": [module.HumanMessage("again")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][-1]["event"] == "policy_violation"
+        assert manifest["trace"][-1]["metadata"]["policy_kind"] == "max_tokens_per_run"
+
+    def test_nodes_fail_when_token_budget_lacks_usage_metadata(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "token-budget-metadata-test"},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {"assistant": {"agent": "assistant"}},
+                    "edges": [],
+                },
+                "policies": {"budgets": {"max_tokens_per_run": 5}},
+            },
+            llm_script=[{"content": "first"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="token-budget-metadata-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+
+        with pytest.raises(RuntimeError, match="token usage metadata is required"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][-1]["event"] == "policy_violation"
+        assert manifest["trace"][-1]["metadata"]["policy_kind"] == "max_tokens_per_run"
+
+    def test_nodes_enforce_max_cost_usd_with_provider_pricing(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "cost-budget-test"},
+                "model_providers": {
+                    "openai_priced": {
+                        "provider": "openai",
+                        "pricing": {
+                            "input_per_1k_tokens_usd": 1.0,
+                            "output_per_1k_tokens_usd": 1.0,
+                        },
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o", "model_provider": "openai_priced"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {"assistant": {"agent": "assistant"}},
+                    "edges": [],
+                },
+                "policies": {"budgets": {"max_cost_usd": 0.003}},
+            },
+            llm_script=[
+                {"content": "first", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}},
+                {"content": "second", "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}},
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="cost-budget-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+        assert result["messages"][-1].content == "first"
+
+        with pytest.raises(RuntimeError, match="run exceeded max_cost_usd=0.003"):
+            module.node_assistant({"messages": [module.HumanMessage("again")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][-1]["event"] == "policy_violation"
+        assert manifest["trace"][-1]["metadata"]["policy_kind"] == "max_cost_usd"
+
+    def test_nodes_enforce_max_cost_usd_with_explicit_fixture_cost(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "cost-budget-explicit-test"},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {"assistant": {"agent": "assistant"}},
+                    "edges": [],
+                },
+                "policies": {"budgets": {"max_cost_usd": 0.002}},
+            },
+            llm_script=[
+                {"content": "first", "cost_usd": 0.0015},
+                {"content": "second", "cost_usd": 0.0010},
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="cost-budget-explicit-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+        assert result["messages"][-1].content == "first"
+
+        with pytest.raises(RuntimeError, match="run exceeded max_cost_usd=0.002"):
+            module.node_assistant({"messages": [module.HumanMessage("again")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][-1]["event"] == "policy_violation"
+        assert manifest["trace"][-1]["metadata"]["policy_kind"] == "max_cost_usd"
+
+    def test_nodes_apply_low_confidence_escalation(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "low-confidence-test"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                        "confidence": {"type": "number", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {
+                        "assistant": {"agent": "assistant"},
+                        "handoff_review": {"type": "handoff", "channel": "console"},
+                    },
+                    "edges": [{"from": "assistant", "to": "END"}],
+                },
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "route_payload",
+                            "produces": ["route", "confidence"],
+                        }
+                    },
+                    "outputs": {
+                        "route_payload": {
+                            "type": "object",
+                            "required": ["route", "confidence"],
+                            "properties": {
+                                "route": {"type": "string"},
+                                "confidence": {"type": "number"},
+                            },
+                        }
+                    },
+                },
+                "policies": {
+                    "escalation": {"on_low_confidence": "handoff_review", "confidence_threshold": 0.75}
+                },
+            },
+            llm_script=[{"content": '{"route":"billing","confidence":0.42}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="low-confidence-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["route"] == "billing"
+        assert result["confidence"] == 0.42
+        assert result["__abp_escalation_target"] == "handoff_review"
+        assert result["__abp_escalation_source"] == "assistant"
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][-1]["event"] == "node_finished"
+        assert manifest["trace"][-1]["route"] == "handoff_review"
+        assert manifest["trace"][-1]["metadata"]["escalated"] is True
+
+    def test_graph_routes_low_confidence_escalation_to_handoff_target(self, tmp_path, monkeypatch):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "graph-escalation-test"},
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {
+                    "assistant": {"agent": "assistant"},
+                    "handoff_review": {"type": "handoff", "channel": "console"},
+                },
+                "edges": [
+                    {"from": "assistant", "to": "END"},
+                    {"from": "handoff_review", "to": "END"},
+                ],
+            },
+            "policies": {
+                "escalation": {"on_low_confidence": "handoff_review", "confidence_threshold": 0.75}
+            },
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+        graph_path = tmp_path / "generated_graph.py"
+        graph_path.write_text(files["graph.py"], encoding="utf-8")
+        (tmp_path / "state.py").write_text("AgentState = dict\n", encoding="utf-8")
+        (tmp_path / "nodes.py").write_text(
+            "def node_assistant(state):\n    return state\n\n"
+            "def node_handoff_review(state):\n    return state\n",
+            encoding="utf-8",
+        )
+
+        fake_langgraph_graph = types.ModuleType("langgraph.graph")
+
+        class FakeStateGraph:
+            instances = []
+
+            def __init__(self, state_type):
+                self.state_type = state_type
+                self.conditional_edges = []
+                self.edges = []
+                FakeStateGraph.instances.append(self)
+
+            def add_node(self, name, fn):
+                return None
+
+            def add_edge(self, source, target):
+                self.edges.append((source, target))
+
+            def add_conditional_edges(self, source, route_fn, mapping):
+                self.conditional_edges.append((source, route_fn, mapping))
+
+            def compile(self, checkpointer=None):
+                return {"checkpointer": checkpointer, "conditional_edges": self.conditional_edges}
+
+        fake_langgraph_graph.StateGraph = FakeStateGraph
+        fake_langgraph_graph.START = "START"
+        fake_langgraph_graph.END = "END"
+
+        fake_memory = types.ModuleType("langgraph.checkpoint.memory")
+
+        class MemorySaver:
+            pass
+
+        fake_memory.MemorySaver = MemorySaver
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.setitem(sys.modules, "langgraph.graph", fake_langgraph_graph)
+        monkeypatch.setitem(sys.modules, "langgraph.checkpoint.memory", fake_memory)
+
+        spec_obj = importlib.util.spec_from_file_location(
+            "generated_graph_escalation_test",
+            graph_path,
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        builder = FakeStateGraph.instances[0]
+        assistant_routes = [item for item in builder.conditional_edges if item[0] == "assistant"]
+        assert len(assistant_routes) == 1
+        _, route_fn, mapping = assistant_routes[0]
+        assert mapping["handoff_review"] == "handoff_review"
+        assert route_fn({"__abp_escalation_target": "handoff_review", "__abp_escalation_source": "assistant"}) == "handoff_review"
+        assert route_fn({}) == "END"
+
+    def test_generated_tools_enforce_max_calls_per_run(self, tmp_path, monkeypatch):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "tool-policy-test"},
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "description": "Lookup invoice",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["lookup_invoice"]}},
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {"tool_usage": {"max_calls_per_run": 1}},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        _write_trace_helper(tmp_path, files)
+        _write_harness_helper(tmp_path, files)
+        tools_path = tmp_path / "generated_tools.py"
+        tools_path.write_text(files["tools.py"], encoding="utf-8")
+
+        fake_langchain_core = types.ModuleType("langchain_core")
+        fake_tools_mod = types.ModuleType("langchain_core.tools")
+
+        class FakeTool:
+            def __init__(self, func, name=None, description=None):
+                self.func = func
+                self.name = name or func.__name__
+                self.description = description or ""
+
+            def invoke(self, args):
+                return self.func(**args)
+
+        def tool(func):
+            return FakeTool(func, name=func.__name__, description=func.__doc__)
+
+        class StructuredTool:
+            @classmethod
+            def from_function(cls, func, name=None, description=None):
+                return FakeTool(func, name=name, description=description)
+
+        fake_tools_mod.tool = tool
+        fake_tools_mod.StructuredTool = StructuredTool
+        fake_langchain_core.tools = fake_tools_mod
+
+        monkeypatch.setenv("ABP_TOOL_MODE", "stub")
+        monkeypatch.setenv(
+            "ABP_HARNESS_FIXTURES",
+            json.dumps({"tool_outputs": {"lookup_invoice": [{"result": {"status": "paid"}}]}}),
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+        monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+        monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools_mod)
+
+        spec_obj = importlib.util.spec_from_file_location(
+            "generated_tools_policy_test",
+            tools_path,
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="tool-policy-test",
+            blueprint_version="1.0",
+            mode="stubbed",
+        )
+        trace_mod.set_current_node("assistant")
+
+        first = module.lookup_invoice.invoke({"invoice_id": "inv-123"})
+        assert first == {"status": "paid"}
+
+        with pytest.raises(RuntimeError, match="exceeded max_calls_per_run=1"):
+            module.lookup_invoice.invoke({"invoice_id": "inv-456"})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["tool_called", "policy_violation"]
+        assert manifest["trace"][1]["tool"] == "lookup_invoice"
+        assert manifest["trace"][1]["metadata"]["policy_kind"] == "max_calls_per_run"
+
+    def test_generated_tools_enforce_max_calls_per_node(self, tmp_path, monkeypatch):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "tool-policy-node-test"},
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "description": "Lookup invoice",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["lookup_invoice"]}},
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {"tool_usage": {"max_calls_per_node": 1}},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        _write_trace_helper(tmp_path, files)
+        _write_harness_helper(tmp_path, files)
+        tools_path = tmp_path / "generated_tools.py"
+        tools_path.write_text(files["tools.py"], encoding="utf-8")
+
+        fake_langchain_core = types.ModuleType("langchain_core")
+        fake_tools_mod = types.ModuleType("langchain_core.tools")
+
+        class FakeTool:
+            def __init__(self, func, name=None, description=None):
+                self.func = func
+                self.name = name or func.__name__
+                self.description = description or ""
+
+            def invoke(self, args):
+                return self.func(**args)
+
+        def tool(func):
+            return FakeTool(func, name=func.__name__, description=func.__doc__)
+
+        class StructuredTool:
+            @classmethod
+            def from_function(cls, func, name=None, description=None):
+                return FakeTool(func, name=name, description=description)
+
+        fake_tools_mod.tool = tool
+        fake_tools_mod.StructuredTool = StructuredTool
+        fake_langchain_core.tools = fake_tools_mod
+
+        monkeypatch.setenv("ABP_TOOL_MODE", "stub")
+        monkeypatch.setenv(
+            "ABP_HARNESS_FIXTURES",
+            json.dumps({"tool_outputs": {"lookup_invoice": [{"result": {"status": "paid"}}]}}),
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+        monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+        monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools_mod)
+
+        spec_obj = importlib.util.spec_from_file_location(
+            "generated_tools_policy_node_test",
+            tools_path,
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="tool-policy-node-test",
+            blueprint_version="1.0",
+            mode="stubbed",
+        )
+        trace_mod.set_current_node("assistant")
+
+        first = module.lookup_invoice.invoke({"invoice_id": "inv-123"})
+        assert first == {"status": "paid"}
+
+        with pytest.raises(RuntimeError, match="exceeded max_calls_per_node=1"):
+            module.lookup_invoice.invoke({"invoice_id": "inv-456"})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["tool_called", "policy_violation"]
+        assert manifest["trace"][1]["tool"] == "lookup_invoice"
+        assert manifest["trace"][1]["metadata"]["policy_kind"] == "max_calls_per_node"
+
+    def test_generated_tools_validate_explicit_arguments(self, tmp_path, monkeypatch):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "tool-policy-args-test"},
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "description": "Lookup invoice",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["lookup_invoice"]}},
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {"tool_usage": {"require_explicit_arguments": True}},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        _write_trace_helper(tmp_path, files)
+        _write_harness_helper(tmp_path, files)
+        tools_path = tmp_path / "generated_tools.py"
+        tools_path.write_text(files["tools.py"], encoding="utf-8")
+
+        fake_langchain_core = types.ModuleType("langchain_core")
+        fake_tools_mod = types.ModuleType("langchain_core.tools")
+
+        class FakeTool:
+            def __init__(self, func, name=None, description=None):
+                self.func = func
+                self.name = name or func.__name__
+                self.description = description or ""
+
+            def invoke(self, args):
+                return self.func(**args)
+
+        def tool(func):
+            return FakeTool(func, name=func.__name__, description=func.__doc__)
+
+        class StructuredTool:
+            @classmethod
+            def from_function(cls, func, name=None, description=None):
+                return FakeTool(func, name=name, description=description)
+
+        fake_tools_mod.tool = tool
+        fake_tools_mod.StructuredTool = StructuredTool
+        fake_langchain_core.tools = fake_tools_mod
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+        monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+        monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools_mod)
+
+        spec_obj = importlib.util.spec_from_file_location(
+            "generated_tools_policy_args_test",
+            tools_path,
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="tool-policy-args-test",
+            blueprint_version="1.0",
+            mode="stubbed",
+        )
+        trace_mod.set_current_node("assistant")
+
+        with pytest.raises(RuntimeError, match="missing required argument\\(s\\): invoice_id"):
+            module.validate_tool_arguments("lookup_invoice", {})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][0]["event"] == "policy_violation"
+        assert manifest["trace"][0]["metadata"]["policy_kind"] == "explicit_arguments"
+
+        trace_mod.current_recorder().manifest["trace"].clear()
+
+        with pytest.raises(RuntimeError, match="unknown argument\\(s\\): extra"):
+            module.validate_tool_arguments("lookup_invoice", {"invoice_id": "inv-123", "extra": True})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert manifest["trace"][0]["event"] == "policy_violation"
+        assert manifest["trace"][0]["metadata"]["policy_kind"] == "explicit_arguments"
+
+    def test_unknown_tool_policy_can_fail_node_execution(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "unknown-tool-policy-test"},
+                "tools": {
+                    "lookup_invoice": {
+                        "type": "function",
+                        "parameters": {"invoice_id": {"type": "string", "required": True}},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o", "tools": ["lookup_invoice"]}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {"assistant": {"agent": "assistant"}},
+                    "edges": [],
+                },
+                "policies": {"tool_usage": {"on_unknown_tool": "fail"}},
+            },
+            llm_script=[
+                {
+                    "tool_calls": [
+                        {"id": "call-1", "name": "missing_tool", "args": {"query": "refund"}},
+                    ]
+                }
+            ],
+            tool_names=["lookup_invoice"],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="unknown-tool-policy-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+
+        with pytest.raises(RuntimeError, match="Tool policy violation: Unknown tool: missing_tool"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "policy_violation"]
+        assert manifest["trace"][1]["tool"] == "missing_tool"
+        assert manifest["trace"][1]["metadata"]["policy_kind"] == "unknown_tool"
+
+    def test_nodes_validate_tool_arguments_before_invocation(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "node-policy-plumbing-test"},
+            "tools": {
+                "lookup_invoice": {
+                    "type": "function",
+                    "parameters": {"invoice_id": {"type": "string", "required": True}},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["lookup_invoice"]}},
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "validate_tool_arguments(tc[\"name\"], tc.get(\"args\", {}))" in files["nodes.py"]
 
     def test_impl_tools_py_is_valid_python(self):
         ir = load_ir("impl_tools.yml")

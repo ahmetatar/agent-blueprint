@@ -11,6 +11,7 @@ from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
@@ -64,6 +65,7 @@ class BlueprintSpec(BaseModel):
     input: IOSchema | None = None
     output: IOSchema | None = None
     contracts: ContractsDef | None = None
+    policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     deploy: DeployConfig | None = None
 
@@ -169,4 +171,18 @@ class BlueprintSpec(BaseModel):
                         f"contracts.nodes.{node_name}.output_contract references undefined "
                         f"output contract '{node_contract.output_contract}'"
                     )
+
+        if self.policies:
+            for tool_name in self.policies.approvals.tools:
+                if tool_name not in self.tools:
+                    raise ValueError(
+                        f"policies.approvals.tools references undefined tool '{tool_name}'"
+                    )
+
+            escalation_target = self.policies.escalation.on_low_confidence
+            if escalation_target and escalation_target not in self.graph.nodes:
+                raise ValueError(
+                    f"policies.escalation.on_low_confidence references undefined graph node "
+                    f"'{escalation_target}'"
+                )
         return self

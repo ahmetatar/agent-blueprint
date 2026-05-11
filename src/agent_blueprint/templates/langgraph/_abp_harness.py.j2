@@ -82,9 +82,18 @@ def consume_tool_output(tool_name: str, args: dict[str, Any]) -> Any:
 
 
 class MockLLMResponse:
-    def __init__(self, *, content: str = "", tool_calls: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        content: str = "",
+        tool_calls: list[dict[str, Any]] | None = None,
+        usage_metadata: dict[str, Any] | None = None,
+        cost_usd: float | None = None,
+    ) -> None:
         self.content = content
         self.tool_calls = tool_calls or []
+        self.usage_metadata = usage_metadata
+        self.cost_usd = cost_usd
 
 
 class HarnessMockLLM:
@@ -118,6 +127,8 @@ class HarnessMockLLM:
         return MockLLMResponse(
             content=str(entry.get("content", "")),
             tool_calls=tool_calls,
+            usage_metadata=entry.get("usage"),
+            cost_usd=entry.get("cost_usd"),
         )
 
 

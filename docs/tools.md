@@ -182,3 +182,49 @@ agents:
     model: "claude-opus-4-6"
     tools: [create_project, generate_screen]
 ```
+
+## Tool Policies and Approvals
+
+Tools can now participate directly in runtime safety and noise-control policies.
+
+### Tool approval
+
+Use `requires_approval` when a tool should never run silently:
+
+```yaml
+tools:
+  issue_refund:
+    type: function
+    requires_approval: true
+```
+
+This is useful for actions like:
+
+- refunds
+- outbound emails
+- ticket closure
+- external writes
+
+### Tool usage limits
+
+Use `policies.tool_usage` when an agent should not be allowed to spam tools:
+
+```yaml
+policies:
+  tool_usage:
+    max_calls_per_node: 2
+    max_calls_per_run: 5
+    require_explicit_arguments: true
+    on_unknown_tool: fail
+```
+
+What this means in practice:
+
+- too many tool calls become `policy_violation` events
+- malformed tool args fail deterministically
+- unknown tool names fail loudly instead of degrading into implicit text-only behavior
+
+Short real-life example:
+
+- a research agent may use `web_search`, but no more than twice in one node
+- a billing agent may call `lookup_invoice`, but a hallucinated tool like `refund_everything` should hard-fail

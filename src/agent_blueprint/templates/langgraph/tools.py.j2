@@ -12,7 +12,7 @@ import httpx
 from langchain_core.tools import tool, StructuredTool
 
 from _abp_harness import consume_tool_output, tool_mode
-from _abp_trace import emit_trace_event, record_tool_output
+from _abp_trace import emit_trace_event, get_current_node, record_tool_output
 
 {% for tool_name, tool_def in ir.all_tools.items() %}
 {% if tool_def.type.value == "function" and tool_def.impl %}
@@ -67,6 +67,126 @@ def _maybe_stub_tool(tool_name: str, args: dict[str, Any]) -> Any:
     if tool_mode() in {"stub", "replay"}:
         return consume_tool_output(tool_name, args)
     return None
+
+
+TOOL_POLICY = {
+    "max_calls_per_node": {{ (ir.policies.tool_usage.max_calls_per_node if ir.policies else none) | to_python }},
+    "max_calls_per_run": {{ (ir.policies.tool_usage.max_calls_per_run if ir.policies else none) | to_python }},
+    "require_explicit_arguments": {{ (ir.policies.tool_usage.require_explicit_arguments if ir.policies else false) | to_python }},
+}
+
+UNKNOWN_TOOL_POLICY = {{ (ir.policies.tool_usage.on_unknown_tool.value if ir.policies else "ignore") | to_python }}
+
+TOOL_ARGUMENT_RULES = {
+{% for tool_name, tool_def in ir.all_tools.items() %}
+    "{{ tool_name }}": {
+        "declared": {{ tool_def.parameters.keys() | list | to_python }},
+        "required": {{ tool_def.parameters.items() | selectattr("1.required") | map(attribute="0") | list | to_python }},
+    },
+{% endfor %}
+}
+
+_TOOL_CALL_COUNTS_PER_RUN: dict[str, int] = {}
+_TOOL_CALL_COUNTS_PER_NODE: dict[str, dict[str, int]] = {}
+
+
+def reset_tool_policy_state() -> None:
+    _TOOL_CALL_COUNTS_PER_RUN.clear()
+    _TOOL_CALL_COUNTS_PER_NODE.clear()
+
+
+def _policy_violation(
+    kind: str,
+    message: str,
+    *,
+    tool_name: str | None = None,
+    args: dict[str, Any] | None = None,
+    node_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    payload = dict(metadata or {})
+    payload["policy_kind"] = kind
+    emit_trace_event(
+        "policy_violation",
+        node=node_id,
+        tool=tool_name,
+        args=args,
+        error=message,
+        metadata=payload,
+    )
+    raise RuntimeError(message)
+
+
+def _enforce_explicit_arguments(tool_name: str, args: dict[str, Any], node_id: str | None) -> None:
+    if not TOOL_POLICY["require_explicit_arguments"]:
+        return
+    rules = TOOL_ARGUMENT_RULES.get(tool_name, {"declared": [], "required": []})
+    declared = set(rules["declared"])
+    required = set(rules["required"])
+    provided = set(args)
+
+    unknown = sorted(provided - declared)
+    if unknown:
+        _policy_violation(
+            "explicit_arguments",
+            f"Tool policy violation: tool '{tool_name}' received unknown argument(s): {', '.join(unknown)}",
+            tool_name=tool_name,
+            args=args,
+            node_id=node_id,
+            metadata={"unknown_arguments": unknown},
+        )
+
+    missing = sorted(name for name in required if name not in args)
+    if missing:
+        _policy_violation(
+            "explicit_arguments",
+            f"Tool policy violation: tool '{tool_name}' is missing required argument(s): {', '.join(missing)}",
+            tool_name=tool_name,
+            args=args,
+            node_id=node_id,
+            metadata={"missing_arguments": missing},
+        )
+
+
+def validate_tool_arguments(tool_name: str, args: dict[str, Any]) -> None:
+    _enforce_explicit_arguments(tool_name, args, get_current_node())
+
+
+def _enforce_tool_call_limits(tool_name: str, args: dict[str, Any], node_id: str | None) -> None:
+    current_run_count = _TOOL_CALL_COUNTS_PER_RUN.get(tool_name, 0)
+    max_calls_per_run = TOOL_POLICY["max_calls_per_run"]
+    if max_calls_per_run is not None and current_run_count >= max_calls_per_run:
+        _policy_violation(
+            "max_calls_per_run",
+            f"Tool policy violation: tool '{tool_name}' exceeded max_calls_per_run={max_calls_per_run}",
+            tool_name=tool_name,
+            args=args,
+            node_id=node_id,
+            metadata={"limit": max_calls_per_run, "attempted_call": current_run_count + 1},
+        )
+
+    if node_id is not None:
+        node_counts = _TOOL_CALL_COUNTS_PER_NODE.setdefault(node_id, {})
+        current_node_count = node_counts.get(tool_name, 0)
+        max_calls_per_node = TOOL_POLICY["max_calls_per_node"]
+        if max_calls_per_node is not None and current_node_count >= max_calls_per_node:
+            _policy_violation(
+                "max_calls_per_node",
+                f"Tool policy violation: tool '{tool_name}' exceeded max_calls_per_node={max_calls_per_node} in node '{node_id}'",
+                tool_name=tool_name,
+                args=args,
+                node_id=node_id,
+                metadata={"limit": max_calls_per_node, "attempted_call": current_node_count + 1},
+            )
+        node_counts[tool_name] = current_node_count + 1
+
+    _TOOL_CALL_COUNTS_PER_RUN[tool_name] = current_run_count + 1
+
+
+def _enforce_tool_policy(tool_name: str, args: dict[str, Any]) -> None:
+    node_id = get_current_node()
+    _enforce_explicit_arguments(tool_name, args, node_id)
+    _enforce_tool_call_limits(tool_name, args, node_id)
 
 {% if ir.retrievers %}
 def _format_retrieval_item(item: Any) -> str:
@@ -125,6 +245,7 @@ def _approved_{{ tool_name | safe_id }}(
         "{{ param_name }}": {{ param_name }}{% if not loop.last %},{% endif %}
 {% endfor %}
     }
+    _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
 {% if tool_def.requires_approval %}
@@ -160,6 +281,7 @@ def {{ tool_name }}(
         "{{ param_name }}": {{ param_name }}{% if not loop.last %},{% endif %}
 {% endfor %}
     }
+    _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
 {% if tool_def.requires_approval %}
@@ -191,6 +313,7 @@ def {{ tool_name }}(
         "{{ param_name }}": {{ param_name }}{% if not loop.last %},{% endif %}
 {% endfor %}
     }
+    _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
 {% if tool_def.requires_approval %}
@@ -222,6 +345,7 @@ def {{ tool_name }}(
 def {{ tool_name }}(query: str) -> str:
     """{{ tool_def.description or tool_name }} (top_k={{ tool_def.top_k }})"""
     _abp_args = {"query": query}
+    _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
 {% if tool_def.requires_approval %}

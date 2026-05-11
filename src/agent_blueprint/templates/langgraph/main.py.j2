@@ -6,12 +6,18 @@ import json
 import os
 import sys
 from datetime import datetime, UTC
+from time import monotonic
 from typing import Any
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 
-from _abp_trace import emit_trace_event, finalize_trace, start_trace
+from _abp_trace import emit_trace_event, finalize_trace, reset_budget_state, start_trace
 from graph import graph
+try:
+    from tools import reset_tool_policy_state
+except ImportError:
+    def reset_tool_policy_state() -> None:
+        return None
 
 INPUT_SCHEMA = {
 {% if ir.input_schema %}
@@ -39,6 +45,10 @@ OUTPUT_SCHEMA = {
     },
 {% endfor %}
 {% endif %}
+}
+
+BUDGET_POLICY = {
+    "max_latency_seconds": {{ (ir.policies.budgets.max_latency_seconds if ir.policies else none) | to_python }},
 }
 
 
@@ -152,6 +162,7 @@ def _default_run_id(thread_id: str) -> str:
 
 def run(user_input: Any, thread_id: str = "default") -> Any:
     """Run the agent with a user message and return the final response."""
+    reset_tool_policy_state()
     start_trace(
         run_id=os.environ.get("ABP_RUN_ID", _default_run_id(thread_id)),
         blueprint="{{ ir.name }}",
@@ -161,6 +172,7 @@ def run(user_input: Any, thread_id: str = "default") -> Any:
         seed=int(os.environ["ABP_TRACE_SEED"]) if os.environ.get("ABP_TRACE_SEED") else None,
         metadata={"thread_id": thread_id},
     )
+    started_at = monotonic()
     try:
         initial_state = _build_initial_state(user_input)
     except ValueError as exc:
@@ -196,6 +208,26 @@ def run(user_input: Any, thread_id: str = "default") -> Any:
             "Try running with LANGCHAIN_VERBOSE=true or check your API keys."
         )
         finalize_trace(status="failed", error=error)
+        raise RuntimeError(error)
+    elapsed_seconds = monotonic() - started_at
+    max_latency_seconds = BUDGET_POLICY["max_latency_seconds"]
+    if max_latency_seconds is not None and elapsed_seconds > max_latency_seconds:
+        error = (
+            "Budget policy violation: "
+            f"run exceeded max_latency_seconds={max_latency_seconds} "
+            f"(elapsed={elapsed_seconds:.3f}s)"
+        )
+        emit_trace_event(
+            "policy_violation",
+            error=error,
+            output_state=result,
+            metadata={
+                "policy_kind": "max_latency_seconds",
+                "limit": max_latency_seconds,
+                "elapsed_seconds": round(elapsed_seconds, 6),
+            },
+        )
+        finalize_trace(status="failed", error=error, output_state=result)
         raise RuntimeError(error)
     if OUTPUT_SCHEMA:
         try:

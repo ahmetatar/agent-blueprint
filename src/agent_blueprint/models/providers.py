@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelProvider(str, Enum):
@@ -14,6 +14,11 @@ class ModelProvider(str, Enum):
     azure_openai = "azure_openai"
     bedrock = "bedrock"
     openai_compatible = "openai_compatible"  # any OpenAI-compatible endpoint
+
+
+class ModelPricingDef(BaseModel):
+    input_per_1k_tokens_usd: float = Field(ge=0)
+    output_per_1k_tokens_usd: float = Field(ge=0)
 
 
 class ModelProviderDef(BaseModel):
@@ -28,6 +33,7 @@ class ModelProviderDef(BaseModel):
     # Bedrock-specific
     region: str | None = None
     aws_profile_env: str | None = None
+    pricing: ModelPricingDef | None = None
     # Extra arbitrary provider params
     extra: dict[str, Any] = {}
 

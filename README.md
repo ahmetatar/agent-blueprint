@@ -26,9 +26,26 @@ This is not just about writing less boilerplate. It is about standardizing how a
 If you are building one-off demos, handwritten code may be enough. If you are building agent systems that need consistency, auditability, and repeatable delivery, `agent-blueprint` gives you a stronger foundation.
 
 ```bash
-abp init my-agent
-abp generate my-agent.yml --target langgraph
+abp init --output my-agent.agents.yaml
+abp generate my-agent.agents.yaml --target langgraph
 ```
+
+## What You Can Rely On Today
+
+ABP is no longer just a YAML-to-code scaffold. It already gives you practical workflow guarantees:
+
+- runtime input and output validation
+- enforced tool approvals and human review checkpoints
+- deterministic harness runs with trace emission and replay diffing
+- node and state contracts
+- tool usage policies and execution budgets
+- low-confidence escalation to a specific review or handoff node
+
+If you want the short version of what is implemented today, why it matters, and how to apply it, start here:
+
+- [Runtime Guarantees](docs/runtime-guarantees.md)
+- [Model Providers](docs/model-providers.md)
+- [Tools](docs/tools.md)
 
 ---
 
@@ -89,16 +106,15 @@ tag, TestPyPI, and PyPI publish workflow details.
 ### 1. Create a blueprint
 
 ```bash
-abp init --wizard --output support-team.agents.yaml
-# or scaffold a starter file directly:
 abp init --template=blueprint --output=my-agent.agents.yaml
 # or create a markdown request template for Codex/Claude Code:
 abp init --template=spec --output=my-agent.spec.md
 ```
 
-`--wizard` walks through the system shape interactively: single-agent vs multi-agent,
-specialist names, model defaults, and memory backend. It then writes a validated
-blueprint YAML for you.
+`abp init` scaffolds either:
+
+- a starter blueprint YAML
+- or an agent-spec markdown request template for Codex, Claude Code, or another agentic CLI
 
 This creates `my-agent.agents.yaml`:
 
@@ -211,6 +227,9 @@ A blueprint YAML has these top-level sections:
 | `memory` | No | Checkpointing / persistence ([details](docs/memory.md)) |
 | `input` | No | Input schema for the agent |
 | `output` | No | Output schema for the agent |
+| `contracts` | No | Runtime state and node contracts |
+| `policies` | No | Approvals, tool limits, budgets, and escalation |
+| `harness` | No | Deterministic scenario tests and replay fixtures |
 | `deploy` | No | Cloud deployment configuration ([details](docs/deploy.md)) |
 
 ### `blueprint`
@@ -233,6 +252,7 @@ settings:
   default_temperature: 0.7
   max_retries: 3
   timeout_seconds: 300
+  max_graph_steps: 25
 ```
 
 Settings values can be referenced anywhere with `${settings.field_name}`.
@@ -273,10 +293,6 @@ agents:
     tools: [tool_a, tool_b]         # References to tools section
     temperature: 0.5
     max_tokens: 2048
-    output_schema:                  # Structured output fields
-      department:
-        type: string
-        enum: [billing, technical]
     memory:
       type: conversation_buffer     # conversation_buffer | summary | vector
       max_tokens: 4000
@@ -294,6 +310,7 @@ agents:
 ```
 
 > See [Model Providers](docs/model-providers.md) for adapter selection and [Reasoning Patterns](docs/reasoning.md) for native thinking and graph-level reasoning strategies.
+> Structured outputs no longer belong under `agents.*.output_schema`. Use top-level `contracts` and `output` instead.
 
 ### `tools`
 
@@ -357,6 +374,79 @@ graph:
 
 **Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference `state` fields: `state.field_name`.
 
+### `contracts`
+
+Use contracts when you want node behavior to be explicit and reviewable:
+
+```yaml
+contracts:
+  state:
+    required_fields: [messages]
+    immutable_fields: [request_id]
+
+  nodes:
+    router:
+      requires: [messages]
+      produces: [route, confidence]
+      output_contract: route_payload
+
+  outputs:
+    route_payload:
+      type: object
+      required: [route, confidence]
+      properties:
+        route: { type: string }
+        confidence: { type: number }
+```
+
+### `policies`
+
+Use policies when you want the runtime to enforce safety and noise limits:
+
+```yaml
+policies:
+  approvals:
+    mode: selective
+    tools: [issue_refund]
+
+  tool_usage:
+    max_calls_per_node: 2
+    max_calls_per_run: 5
+    require_explicit_arguments: true
+    on_unknown_tool: fail
+
+  escalation:
+    on_low_confidence: handoff_review
+    confidence_threshold: 0.75
+
+  budgets:
+    max_tokens_per_run: 20000
+    max_latency_seconds: 30
+    max_cost_usd: 0.75
+```
+
+### `harness`
+
+Use harness scenarios when you want deterministic regression checks without hitting live models:
+
+```yaml
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+    seed: 42
+
+  scenarios:
+    - id: refund_happy_path
+      input:
+        message: "Refund invoice 123"
+      expected:
+        tools_called: [lookup_invoice, issue_refund]
+        approvals_triggered: true
+```
+
+> See [Runtime Guarantees](docs/runtime-guarantees.md) for concrete patterns and real-world examples using contracts, policies, and harness scenarios together.
+
 ### `memory`
 
 ```yaml
@@ -375,9 +465,8 @@ memory:
 | `abp init --template=blueprint --output=<file>` | Scaffold an ABP blueprint YAML |
 | `abp init --template=spec --output=<file>` | Scaffold a markdown request template for Codex/Claude Code |
 | `abp validate <file>` | Validate a blueprint against the schema (`--quiet` for CI) |
-| `abp generate <file>` | Generate framework code (`--target langgraph\|plain`, `--dry-run`) |
+| `abp generate <file>` | Generate framework code (`--target langgraph\|crewai\|plain`, `--output-dir`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |
-| `abp test <file>` | Run harness scenarios declared for the blueprint (`--scenario`, `--install`) |
 | `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
 | `abp inspect <file>` | Visualize graph as Mermaid diagram |
 | `abp schema` | Export JSON Schema (`--format json\|yaml`) |
@@ -400,27 +489,28 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 |---|---|---|
 | `--target` | `langgraph` | Target framework |
 | `--thread-id` | `default` | Conversation thread ID |
-| `--install` | `false` | Run `pip install -r requirements.txt` before executing |
+| `--install` | `true` | Run `pip install -r requirements.txt` before executing |
 | `--env` | `.env` | Path to a `.env` file to load |
 
-### `abp test`
+### Harness and Replay
 
-```bash
-# Run all harness scenarios
-abp test my-agent.yml
+ABP already has:
 
-# Run one scenario
-abp test my-agent.yml --scenario refund_happy_path
-```
+- harness schema support
+- trace emission
+- replay-oriented execution helpers
+- fixture-driven mock and stub runtime paths in generated templates
 
-Current support:
-- harness semantics, trace schema, and scenario model are defined at the ABP layer
-- the current execution adapter for `abp test` is LangGraph-backed because LangGraph is the only fully implemented runtime target today
-- future targets such as CrewAI should implement the same ABP harness and trace contract rather than introducing target-specific behavior
+Those capabilities are currently part of the runtime and internal workflow surface. The public CLI in this release is centered on:
 
-Current limitation:
-- `llm_mode` / `tool_mode` are already part of the ABP harness contract, but full mock/stub/replay execution behavior is not complete yet
-- unsupported assertions are reported explicitly rather than being silently ignored
+- `init`
+- `validate`
+- `inspect`
+- `generate`
+- `run`
+- `deploy`
+- `schema`
+- `github`
 
 ---
 
@@ -469,11 +559,12 @@ What is ABP-level:
 - trace schema and event names
 - harness scenario model
 - approval / HITL / contract concepts
+- policy concepts: tool limits, budgets, and low-confidence escalation
 
 What is currently LangGraph-backed:
 - local runtime execution
 - emitted runtime hooks used by `abp run`
-- the current `abp test` scenario executor
+- the current harness execution internals
 
 This means the contract is intended to stay stable as new targets arrive. When a future target such as CrewAI becomes executable, it should implement the same ABP-level trace and harness semantics so that blueprints and harness definitions remain portable.
 
@@ -524,7 +615,7 @@ See [CONTRIBUTING.md](/Users/aatar/Desktop/Repos/agent-blueprint/CONTRIBUTING.md
 
 ```
 src/agent_blueprint/
-├── cli/            # Typer CLI commands (validate, generate, inspect, init, schema)
+├── cli/            # Typer CLI commands and command implementations
 ├── models/         # Pydantic v2 schema models
 ├── ir/             # Intermediate representation: compiler + expression parser
 ├── generators/     # Code generators (langgraph, plain, crewai stub)
@@ -550,11 +641,15 @@ The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input 
 - [x] Safe condition expression parser
 - [x] LangGraph code generator
 - [x] Plain Python generator
-- [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`
+- [x] CLI: `validate`, `generate`, `inspect`, `init`, `schema`, `run`, `deploy`, `github`
 - [x] MCP server configuration and `mcp` tool type
 - [x] Model provider configuration (OpenAI, Anthropic, Google, Ollama, Azure, Bedrock)
 - [x] `impl` field for function tools
 - [x] `abp run` — generate and execute locally
+- [x] runtime-enforced contracts (`input`, `output`, node contracts)
+- [x] tool approval and human-in-the-loop enforcement
+- [x] harness traces, replay diffing, and fixture-driven mock/stub execution
+- [x] policy enforcement: tool limits, budgets, low-confidence escalation
 - [x] `abp deploy --platform azure|aws|gcp`
 - [x] PyPI publish (`pip install agent-blueprint`)
 - [ ] CrewAI generator

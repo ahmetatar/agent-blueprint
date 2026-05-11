@@ -94,7 +94,7 @@ def _llm_constructor_kwargs(node: IRNode, temperature: float | None) -> dict[str
     if node.agent and node.agent.max_tokens is not None:
         kwargs["max_tokens"] = node.agent.max_tokens
     if pd:
-        kwargs.update(pd.extra)
+        kwargs.update({key: value for key, value in pd.extra.items() if key != "abp_pricing"})
     if node.agent:
         kwargs.update(node.agent.llm_params)
         if node.agent.reasoning and node.agent.reasoning.enabled:

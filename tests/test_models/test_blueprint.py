@@ -225,6 +225,55 @@ class TestValidBlueprints:
         assert spec.harness.defaults.replay_trace == "/tmp/golden-trace.json"
         assert spec.harness.scenarios[0].replay_trace == "/tmp/scenario-trace.json"
 
+    def test_artifacts_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "array", "default": []},
+                    "prd": {"type": "object", "default": None, "nullable": True},
+                }
+            },
+            "graph": {
+                "entry_point": "writer",
+                "nodes": {"writer": {"agent": "writer_agent"}},
+                "edges": [],
+            },
+            "agents": {"writer_agent": {"model": "gpt-4o"}},
+            "contracts": {
+                "nodes": {
+                    "writer": {
+                        "produces": ["prd"],
+                        "output_contract": "prd_contract",
+                    }
+                },
+                "outputs": {
+                    "prd_contract": {
+                        "type": "object",
+                        "required": ["title", "problem"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "problem": {"type": "string"},
+                        },
+                    }
+                },
+            },
+            "artifacts": {
+                "prd_doc": {
+                    "format": "markdown",
+                    "producer": "writer",
+                    "contract": "prd_contract",
+                    "path": "artifacts/prd.md",
+                    "metadata": {"kind": "prd", "audience": "product"},
+                }
+            },
+        })
+
+        assert spec.artifacts["prd_doc"].format == "markdown"
+        assert spec.artifacts["prd_doc"].producer == "writer"
+        assert spec.artifacts["prd_doc"].contract == "prd_contract"
+        assert spec.artifacts["prd_doc"].metadata == {"kind": "prd", "audience": "product"}
+
     def test_policies_block_loads(self):
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "policy-test"},
@@ -354,6 +403,37 @@ class TestInvalidBlueprints:
                 "contracts": {"nodes": {"n": {"output_contract": "missing_contract"}}},
             })
         assert "missing_contract" in str(exc_info.value)
+
+    def test_artifact_unknown_producer_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "artifacts": {
+                    "prd_doc": {
+                        "format": "markdown",
+                        "producer": "missing_node",
+                        "path": "artifacts/prd.md",
+                    }
+                },
+            })
+        assert "artifacts.prd_doc.producer references undefined graph node 'missing_node'" in str(exc_info.value)
+
+    def test_artifact_unknown_contract_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "artifacts": {
+                    "prd_doc": {
+                        "format": "markdown",
+                        "producer": "n",
+                        "contract": "missing_contract",
+                        "path": "artifacts/prd.md",
+                    }
+                },
+            })
+        assert "artifacts.prd_doc.contract references undefined output contract 'missing_contract'" in str(exc_info.value)
 
     def test_legacy_agent_output_schema_is_rejected(self):
         with pytest.raises(ValidationError) as exc_info:

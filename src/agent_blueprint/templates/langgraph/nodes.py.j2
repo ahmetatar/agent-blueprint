@@ -3,6 +3,7 @@
 
 import json
 import os
+from pathlib import Path
 import sys
 from typing import Any
 
@@ -42,6 +43,22 @@ UNKNOWN_TOOL_POLICY = {{ (ir.policies.tool_usage.on_unknown_tool.value if ir.pol
 ESCALATION_POLICY = {
     "target": {{ (ir.policies.escalation.on_low_confidence if ir.policies else none) | to_python }},
     "confidence_threshold": {{ (ir.policies.escalation.confidence_threshold if ir.policies else none) | to_python }},
+}
+ARTIFACTS_BY_NODE = {
+{% for node_id, artifact_names in ir.artifact_owners.items() %}
+    "{{ node_id }}": [
+{% for artifact_name in artifact_names %}
+        {
+            "name": "{{ artifact_name }}",
+            "format": "{{ ir.artifacts[artifact_name].format.value }}",
+            "path": {{ ir.artifacts[artifact_name].path | to_python }},
+            "contract": {{ ir.artifacts[artifact_name].contract | to_python }},
+            "contract_schema": {{ (ir.contracts.outputs[ir.artifacts[artifact_name].contract].model_dump(by_alias=True) if ir.artifacts[artifact_name].contract and ir.contracts else none) | to_python }},
+            "metadata": {{ ir.artifacts[artifact_name].metadata | to_python }},
+        },
+{% endfor %}
+    ],
+{% endfor %}
 }
 
 {% macro make_llm(node, temperature) %}
@@ -111,6 +128,30 @@ def _contract_error(
         output_state=updates,
         error=message,
         metadata={"stage": stage, "contract_kind": contract_kind},
+    )
+    clear_current_node()
+    raise ValueError(message)
+
+
+def _artifact_error(
+    node_id: str,
+    artifact_name: str,
+    message: str,
+    *,
+    state: Any | None = None,
+    updates: Any | None = None,
+) -> None:
+    emit_trace_event(
+        "contract_failed",
+        node=node_id,
+        input_state=state,
+        output_state=updates,
+        error=message,
+        metadata={
+            "stage": "artifact",
+            "artifact": artifact_name,
+            "contract_kind": "artifact",
+        },
     )
     clear_current_node()
     raise ValueError(message)
@@ -314,6 +355,153 @@ def _validate_node_output_contract(
         )
 
 
+def _render_markdown_artifact(value: Any) -> str:
+    if isinstance(value, str):
+        return value.rstrip() + "\n"
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            title = str(key).replace("_", " ").strip().title()
+            lines.append(f"## {title}")
+            if isinstance(item, list):
+                lines.extend(f"- {entry}" for entry in item)
+            elif isinstance(item, dict):
+                lines.append("```json")
+                lines.append(json.dumps(item, indent=2, ensure_ascii=True, sort_keys=True))
+                lines.append("```")
+            else:
+                lines.append(str(item))
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+    if isinstance(value, list):
+        return "\n".join(f"- {item}" for item in value).rstrip() + "\n"
+    return str(value).rstrip() + "\n"
+
+
+def _render_yaml_artifact(value: Any, indent: int = 0) -> str:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}{key}:")
+                lines.append(_render_yaml_artifact(item, indent + 2).rstrip())
+            else:
+                lines.append(f"{prefix}{key}: {json.dumps(item, ensure_ascii=True)}")
+        return "\n".join(lines) + "\n"
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{prefix}-")
+                lines.append(_render_yaml_artifact(item, indent + 2).rstrip())
+            else:
+                lines.append(f"{prefix}- {json.dumps(item, ensure_ascii=True)}")
+        return "\n".join(lines) + "\n"
+    return f"{prefix}{json.dumps(value, ensure_ascii=True)}\n"
+
+
+def _render_artifact_content(value: Any, artifact_format: str) -> str:
+    if artifact_format == "json":
+        return json.dumps(value, indent=2, ensure_ascii=True, sort_keys=True) + "\n"
+    if artifact_format == "yaml":
+        return _render_yaml_artifact(value)
+    if artifact_format == "markdown":
+        return _render_markdown_artifact(value)
+    if isinstance(value, str):
+        return value.rstrip() + "\n"
+    return str(value).rstrip() + "\n"
+
+
+def _select_artifact_payload(
+    artifact: dict[str, Any],
+    updates: dict[str, Any],
+    validated_outputs: dict[str, Any],
+    new_messages: list[Any],
+) -> Any:
+    contract = artifact.get("contract")
+    if contract and contract in validated_outputs:
+        return validated_outputs[contract]
+    artifact_name = artifact["name"]
+    if artifact_name in updates:
+        return updates[artifact_name]
+    payload_fields = {
+        key: value
+        for key, value in updates.items()
+        if key not in {"messages", "__abp_escalation_target", "__abp_escalation_source"}
+    }
+    if len(payload_fields) == 1:
+        return next(iter(payload_fields.values()))
+    if payload_fields:
+        return payload_fields
+    if new_messages:
+        return getattr(new_messages[-1], "content", str(new_messages[-1]))
+    return ""
+
+
+def _validate_artifact_payload(
+    node_id: str,
+    artifact: dict[str, Any],
+    payload: Any,
+    *,
+    state: AgentState,
+    updates: dict[str, Any],
+) -> Any:
+    schema = artifact.get("contract_schema")
+    if not schema:
+        return payload
+    try:
+        return _validate_schema_value(f"artifact '{artifact['name']}'", payload, schema)
+    except ValueError as exc:
+        _artifact_error(
+            node_id,
+            artifact["name"],
+            f"Artifact contract error: {exc}",
+            state=state,
+            updates=updates,
+        )
+
+
+def _write_node_artifacts(
+    node_id: str,
+    state: AgentState,
+    updates: dict[str, Any],
+    new_messages: list[Any],
+    validated_outputs: dict[str, Any],
+) -> None:
+    artifact_defs = ARTIFACTS_BY_NODE.get(node_id, [])
+    if not artifact_defs:
+        return
+    root = Path(os.environ.get("ABP_ARTIFACT_DIR", "."))
+    for artifact in artifact_defs:
+        payload = _select_artifact_payload(artifact, updates, validated_outputs, new_messages)
+        validated_payload = _validate_artifact_payload(
+            node_id,
+            artifact,
+            payload,
+            state=state,
+            updates=updates,
+        )
+        target_path = root / artifact["path"]
+        content = _render_artifact_content(validated_payload, artifact["format"])
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+        emit_trace_event(
+            "artifact_written",
+            node=node_id,
+            output_state=updates,
+            metadata={
+                "artifact": artifact["name"],
+                "format": artifact["format"],
+                "path": str(target_path),
+                "contract": artifact.get("contract"),
+                "metadata": artifact.get("metadata", {}),
+                "validated": artifact.get("contract_schema") is not None,
+                "bytes": len(content.encode("utf-8")),
+            },
+        )
+
+
 def _human_review_allowed(node_id: str, trigger: str) -> bool:
     mode = os.environ.get("ABP_HITL_MODE", "deny").strip().lower()
     if mode == "allow":
@@ -462,6 +650,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% endif %}
     new_messages: list = []
     updates: dict = {}
+    validated_artifact_outputs: dict[str, Any] = {}
 {% if node.tool_defs %}
     # ReAct loop: invoke LLM, execute any tool calls, repeat until plain response
     while True:
@@ -507,11 +696,16 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         contract_kind="output_contract",
         required=True,
     )
+{% if node.contract.produces and node.contract.produces | length == 1 %}
+    if validated_output is not None:
+        updates["{{ node.contract.produces[0] }}"] = validated_output
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+{% else %}
     if isinstance(validated_output, dict):
         updates.update(validated_output)
-{% if node.contract.produces and node.contract.produces | length == 1 %}
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
     elif validated_output is not None:
-        updates["{{ node.contract.produces[0] }}"] = validated_output
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
 {% endif %}
 {% endif %}
 {% if ir.contracts and ir.contracts.state.immutable_fields %}
@@ -535,6 +729,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% if node.contract and node.contract.produces %}
     _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
 {% endif %}
+    _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
     escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
     emit_trace_event(
         "node_finished",

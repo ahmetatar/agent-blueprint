@@ -28,9 +28,21 @@ from langchain_aws import ChatBedrock
 {% endif %}
 
 from _abp_harness import build_llm
-from _abp_trace import clear_current_node, emit_trace_event, record_llm_output, set_current_node
+from _abp_trace import (
+    clear_current_node,
+    emit_trace_event,
+    record_llm_output,
+    register_llm_budget_usage,
+    set_current_node,
+)
 from state import AgentState
-from tools import TOOLS, TOOLS_BY_NAME
+from tools import TOOLS, TOOLS_BY_NAME, validate_tool_arguments
+
+UNKNOWN_TOOL_POLICY = {{ (ir.policies.tool_usage.on_unknown_tool.value if ir.policies else "ignore") | to_python }}
+ESCALATION_POLICY = {
+    "target": {{ (ir.policies.escalation.on_low_confidence if ir.policies else none) | to_python }},
+    "confidence_threshold": {{ (ir.policies.escalation.confidence_threshold if ir.policies else none) | to_python }},
+}
 
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
@@ -48,6 +60,12 @@ def _last_user_message_content(messages: list) -> str:
 
 def _llm_trace_payload(response: Any) -> dict[str, Any]:
     payload = {"content": str(getattr(response, "content", ""))}
+    usage_metadata = getattr(response, "usage_metadata", None)
+    if usage_metadata is not None:
+        payload["usage"] = usage_metadata
+    cost_usd = getattr(response, "cost_usd", None)
+    if cost_usd is not None:
+        payload["cost_usd"] = cost_usd
     tool_calls = getattr(response, "tool_calls", None)
     if tool_calls:
         payload["tool_calls"] = [
@@ -360,6 +378,36 @@ def _require_human_review(
         "ABP_APPROVED_HITL or ABP_APPROVE_HITL_<NODE>_<TRIGGER>."
     )
 
+
+def _handle_unknown_tool(node_id: str, tool_name: str, args: dict[str, Any]) -> str:
+    message = f"Unknown tool: {tool_name}"
+    if UNKNOWN_TOOL_POLICY == "fail":
+        emit_trace_event(
+            "policy_violation",
+            node=node_id,
+            tool=tool_name,
+            args=args,
+            error=message,
+            metadata={"policy_kind": "unknown_tool"},
+        )
+        raise RuntimeError(f"Tool policy violation: {message}")
+    return message
+
+
+def _apply_low_confidence_escalation(node_id: str, updates: dict[str, Any]) -> str | None:
+    target = ESCALATION_POLICY["target"]
+    threshold = ESCALATION_POLICY["confidence_threshold"]
+    if target is None or threshold is None:
+        return None
+    confidence = updates.get("confidence")
+    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+        return None
+    if float(confidence) >= float(threshold):
+        return None
+    updates["__abp_escalation_target"] = target
+    updates["__abp_escalation_source"] = node_id
+    return target
+
 {% for node in ir.nodes %}
 {% if node.agent %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
@@ -418,6 +466,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     # ReAct loop: invoke LLM, execute any tool calls, repeat until plain response
     while True:
         response = llm.invoke(working)
+        register_llm_budget_usage("{{ node.id }}", response)
         record_llm_output("{{ node.id }}", _llm_trace_payload(response))
         working.append(response)
         new_messages.append(response)
@@ -427,9 +476,10 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         for tc in response.tool_calls:
             fn = tool_map.get(tc["name"])
             if fn is None:
-                content = f"Unknown tool: {tc['name']}"
+                content = _handle_unknown_tool("{{ node.id }}", tc["name"], tc.get("args", {}))
             else:
                 try:
+                    validate_tool_arguments(tc["name"], tc.get("args", {}))
                     _require_human_review("{{ node.id }}", hitl, "before_tool_call", tool_name=tc["name"])
                     content = str(fn.invoke(tc.get("args", {})))
                     _require_human_review("{{ node.id }}", hitl, "after_tool_call", tool_name=tc["name"])
@@ -442,6 +492,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
             new_messages.append(tool_msg)
 {% else %}
     response = llm.invoke(working)
+    register_llm_budget_usage("{{ node.id }}", response)
     record_llm_output("{{ node.id }}", _llm_trace_payload(response))
     _require_human_review("{{ node.id }}", hitl, "before_response")
     new_messages.append(response)
@@ -484,7 +535,15 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% if node.contract and node.contract.produces %}
     _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
 {% endif %}
-    emit_trace_event("node_finished", node="{{ node.id }}", input_state=state, output_state=updates)
+    escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
+    emit_trace_event(
+        "node_finished",
+        node="{{ node.id }}",
+        route=escalation_target,
+        input_state=state,
+        output_state=updates,
+        metadata={"escalated": escalation_target is not None},
+    )
     clear_current_node()
     return updates
 

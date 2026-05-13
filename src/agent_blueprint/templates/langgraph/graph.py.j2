@@ -21,6 +21,8 @@ from nodes import (
 {% endfor %}
 )
 
+ESCALATION_TARGET = {{ (ir.policies.escalation.on_low_confidence if ir.policies else none) | to_python }}
+
 
 def build_graph():
     builder = StateGraph(AgentState)
@@ -37,6 +39,13 @@ def build_graph():
 {% for edge in ir.edges %}
 {% if edge.is_conditional %}
     def _route_{{ edge.from_node | safe_id }}(state: AgentState) -> str:
+{% if ir.policies and ir.policies.escalation.on_low_confidence %}
+        if (
+            state.get("__abp_escalation_target")
+            and state.get("__abp_escalation_source") == "{{ edge.from_node }}"
+        ):
+            return str(state["__abp_escalation_target"])
+{% endif %}
 {% for target in edge.targets %}
 {% if target.condition %}
         if {{ target.condition.to_dict_access('state') }}:
@@ -53,15 +62,37 @@ def build_graph():
         "{{ edge.from_node }}",
         _route_{{ edge.from_node | safe_id }},
         {
+{% if ir.policies and ir.policies.escalation.on_low_confidence %}
+            "{{ ir.policies.escalation.on_low_confidence }}": "{{ ir.policies.escalation.on_low_confidence }}",
+{% endif %}
 {% for target in edge.targets %}
             "{{ target.target }}": {% if target.target == "END" %}END{% else %}"{{ target.target }}"{% endif %},
 {% endfor %}
         }
     )
 {% else %}
+{% if ir.policies and ir.policies.escalation.on_low_confidence %}
+    def _route_{{ edge.from_node | safe_id }}(state: AgentState) -> str:
+        if (
+            state.get("__abp_escalation_target")
+            and state.get("__abp_escalation_source") == "{{ edge.from_node }}"
+        ):
+            return str(state["__abp_escalation_target"])
+        return {% if edge.targets[0].target == "END" %}"END"{% else %}"{{ edge.targets[0].target }}"{% endif %}
+
+    builder.add_conditional_edges(
+        "{{ edge.from_node }}",
+        _route_{{ edge.from_node | safe_id }},
+        {
+            "{{ ir.policies.escalation.on_low_confidence }}": "{{ ir.policies.escalation.on_low_confidence }}",
+            {% if edge.targets[0].target == "END" %}"END": END{% else %}"{{ edge.targets[0].target }}": "{{ edge.targets[0].target }}"{% endif %},
+        }
+    )
+{% else %}
 {% for target in edge.targets %}
     builder.add_edge("{{ edge.from_node }}", {% if target.target == "END" %}END{% else %}"{{ target.target }}"{% endif %})
 {% endfor %}
+{% endif %}
 {% endif %}
 {% endfor %}
 

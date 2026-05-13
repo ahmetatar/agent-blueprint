@@ -64,7 +64,7 @@ class BannerGroup(TyperGroup):
 app = typer.Typer(
     name="abp",
     cls=BannerGroup,
-    help="Agent Blueprint - Declarative AI agent orchestration via YAML",
+    help="Agent Blueprint - Declarative, framework-agnostic AI agent orchestration via YAML",
     invoke_without_command=True,
     no_args_is_help=False,
     rich_markup_mode="rich",

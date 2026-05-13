@@ -2,6 +2,10 @@
 
 Thanks for contributing to `agent-blueprint`.
 
+Official product tagline:
+
+> Declarative, framework-agnostic AI agent orchestration via YAML.
+
 This project is a declarative specification and code generation tool. That means small changes can affect schema compatibility, generated code, CLI behavior, and deployment workflows at the same time. The contribution rules below are designed to keep those contracts stable.
 
 ## Ground Rules

@@ -6,6 +6,7 @@ from typing import Any
 from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.expression import CompiledExpression, parse_expression
 from agent_blueprint.models.agents import AgentDef, RagMode
+from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
 from agent_blueprint.models.contracts import ContractsDef, NodeContractDef
 from agent_blueprint.models.harness import HarnessDef
@@ -67,6 +68,8 @@ class AgentGraph:
     input_schema: IOSchema | None = None
     output_schema: IOSchema | None = None
     contracts: ContractsDef | None = None
+    artifacts: dict[str, ArtifactDef] = field(default_factory=dict)
+    artifact_owners: dict[str, list[str]] = field(default_factory=dict)
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     warnings: list[str] = field(default_factory=list)
@@ -89,6 +92,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     nodes = _compile_nodes(spec)
     edges = _compile_edges(spec)
     warnings = _collect_warnings(nodes)
+    artifact_owners = _compile_artifact_owners(spec.artifacts)
 
     return AgentGraph(
         name=spec.blueprint.name,
@@ -105,10 +109,19 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         input_schema=spec.input,
         output_schema=spec.output,
         contracts=spec.contracts,
+        artifacts=spec.artifacts,
+        artifact_owners=artifact_owners,
         policies=spec.policies,
         harness=spec.harness,
         warnings=warnings,
     )
+
+
+def _compile_artifact_owners(artifacts: dict[str, ArtifactDef]) -> dict[str, list[str]]:
+    owners: dict[str, list[str]] = {}
+    for artifact_name, artifact in artifacts.items():
+        owners.setdefault(artifact.producer, []).append(artifact_name)
+    return owners
 
 
 def _collect_warnings(nodes: list[IRNode]) -> list[str]:

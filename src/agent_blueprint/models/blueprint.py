@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from agent_blueprint.models.agents import AgentDef
+from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.contracts import ContractsDef
 from agent_blueprint.models.deploy import DeployConfig
 from agent_blueprint.models.graph import GraphDef
@@ -65,6 +66,7 @@ class BlueprintSpec(BaseModel):
     input: IOSchema | None = None
     output: IOSchema | None = None
     contracts: ContractsDef | None = None
+    artifacts: dict[str, ArtifactDef] = Field(default_factory=dict)
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     deploy: DeployConfig | None = None
@@ -170,6 +172,19 @@ class BlueprintSpec(BaseModel):
                     raise ValueError(
                         f"contracts.nodes.{node_name}.output_contract references undefined "
                         f"output contract '{node_contract.output_contract}'"
+                    )
+
+        for artifact_name, artifact in self.artifacts.items():
+            if artifact.producer not in self.graph.nodes:
+                raise ValueError(
+                    f"artifacts.{artifact_name}.producer references undefined graph node "
+                    f"'{artifact.producer}'"
+                )
+            if artifact.contract:
+                if self.contracts is None or artifact.contract not in self.contracts.outputs:
+                    raise ValueError(
+                        f"artifacts.{artifact_name}.contract references undefined output "
+                        f"contract '{artifact.contract}'"
                     )
 
         if self.policies:

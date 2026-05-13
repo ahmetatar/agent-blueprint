@@ -1116,6 +1116,306 @@ class TestLangGraphGenerator:
         manifest = trace_mod.current_recorder().manifest
         assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
 
+    def test_node_output_contract_can_store_object_under_single_produced_field(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-output-contract-object-field"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "prd": {"type": "object", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "prd_contract",
+                            "produces": ["prd"],
+                        }
+                    },
+                    "outputs": {
+                        "prd_contract": {
+                            "type": "object",
+                            "required": ["title", "problem"],
+                            "properties": {
+                                "title": {"type": "string"},
+                                "problem": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"title":"Invoice Assistant","problem":"Manual disputes"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="node-output-contract-object-field",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["prd"] == {
+            "title": "Invoice Assistant",
+            "problem": "Manual disputes",
+        }
+        assert "title" not in result
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_node_writes_declared_artifact_for_valid_contract(self, tmp_path, monkeypatch):
+        artifact_root = tmp_path / "run-artifacts"
+        monkeypatch.setenv("ABP_ARTIFACT_DIR", str(artifact_root))
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "artifact-write-valid"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "prd": {"type": "object", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "prd_contract",
+                            "produces": ["prd"],
+                        }
+                    },
+                    "outputs": {
+                        "prd_contract": {
+                            "type": "object",
+                            "required": ["title", "problem"],
+                            "properties": {
+                                "title": {"type": "string"},
+                                "problem": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "artifacts": {
+                    "prd_doc": {
+                        "format": "markdown",
+                        "producer": "assistant",
+                        "contract": "prd_contract",
+                        "path": "artifacts/prd.md",
+                        "metadata": {"kind": "prd"},
+                    }
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"title":"Invoice Assistant","problem":"Manual disputes"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="artifact-write-valid",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        artifact_path = artifact_root / "artifacts" / "prd.md"
+        assert result["prd"]["title"] == "Invoice Assistant"
+        assert artifact_path.read_text(encoding="utf-8") == (
+            "## Title\n"
+            "Invoice Assistant\n\n"
+            "## Problem\n"
+            "Manual disputes\n"
+        )
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == [
+            "node_started",
+            "artifact_written",
+            "node_finished",
+        ]
+        artifact_event = manifest["trace"][1]
+        assert artifact_event["metadata"]["artifact"] == "prd_doc"
+        assert artifact_event["metadata"]["format"] == "markdown"
+        assert artifact_event["metadata"]["contract"] == "prd_contract"
+        assert artifact_event["metadata"]["metadata"] == {"kind": "prd"}
+        assert artifact_event["metadata"]["validated"] is True
+        assert artifact_event["metadata"]["path"] == str(artifact_path)
+
+    def test_node_writes_json_yaml_and_text_artifacts_with_contract_validation(self, tmp_path, monkeypatch):
+        artifact_root = tmp_path / "run-artifacts"
+        monkeypatch.setenv("ABP_ARTIFACT_DIR", str(artifact_root))
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "artifact-format-validation"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "prd": {"type": "object", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "prd_contract",
+                            "produces": ["prd"],
+                        }
+                    },
+                    "outputs": {
+                        "prd_contract": {
+                            "type": "object",
+                            "required": ["title", "problem"],
+                            "properties": {
+                                "title": {"type": "string"},
+                                "problem": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "artifacts": {
+                    "prd_json": {
+                        "format": "json",
+                        "producer": "assistant",
+                        "contract": "prd_contract",
+                        "path": "artifacts/prd.json",
+                        "metadata": {"kind": "prd", "format_role": "machine"},
+                    },
+                    "prd_yaml": {
+                        "format": "yaml",
+                        "producer": "assistant",
+                        "contract": "prd_contract",
+                        "path": "artifacts/prd.yml",
+                    },
+                    "prd_text": {
+                        "format": "text",
+                        "producer": "assistant",
+                        "contract": "prd_contract",
+                        "path": "artifacts/prd.txt",
+                    },
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"title":"Invoice Assistant","problem":"Manual disputes"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="artifact-format-validation",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert json.loads((artifact_root / "artifacts" / "prd.json").read_text(encoding="utf-8")) == {
+            "title": "Invoice Assistant",
+            "problem": "Manual disputes",
+        }
+        assert (artifact_root / "artifacts" / "prd.yml").read_text(encoding="utf-8") == (
+            'title: "Invoice Assistant"\n'
+            'problem: "Manual disputes"\n'
+        )
+        assert (artifact_root / "artifacts" / "prd.txt").read_text(encoding="utf-8") == (
+            "{'title': 'Invoice Assistant', 'problem': 'Manual disputes'}\n"
+        )
+        manifest = trace_mod.current_recorder().manifest
+        artifact_events = [
+            event for event in manifest["trace"] if event["event"] == "artifact_written"
+        ]
+        assert [event["metadata"]["artifact"] for event in artifact_events] == [
+            "prd_json",
+            "prd_yaml",
+            "prd_text",
+        ]
+        assert all(event["metadata"]["validated"] is True for event in artifact_events)
+        assert artifact_events[0]["metadata"]["metadata"] == {
+            "kind": "prd",
+            "format_role": "machine",
+        }
+
+    def test_node_artifact_contract_mismatch_fails_before_write(self, tmp_path, monkeypatch):
+        artifact_root = tmp_path / "run-artifacts"
+        monkeypatch.setenv("ABP_ARTIFACT_DIR", str(artifact_root))
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "artifact-contract-mismatch"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "route_contract",
+                            "produces": ["route"],
+                        }
+                    },
+                    "outputs": {
+                        "route_contract": {
+                            "type": "object",
+                            "required": ["route"],
+                            "properties": {"route": {"type": "string"}},
+                        },
+                        "prd_contract": {
+                            "type": "object",
+                            "required": ["title"],
+                            "properties": {"title": {"type": "string"}},
+                        },
+                    },
+                },
+                "artifacts": {
+                    "prd_doc": {
+                        "format": "markdown",
+                        "producer": "assistant",
+                        "contract": "prd_contract",
+                        "path": "artifacts/prd.md",
+                    }
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[{"content": '{"route":"billing"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="artifact-contract-mismatch",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="Artifact contract error"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert not (artifact_root / "artifacts" / "prd.md").exists()
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        assert manifest["trace"][-1]["metadata"]["stage"] == "artifact"
+        assert manifest["trace"][-1]["metadata"]["artifact"] == "prd_doc"
+
     def test_node_output_contract_fails_on_invalid_shape(self, tmp_path, monkeypatch):
         module = _load_generated_nodes_module(
             tmp_path,

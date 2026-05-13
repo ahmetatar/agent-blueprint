@@ -164,6 +164,38 @@ class TestHarnessCompilerSupport:
         assert ir.harness.scenarios[0].id == "refund_happy_path"
         assert ir.harness.scenarios[0].expected.route == "billing"
 
+    def test_artifacts_are_carried_into_ir_with_ownership(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "writer",
+                "nodes": {"writer": {"type": "function"}},
+                "edges": [],
+            },
+            "contracts": {
+                "outputs": {
+                    "prd_contract": {
+                        "type": "object",
+                        "required": ["title"],
+                        "properties": {"title": {"type": "string"}},
+                    }
+                }
+            },
+            "artifacts": {
+                "prd_doc": {
+                    "format": "markdown",
+                    "producer": "writer",
+                    "contract": "prd_contract",
+                    "path": "artifacts/prd.md",
+                }
+            },
+        })
+        ir = compile_blueprint(spec)
+
+        assert ir.artifacts["prd_doc"].path == "artifacts/prd.md"
+        assert ir.artifacts["prd_doc"].producer == "writer"
+        assert ir.artifact_owners == {"writer": ["prd_doc"]}
+
 
 class TestUnsupportedNodeTypes:
     @pytest.mark.parametrize("node_type", ["parallel", "subgraph"])

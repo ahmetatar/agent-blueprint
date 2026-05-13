@@ -283,20 +283,37 @@ If you want a strong ABP workflow with the current feature set, the most useful 
 3. `policies.tool_usage` for noisy tools
 4. `policies.budgets` for expensive runs
 5. `policies.escalation` for ambiguity
-6. `harness` scenarios for the critical happy path and one failure path
+6. `artifacts` for PRD-ready work products
+7. `harness` scenarios for the critical happy path and one failure path
 
 That gives you a workflow that is:
 
 - validated before runtime
 - guarded during runtime
+- able to persist declared artifact outputs
 - replayable after runtime
 
-## What Is Still Ahead
+## Artifact-Centric Workflows
 
-A major next step for ABP is making artifacts first-class. That will cover:
+ABP supports first-class artifact declarations for LangGraph targets. A blueprint can declare
+which node produces a work product, where it should be written, what format it uses, and which
+contract validates its payload before persistence:
 
-- named artifact declarations
-- persistence during runs
-- artifact contracts and validation
+```yaml
+artifacts:
+  prd_doc:
+    format: markdown
+    producer: writer
+    contract: prd_contract
+    path: "artifacts/prd.md"
+    metadata:
+      kind: prd
+```
 
-Until then, ABP is already useful for controlled conversational and routing workflows, but not yet for artifact-centric production flows like PRD generation with declared output files.
+During runtime, generated LangGraph code writes the artifact under `ABP_ARTIFACT_DIR` when set,
+or relative to the current working directory by default. Successful writes emit an
+`artifact_written` trace event with the artifact name, path, format, validation status, and
+metadata. Invalid artifact payloads fail before the file is written.
+
+See [examples/prd-factory.yml](../examples/prd-factory.yml) for a PRD-first workflow with a
+validated markdown artifact and harness scenario.

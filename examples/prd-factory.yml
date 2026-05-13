@@ -1,0 +1,131 @@
+blueprint:
+  name: "prd-factory"
+  version: "1.0"
+  description: "PRD-first workflow that emits a validated markdown artifact"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.2
+  max_graph_steps: 8
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    prd:
+      type: object
+      default: null
+
+input:
+  schema:
+    message:
+      type: string
+      required: true
+      description: "Product idea or feature brief to turn into a PRD"
+
+agents:
+  prd_writer:
+    name: "PRD Writer"
+    model: "${settings.default_model}"
+    system_prompt: |
+      You turn product ideas into concise PRDs.
+      Return only JSON matching this shape:
+      {
+        "title": "...",
+        "problem": "...",
+        "goals": ["..."],
+        "user_stories": ["..."],
+        "acceptance_criteria": ["..."]
+      }
+
+graph:
+  entry_point: writer
+  nodes:
+    writer:
+      agent: prd_writer
+      description: "Draft the PRD and produce the artifact payload"
+  edges:
+    - from: writer
+      to: END
+
+contracts:
+  nodes:
+    writer:
+      produces:
+        - prd
+      output_contract: prd_contract
+  outputs:
+    prd_contract:
+      type: object
+      required:
+        - title
+        - problem
+        - goals
+        - user_stories
+        - acceptance_criteria
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+        problem:
+          type: string
+        goals:
+          type: array
+          items:
+            type: string
+        user_stories:
+          type: array
+          items:
+            type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+
+artifacts:
+  prd_doc:
+    format: markdown
+    producer: writer
+    contract: prd_contract
+    path: "artifacts/prd.md"
+    metadata:
+      kind: prd
+      audience: product
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+    seed: 42
+    fixtures:
+      llm_outputs:
+        writer:
+          - content: |
+              {
+                "title": "Invoice Dispute Assistant",
+                "problem": "Support teams manually triage invoice disputes across email and chat.",
+                "goals": [
+                  "Classify invoice dispute requests",
+                  "Collect missing invoice context",
+                  "Draft resolution recommendations"
+                ],
+                "user_stories": [
+                  "As a support agent, I want disputes summarized so I can respond faster.",
+                  "As a finance lead, I want dispute reasons tracked so I can reduce repeats."
+                ],
+                "acceptance_criteria": [
+                  "The workflow emits a markdown PRD artifact.",
+                  "The PRD includes title, problem, goals, user stories, and acceptance criteria."
+                ]
+              }
+  scenarios:
+    - id: prd_generation_happy_path
+      input:
+        message: "Create a PRD for an AI invoice dispute assistant."
+      expected:
+        output_contract: prd_contract
+        artifacts:
+          - prd_doc
+        state_assertions:
+          - "state.prd.title == 'Invoice Dispute Assistant'"

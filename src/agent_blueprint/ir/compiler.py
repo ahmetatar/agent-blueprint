@@ -18,7 +18,7 @@ from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef
 
-_UNSUPPORTED_NODE_TYPES = {"parallel", "subgraph"}
+_UNSUPPORTED_NODE_TYPES = {"subgraph"}
 
 
 @dataclass

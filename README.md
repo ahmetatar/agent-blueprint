@@ -356,6 +356,10 @@ graph:
     escalate:
       type: handoff
       channel: slack
+    fan_out_context:
+      type: parallel
+      branches: [research, pricing]
+      join: merge_context
 
   edges:
     # Simple edge
@@ -373,6 +377,8 @@ graph:
 ```
 
 **Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference `state` fields: `state.field_name`.
+
+**Parallel nodes** fan out to each branch and then join at the declared `join` node. Branch updates merge through the reducers declared on `state.fields` (`append`, `merge`, or `replace`). The initial partial-failure policy is `fail_fast`.
 
 ### `contracts`
 

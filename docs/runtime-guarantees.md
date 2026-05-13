@@ -59,7 +59,7 @@ Real-life use case:
 
 ### 2. Step limits and unsupported semantics fail loudly
 
-ABP enforces `settings.max_graph_steps` and rejects unimplemented node types like `parallel` and `subgraph` during compile time.
+ABP enforces `settings.max_graph_steps` and rejects unimplemented node types like `subgraph` during compile time. `parallel` nodes are implemented for LangGraph targets with explicit branch fan-out, join edges, fail-fast branch errors, and deterministic state reducer behavior.
 
 What this gives you:
 

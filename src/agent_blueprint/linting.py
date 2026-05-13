@@ -44,6 +44,12 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
 
 def _lint_unreachable_nodes(spec: BlueprintSpec) -> list[LintFinding]:
     adjacency: dict[str, set[str]] = {node_id: set() for node_id in spec.graph.nodes}
+    for node_id, node in spec.graph.nodes.items():
+        if node.type.value == "parallel":
+            adjacency.setdefault(node_id, set()).update(node.branches)
+            if node.join:
+                for branch in node.branches:
+                    adjacency.setdefault(branch, set()).add(node.join)
     for edge in spec.graph.edges:
         for target in edge.get_targets():
             if target.target in spec.graph.nodes:

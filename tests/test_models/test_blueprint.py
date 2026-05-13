@@ -274,6 +274,30 @@ class TestValidBlueprints:
         assert spec.artifacts["prd_doc"].contract == "prd_contract"
         assert spec.artifacts["prd_doc"].metadata == {"kind": "prd", "audience": "product"}
 
+    def test_parallel_node_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "fanout",
+                "nodes": {
+                    "fanout": {
+                        "type": "parallel",
+                        "branches": ["research", "pricing"],
+                        "join": "merge",
+                    },
+                    "research": {"type": "function"},
+                    "pricing": {"type": "function"},
+                    "merge": {"type": "function"},
+                },
+                "edges": [{"from": "merge", "to": "END"}],
+            },
+        })
+
+        fanout = spec.graph.nodes["fanout"]
+        assert fanout.branches == ["research", "pricing"]
+        assert fanout.join == "merge"
+        assert fanout.failure_policy == "fail_fast"
+
     def test_policies_block_loads(self):
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "policy-test"},
@@ -434,6 +458,45 @@ class TestInvalidBlueprints:
                 },
             })
         assert "artifacts.prd_doc.contract references undefined output contract 'missing_contract'" in str(exc_info.value)
+
+    def test_parallel_node_unknown_branch_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "fanout",
+                    "nodes": {
+                        "fanout": {
+                            "type": "parallel",
+                            "branches": ["missing"],
+                            "join": "merge",
+                        },
+                        "merge": {"type": "function"},
+                    },
+                    "edges": [],
+                },
+            })
+        assert "Parallel node 'fanout' branch 'missing' is not defined" in str(exc_info.value)
+
+    def test_parallel_node_explicit_branch_edge_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "fanout",
+                    "nodes": {
+                        "fanout": {
+                            "type": "parallel",
+                            "branches": ["research"],
+                            "join": "merge",
+                        },
+                        "research": {"type": "function"},
+                        "merge": {"type": "function"},
+                    },
+                    "edges": [{"from": "research", "to": "merge"}],
+                },
+            })
+        assert "branch node(s) cannot declare explicit outgoing edges" in str(exc_info.value)
 
     def test_legacy_agent_output_schema_is_rejected(self):
         with pytest.raises(ValidationError) as exc_info:

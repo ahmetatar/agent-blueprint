@@ -198,8 +198,35 @@ class TestHarnessCompilerSupport:
 
 
 class TestUnsupportedNodeTypes:
-    @pytest.mark.parametrize("node_type", ["parallel", "subgraph"])
-    def test_compile_fails_loudly_for_unsupported_node_types(self, node_type):
+    def test_parallel_nodes_compile(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "fanout",
+                "nodes": {
+                    "fanout": {
+                        "type": "parallel",
+                        "branches": ["research", "pricing"],
+                        "join": "merge",
+                    },
+                    "research": {"type": "function"},
+                    "pricing": {"type": "function"},
+                    "merge": {"type": "function"},
+                },
+                "edges": [{"from": "merge", "to": "END"}],
+            },
+        })
+
+        ir = compile_blueprint(spec)
+
+        fanout = ir.get_node("fanout")
+        assert fanout is not None
+        assert fanout.node_def.type == "parallel"
+        assert fanout.node_def.branches == ["research", "pricing"]
+        assert fanout.node_def.join == "merge"
+
+    def test_compile_fails_loudly_for_unsupported_node_types(self):
+        node_type = "subgraph"
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "test"},
             "graph": {

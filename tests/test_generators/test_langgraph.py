@@ -189,6 +189,52 @@ class TestLangGraphGenerator:
         files = self.gen.generate(ir)
         ast.parse(files["graph.py"])
 
+    def test_parallel_node_generates_fanout_and_join_edges(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "parallel-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "findings": {"type": "array", "reducer": "append"},
+                    "scores": {"type": "object", "reducer": "merge"},
+                    "summary": {"type": "string", "reducer": "replace"},
+                }
+            },
+            "graph": {
+                "entry_point": "fanout",
+                "nodes": {
+                    "fanout": {
+                        "type": "parallel",
+                        "branches": ["research", "pricing"],
+                        "join": "merge",
+                    },
+                    "research": {"type": "function"},
+                    "pricing": {"type": "function"},
+                    "merge": {"type": "function"},
+                },
+                "edges": [{"from": "merge", "to": "END"}],
+            },
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        ast.parse(files["graph.py"])
+        ast.parse(files["nodes.py"])
+        ast.parse(files["state.py"])
+        graph_py = files["graph.py"]
+        nodes_py = files["nodes.py"]
+        state_py = files["state.py"]
+
+        assert "def _fan_out_fanout(state: AgentState) -> list[str]:" in graph_py
+        assert "return ['research', 'pricing']" in graph_py
+        assert 'builder.add_edge("research", "merge")' in graph_py
+        assert 'builder.add_edge("pricing", "merge")' in graph_py
+        assert "def node_fanout(state: AgentState) -> dict:" in nodes_py
+        assert '"parallel_started"' in nodes_py
+        assert '"failure_policy": "fail_fast"' in nodes_py
+        assert "findings: Annotated[Any, _abp_append_reducer]" in state_py
+        assert "scores: Annotated[Any, _abp_merge_reducer]" in state_py
+        assert "summary: Annotated[str | None, _abp_replace_reducer]" in state_py
+
     def test_main_py_is_valid_python(self):
         ir = load_ir("basic_chatbot.yml")
         files = self.gen.generate(ir)

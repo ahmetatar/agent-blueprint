@@ -748,6 +748,34 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     print("[HANDOFF] {{ node.description }}")
     return {}
 
+{% elif node.node_def.type.value == "parallel" %}
+def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
+    """Parallel fan-out: {{ node.description }}"""
+    set_current_node("{{ node.id }}")
+    emit_trace_event(
+        "parallel_started",
+        node="{{ node.id }}",
+        input_state=state,
+        metadata={
+            "branches": {{ node.node_def.branches | to_python }},
+            "join": {{ node.node_def.join | to_python }},
+            "failure_policy": "{{ node.node_def.failure_policy.value }}",
+        },
+    )
+    emit_trace_event(
+        "parallel_finished",
+        node="{{ node.id }}",
+        input_state=state,
+        output_state={},
+        metadata={
+            "branches": {{ node.node_def.branches | to_python }},
+            "join": {{ node.node_def.join | to_python }},
+            "failure_policy": "{{ node.node_def.failure_policy.value }}",
+        },
+    )
+    clear_current_node()
+    return {}
+
 {% elif node.node_def.type.value == "function" %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """Function node: {{ node.description }}"""

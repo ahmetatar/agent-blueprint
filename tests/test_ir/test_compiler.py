@@ -195,6 +195,31 @@ class TestHarnessCompilerSupport:
         assert ir.artifacts["prd_doc"].producer == "writer"
         assert ir.artifact_owners == {"writer": ["prd_doc"]}
 
+    def test_evals_are_carried_into_ir(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "router",
+                "nodes": {"router": {"type": "function"}},
+                "edges": [],
+            },
+            "evals": {
+                "suites": [
+                    {
+                        "id": "router_accuracy",
+                        "metric": "exact_match",
+                        "dataset": "datasets/router_cases.yaml",
+                    }
+                ]
+            },
+        })
+
+        ir = compile_blueprint(spec)
+
+        assert ir.evals is not None
+        assert ir.evals.suites[0].id == "router_accuracy"
+        assert ir.evals.suites[0].dataset == "datasets/router_cases.yaml"
+
 
 class TestReusableSubgraphs:
     def test_parallel_nodes_compile(self):

@@ -404,6 +404,39 @@ class TestValidBlueprints:
         assert spec.policies.budgets.max_latency_seconds == 45
         assert spec.model_providers["openai_priced"].pricing is not None
 
+    def test_evals_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "evals-test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "evals": {
+                "suites": [
+                    {
+                        "id": "router_accuracy",
+                        "metric": "exact_match",
+                        "dataset": "datasets/router_cases.yaml",
+                        "description": "Route classifier benchmark",
+                    },
+                    {
+                        "id": "prd_quality",
+                        "metric": "rubric",
+                        "dataset": "datasets/prd_cases.yaml",
+                        "metadata": {"rubric": "prd_v1"},
+                    },
+                    {
+                        "id": "tool_policy_compliance",
+                        "metric": "policy_violations",
+                        "dataset": "datasets/policy_cases.jsonl",
+                    },
+                ]
+            },
+        })
+
+        assert spec.evals is not None
+        assert spec.evals.suites[0].id == "router_accuracy"
+        assert spec.evals.suites[0].metric == "exact_match"
+        assert spec.evals.suites[0].dataset == "datasets/router_cases.yaml"
+        assert spec.evals.suites[1].metadata == {"rubric": "prd_v1"}
+
 
 class TestMcpTools:
     def test_mcp_blueprint_loads(self):
@@ -684,6 +717,44 @@ class TestInvalidBlueprints:
                 },
             })
         assert "duplicate id" in str(exc_info.value)
+
+    def test_evals_duplicate_suite_ids_raise(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "evals-test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "evals": {
+                    "suites": [
+                        {
+                            "id": "dup",
+                            "metric": "exact_match",
+                            "dataset": "datasets/router_cases.yaml",
+                        },
+                        {
+                            "id": "dup",
+                            "metric": "rubric",
+                            "dataset": "datasets/prd_cases.yaml",
+                        },
+                    ]
+                },
+            })
+        assert "evals.suites contains duplicate id" in str(exc_info.value)
+
+    def test_evals_suite_dataset_is_required(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "evals-test"},
+                "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+                "evals": {
+                    "suites": [
+                        {
+                            "id": "router_accuracy",
+                            "metric": "exact_match",
+                        }
+                    ]
+                },
+            })
+        assert "dataset" in str(exc_info.value)
 
     def test_policies_approval_tool_reference_must_exist(self):
         with pytest.raises(ValidationError) as exc_info:

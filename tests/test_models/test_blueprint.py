@@ -274,6 +274,91 @@ class TestValidBlueprints:
         assert spec.artifacts["prd_doc"].contract == "prd_contract"
         assert spec.artifacts["prd_doc"].metadata == {"kind": "prd", "audience": "product"}
 
+    def test_parallel_node_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "fanout",
+                "nodes": {
+                    "fanout": {
+                        "type": "parallel",
+                        "branches": ["research", "pricing"],
+                        "join": "merge",
+                    },
+                    "research": {"type": "function"},
+                    "pricing": {"type": "function"},
+                    "merge": {"type": "function"},
+                },
+                "edges": [{"from": "merge", "to": "END"}],
+            },
+        })
+
+        fanout = spec.graph.nodes["fanout"]
+        assert fanout.branches == ["research", "pricing"]
+        assert fanout.join == "merge"
+        assert fanout.failure_policy == "fail_fast"
+
+    def test_subgraph_node_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "prd": {"type": "object", "default": None, "nullable": True},
+                }
+            },
+            "agents": {"writer_agent": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "prd_pipeline",
+                "nodes": {
+                    "prd_pipeline": {
+                        "type": "subgraph",
+                        "ref": "prd_generation_v1",
+                        "input_map": {"messages": "messages"},
+                        "output_map": {"prd": "prd"},
+                    }
+                },
+                "edges": [{"from": "prd_pipeline", "to": "END"}],
+            },
+            "subgraphs": {
+                "prd_generation_v1": {
+                    "entry_point": "writer",
+                    "nodes": {"writer": {"agent": "writer_agent"}},
+                    "edges": [{"from": "writer", "to": "END"}],
+                }
+            },
+        })
+
+        subgraph_node = spec.graph.nodes["prd_pipeline"]
+        assert subgraph_node.ref == "prd_generation_v1"
+        assert subgraph_node.input_map == {"messages": "messages"}
+        assert subgraph_node.output_map == {"prd": "prd"}
+
+    def test_node_retry_block_loads(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "agents": {"researcher": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "researcher",
+                "nodes": {
+                    "researcher": {
+                        "agent": "researcher",
+                        "retry": {
+                            "max_attempts": 3,
+                            "backoff_seconds": 0.25,
+                            "on": ["exception"],
+                        },
+                    }
+                },
+                "edges": [],
+            },
+        })
+
+        retry = spec.graph.nodes["researcher"].retry
+        assert retry.max_attempts == 3
+        assert retry.backoff_seconds == 0.25
+        assert retry.on == ["exception"]
+
     def test_policies_block_loads(self):
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "policy-test"},
@@ -434,6 +519,97 @@ class TestInvalidBlueprints:
                 },
             })
         assert "artifacts.prd_doc.contract references undefined output contract 'missing_contract'" in str(exc_info.value)
+
+    def test_parallel_node_unknown_branch_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "fanout",
+                    "nodes": {
+                        "fanout": {
+                            "type": "parallel",
+                            "branches": ["missing"],
+                            "join": "merge",
+                        },
+                        "merge": {"type": "function"},
+                    },
+                    "edges": [],
+                },
+            })
+        assert "Parallel node 'fanout' branch 'missing' is not defined" in str(exc_info.value)
+
+    def test_parallel_node_explicit_branch_edge_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "fanout",
+                    "nodes": {
+                        "fanout": {
+                            "type": "parallel",
+                            "branches": ["research"],
+                            "join": "merge",
+                        },
+                        "research": {"type": "function"},
+                        "merge": {"type": "function"},
+                    },
+                    "edges": [{"from": "research", "to": "merge"}],
+                },
+            })
+        assert "branch node(s) cannot declare explicit outgoing edges" in str(exc_info.value)
+
+    def test_subgraph_node_unknown_ref_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "pipeline",
+                    "nodes": {
+                        "pipeline": {
+                            "type": "subgraph",
+                            "ref": "missing",
+                            "input_map": {"messages": "messages"},
+                            "output_map": {"result": "result"},
+                        }
+                    },
+                    "edges": [],
+                },
+            })
+        assert "Node 'pipeline' references undefined subgraph 'missing'" in str(exc_info.value)
+
+    def test_nested_subgraph_raises(self):
+        with pytest.raises(ValidationError) as exc_info:
+            BlueprintSpec.model_validate({
+                "blueprint": {"name": "test"},
+                "graph": {
+                    "entry_point": "pipeline",
+                    "nodes": {
+                        "pipeline": {
+                            "type": "subgraph",
+                            "ref": "outer",
+                            "input_map": {"messages": "messages"},
+                            "output_map": {"result": "result"},
+                        }
+                    },
+                    "edges": [],
+                },
+                "subgraphs": {
+                    "outer": {
+                        "entry_point": "inner",
+                        "nodes": {
+                            "inner": {
+                                "type": "subgraph",
+                                "ref": "other",
+                                "input_map": {"messages": "messages"},
+                                "output_map": {"result": "result"},
+                            }
+                        },
+                        "edges": [],
+                    }
+                },
+            })
+        assert "uses nested subgraph semantics" in str(exc_info.value)
 
     def test_legacy_agent_output_schema_is_rejected(self):
         with pytest.raises(ValidationError) as exc_info:

@@ -62,6 +62,7 @@ class BlueprintSpec(BaseModel):
     agents: dict[str, AgentDef] = Field(default_factory=dict)
     tools: dict[str, ToolDef] = Field(default_factory=dict)
     graph: GraphDef
+    subgraphs: dict[str, GraphDef] = Field(default_factory=dict)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     input: IOSchema | None = None
     output: IOSchema | None = None
@@ -130,6 +131,23 @@ class BlueprintSpec(BaseModel):
                 raise ValueError(
                     f"Node '{node_name}' references undefined agent '{node.agent}'"
                 )
+            if node.type.value == "subgraph" and node.ref not in self.subgraphs:
+                raise ValueError(
+                    f"Node '{node_name}' references undefined subgraph '{node.ref}'"
+                )
+
+        for subgraph_name, subgraph in self.subgraphs.items():
+            for node_name, node in subgraph.nodes.items():
+                if node.agent and node.agent not in self.agents:
+                    raise ValueError(
+                        f"Subgraph '{subgraph_name}' node '{node_name}' references undefined "
+                        f"agent '{node.agent}'"
+                    )
+                if node.type.value == "subgraph":
+                    raise ValueError(
+                        f"Subgraph '{subgraph_name}' node '{node_name}' uses nested subgraph "
+                        "semantics, which are not supported yet"
+                    )
 
         if self.contracts:
             known_state_fields = set(self.state.fields)

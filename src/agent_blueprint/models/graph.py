@@ -14,6 +14,20 @@ class NodeType(str, Enum):
     subgraph = "subgraph"
 
 
+class ParallelFailurePolicy(str, Enum):
+    fail_fast = "fail_fast"
+
+
+class RetryCondition(str, Enum):
+    exception = "exception"
+
+
+class RetryPolicyDef(BaseModel):
+    max_attempts: int = Field(default=1, ge=1)
+    backoff_seconds: float = Field(default=0.0, ge=0.0)
+    on: list[RetryCondition] = Field(default_factory=lambda: [RetryCondition.exception])
+
+
 class HandoffChannel(str, Enum):
     slack = "slack"
     email = "email"
@@ -52,6 +66,13 @@ class EdgeDef(BaseModel):
 class NodeDef(BaseModel):
     agent: str | None = None
     type: NodeType = NodeType.agent
+    branches: list[str] = Field(default_factory=list)
+    join: str | None = None
+    failure_policy: ParallelFailurePolicy = ParallelFailurePolicy.fail_fast
+    ref: str | None = None
+    input_map: dict[str, str] = Field(default_factory=dict)
+    output_map: dict[str, str] = Field(default_factory=dict)
+    retry: RetryPolicyDef = Field(default_factory=RetryPolicyDef)
     description: str | None = None
     action: str | None = None
     channel: HandoffChannel | None = None
@@ -62,6 +83,24 @@ class NodeDef(BaseModel):
     def validate_type_fields(self) -> "NodeDef":
         if self.type == NodeType.agent and not self.agent:
             raise ValueError("agent nodes require an 'agent' reference")
+        if self.type == NodeType.parallel:
+            if self.agent:
+                raise ValueError("parallel nodes cannot declare an 'agent' reference")
+            if not self.branches:
+                raise ValueError("parallel nodes require at least one branch")
+            if not self.join:
+                raise ValueError("parallel nodes require a 'join' target")
+            if self.join in self.branches:
+                raise ValueError("parallel node 'join' target cannot also be a branch")
+        if self.type == NodeType.subgraph:
+            if self.agent:
+                raise ValueError("subgraph nodes cannot declare an 'agent' reference")
+            if not self.ref:
+                raise ValueError("subgraph nodes require a 'ref'")
+            if not self.input_map:
+                raise ValueError("subgraph nodes require an 'input_map'")
+            if not self.output_map:
+                raise ValueError("subgraph nodes require an 'output_map'")
         if self.type == NodeType.handoff and not self.channel:
             self.channel = HandoffChannel.console
         return self
@@ -89,4 +128,28 @@ class GraphDef(BaseModel):
                     raise ValueError(
                         f"Edge target '{target.target}' is not defined in nodes"
                     )
+        for node_id, node in self.nodes.items():
+            if node.type != NodeType.parallel:
+                continue
+            for branch in node.branches:
+                if branch not in self.nodes:
+                    raise ValueError(
+                        f"Parallel node '{node_id}' branch '{branch}' is not defined in nodes"
+                    )
+            if node.join not in self.nodes:
+                raise ValueError(
+                    f"Parallel node '{node_id}' join target '{node.join}' is not defined in nodes"
+                )
+            if any(edge.from_node == node_id for edge in self.edges):
+                raise ValueError(
+                    f"Parallel node '{node_id}' uses branches/join and cannot also declare explicit outgoing edges"
+                )
+            branch_edges = sorted(
+                edge.from_node for edge in self.edges if edge.from_node in node.branches
+            )
+            if branch_edges:
+                rendered = ", ".join(branch_edges)
+                raise ValueError(
+                    f"Parallel node '{node_id}' branch node(s) cannot declare explicit outgoing edges: {rendered}"
+                )
         return self

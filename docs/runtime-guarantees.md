@@ -59,7 +59,7 @@ Real-life use case:
 
 ### 2. Step limits and unsupported semantics fail loudly
 
-ABP enforces `settings.max_graph_steps` and rejects unimplemented node types like `parallel` and `subgraph` during compile time.
+ABP enforces `settings.max_graph_steps` during runtime. `parallel` nodes are implemented for LangGraph targets with explicit branch fan-out, join edges, fail-fast branch errors, and deterministic state reducer behavior. `subgraph` nodes are expanded through named reusable graph definitions with explicit input and output maps so internal state does not merge back into outer state unless declared.
 
 What this gives you:
 
@@ -246,7 +246,28 @@ Real-life use case:
 
 - a document-analysis flow used by internal teams should hard-stop before it burns through a large token budget on a pathological prompt
 
-### 8. Low-confidence escalation
+### 8. Retry policies
+
+ABP supports per-node retry policies for transient runtime failures:
+
+```yaml
+graph:
+  nodes:
+    researcher:
+      agent: researcher
+      retry:
+        max_attempts: 2
+        backoff_seconds: 1
+        on: [exception]
+```
+
+`max_attempts` includes the first attempt. Every scheduled retry and exhausted retry emits a trace event, so mock, replay, and live runs expose the same retry lifecycle. Until fallback routing is added, exhausted retries fail deterministically.
+
+Real-life use case:
+
+- a model provider returns a transient transport error; the node retries once, then either succeeds with a visible retry trace or fails with a clear exhausted-retry event
+
+### 9. Low-confidence escalation
 
 ABP can reroute a workflow when a node emits a low confidence score.
 
@@ -282,9 +303,10 @@ If you want a strong ABP workflow with the current feature set, the most useful 
 2. `contracts` for the router and final writer nodes
 3. `policies.tool_usage` for noisy tools
 4. `policies.budgets` for expensive runs
-5. `policies.escalation` for ambiguity
-6. `artifacts` for PRD-ready work products
-7. `harness` scenarios for the critical happy path and one failure path
+5. node-level `retry` for transient runtime failures
+6. `policies.escalation` for ambiguity
+7. `artifacts` for PRD-ready work products
+8. `harness` scenarios for the critical happy path and one failure path
 
 That gives you a workflow that is:
 

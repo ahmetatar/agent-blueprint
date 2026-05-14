@@ -10,7 +10,7 @@ from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
 from agent_blueprint.models.contracts import ContractsDef, NodeContractDef
 from agent_blueprint.models.harness import HarnessDef
-from agent_blueprint.models.graph import NodeDef
+from agent_blueprint.models.graph import EdgeDef, NodeDef, NodeType
 from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
@@ -18,7 +18,7 @@ from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef
 
-_UNSUPPORTED_NODE_TYPES = {"parallel", "subgraph"}
+_UNSUPPORTED_NODE_TYPES: set[str] = set()
 
 
 @dataclass
@@ -87,10 +87,19 @@ class AgentGraph:
         return {node.resolved_provider for node in self.nodes if node.agent}
 
 
+@dataclass
+class ExpandedGraph:
+    state: StateDef
+    nodes: dict[str, NodeDef]
+    edges: list[EdgeDef]
+    entry_point: str
+
+
 def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     """Compile a validated BlueprintSpec into the framework-agnostic AgentGraph IR."""
-    nodes = _compile_nodes(spec)
-    edges = _compile_edges(spec)
+    expanded = _expand_subgraphs(spec)
+    nodes = _compile_nodes(spec, expanded.nodes)
+    edges = _compile_edges(expanded.edges)
     warnings = _collect_warnings(nodes)
     artifact_owners = _compile_artifact_owners(spec.artifacts)
 
@@ -99,10 +108,10 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         version=spec.blueprint.version,
         description=spec.blueprint.description,
         settings=spec.settings,
-        state=spec.state,
+        state=expanded.state,
         nodes=nodes,
         edges=edges,
-        entry_point=spec.graph.entry_point,
+        entry_point=expanded.entry_point,
         memory=spec.memory,
         all_tools=spec.tools,
         retrievers=spec.retrievers,
@@ -114,6 +123,125 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         policies=spec.policies,
         harness=spec.harness,
         warnings=warnings,
+    )
+
+
+def _namespace_id(subgraph_node_id: str, inner_node_id: str) -> str:
+    return f"{subgraph_node_id}__{inner_node_id}"
+
+
+def _namespace_state_key(subgraph_node_id: str, inner_field: str) -> str:
+    return f"{subgraph_node_id}__{inner_field}"
+
+
+def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
+    nodes: dict[str, NodeDef] = {}
+    edges: list[EdgeDef] = []
+    state = spec.state.model_copy(deep=True)
+    subgraph_entry_nodes: dict[str, str] = {}
+    subgraph_exit_nodes: dict[str, str] = {}
+
+    for node_id, node_def in spec.graph.nodes.items():
+        if node_def.type != NodeType.subgraph:
+            nodes[node_id] = node_def
+            continue
+
+        if node_def.ref is None or node_def.ref not in spec.subgraphs:
+            raise BlueprintCompilationError(
+                f"Node '{node_id}' references undefined subgraph '{node_def.ref}'"
+            )
+
+        subgraph = spec.subgraphs[node_def.ref]
+        entry_id = _namespace_id(node_id, "entry")
+        exit_id = _namespace_id(node_id, "exit")
+        subgraph_entry_nodes[node_id] = entry_id
+        subgraph_exit_nodes[node_id] = exit_id
+
+        nodes[entry_id] = NodeDef(
+            type=NodeType.function,
+            description=f"Subgraph '{node_id}' input adapter",
+            metadata={
+                "abp_subgraph_adapter": "entry",
+                "subgraph_node": node_id,
+                "ref": node_def.ref,
+                "input_map": node_def.input_map,
+            },
+        )
+        nodes[exit_id] = NodeDef(
+            type=NodeType.function,
+            description=f"Subgraph '{node_id}' output adapter",
+            metadata={
+                "abp_subgraph_adapter": "exit",
+                "subgraph_node": node_id,
+                "ref": node_def.ref,
+                "output_map": node_def.output_map,
+            },
+        )
+
+        for outer_field, inner_field in node_def.input_map.items():
+            if outer_field in spec.state.fields:
+                state.fields.setdefault(
+                    _namespace_state_key(node_id, inner_field),
+                    spec.state.fields[outer_field].model_copy(deep=True),
+                )
+        for inner_field, outer_field in node_def.output_map.items():
+            if outer_field in spec.state.fields:
+                state.fields.setdefault(
+                    _namespace_state_key(node_id, inner_field),
+                    spec.state.fields[outer_field].model_copy(deep=True),
+                )
+
+        state_key_map = {
+            inner_field: _namespace_state_key(node_id, inner_field)
+            for inner_field in set(node_def.input_map.values()) | set(node_def.output_map.keys())
+        }
+
+        for inner_node_id, inner_node in subgraph.nodes.items():
+            expanded_node = inner_node.model_copy(deep=True)
+            expanded_node.metadata = {
+                **expanded_node.metadata,
+                "abp_subgraph_node": node_id,
+                "abp_subgraph_ref": node_def.ref,
+                "abp_state_key_map": state_key_map,
+            }
+            if expanded_node.type == NodeType.parallel:
+                expanded_node.branches = [
+                    _namespace_id(node_id, branch) for branch in expanded_node.branches
+                ]
+                if expanded_node.join:
+                    expanded_node.join = _namespace_id(node_id, expanded_node.join)
+            nodes[_namespace_id(node_id, inner_node_id)] = expanded_node
+
+        edges.append(EdgeDef.model_validate({
+            "from": entry_id,
+            "to": _namespace_id(node_id, subgraph.entry_point),
+        }))
+        for inner_edge in subgraph.edges:
+            edge_source = _namespace_id(node_id, inner_edge.from_node)
+            remapped_targets = []
+            for target in inner_edge.get_targets():
+                remapped = target.model_copy(deep=True)
+                remapped.target = (
+                    exit_id if remapped.target == "END" else _namespace_id(node_id, remapped.target)
+                )
+                remapped_targets.append(remapped)
+            edges.append(EdgeDef.model_validate({"from": edge_source, "to": remapped_targets}))
+
+    for edge in spec.graph.edges:
+        from_node = subgraph_exit_nodes.get(edge.from_node, edge.from_node)
+        remapped_targets = []
+        for target in edge.get_targets():
+            remapped = target.model_copy(deep=True)
+            remapped.target = subgraph_entry_nodes.get(remapped.target, remapped.target)
+            remapped_targets.append(remapped)
+        edges.append(EdgeDef.model_validate({"from": from_node, "to": remapped_targets}))
+
+    entry_point = subgraph_entry_nodes.get(spec.graph.entry_point, spec.graph.entry_point)
+    return ExpandedGraph(
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry_point=entry_point,
     )
 
 
@@ -165,10 +293,10 @@ def _resolve_llm(agent: AgentDef, spec: BlueprintSpec) -> tuple[str, str, ModelP
     return provider, model_name, None
 
 
-def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
+def _compile_nodes(spec: BlueprintSpec, node_defs: dict[str, NodeDef]) -> list[IRNode]:
     nodes: list[IRNode] = []
 
-    for node_id, node_def in spec.graph.nodes.items():
+    for node_id, node_def in node_defs.items():
         if node_def.type.value in _UNSUPPORTED_NODE_TYPES:
             raise BlueprintCompilationError(
                 f"Node '{node_id}' uses unsupported node type '{node_def.type.value}'. "
@@ -219,10 +347,10 @@ def _compile_nodes(spec: BlueprintSpec) -> list[IRNode]:
     return nodes
 
 
-def _compile_edges(spec: BlueprintSpec) -> list[IREdge]:
+def _compile_edges(edge_defs: list[EdgeDef]) -> list[IREdge]:
     edges: list[IREdge] = []
 
-    for edge_def in spec.graph.edges:
+    for edge_def in edge_defs:
         targets: list[IREdgeTarget] = []
 
         for edge_target in edge_def.get_targets():

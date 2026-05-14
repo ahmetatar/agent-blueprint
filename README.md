@@ -351,11 +351,26 @@ graph:
     router:
       agent: router
       description: "Route requests"
+      retry:
+        max_attempts: 2
+        backoff_seconds: 1
+        on: [exception]
     handle_billing:
       agent: billing_agent
     escalate:
       type: handoff
       channel: slack
+    fan_out_context:
+      type: parallel
+      branches: [research, pricing]
+      join: merge_context
+    prd_pipeline:
+      type: subgraph
+      ref: prd_generation_v1
+      input_map:
+        messages: messages
+      output_map:
+        prd: prd
 
   edges:
     # Simple edge
@@ -372,7 +387,25 @@ graph:
         - default: END
 ```
 
-**Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference `state` fields: `state.field_name`.
+**Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference state fields with `state.field_name`; arbitrary names, function calls, arithmetic, and subscripts are rejected. See [Condition Expressions](docs/condition-expressions.md) for the portable grammar and lint analysis guarantees.
+
+**Parallel nodes** fan out to each branch and then join at the declared `join` node. Branch updates merge through the reducers declared on `state.fields` (`append`, `merge`, or `replace`). The initial partial-failure policy is `fail_fast`.
+
+**Subgraph nodes** reuse a named graph from the top-level `subgraphs` registry. `input_map` maps outer state fields into the subgraph's isolated namespace; `output_map` maps selected subgraph-local fields back to outer state.
+
+**Retry policies** can be declared per node. `max_attempts` includes the first attempt; `backoff_seconds` waits between retryable failures; `on: [exception]` retries runtime exceptions and emits retry trace events. Exhausted retries fail deterministically until fallback routing is added.
+
+```yaml
+subgraphs:
+  prd_generation_v1:
+    entry_point: writer
+    nodes:
+      writer:
+        agent: prd_writer
+    edges:
+      - from: writer
+        to: END
+```
 
 ### `contracts`
 

@@ -6,20 +6,52 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 
+def _abp_append_reducer(left: Any, right: Any) -> Any:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    if isinstance(left, list) and isinstance(right, list):
+        return left + right
+    if isinstance(left, list):
+        return left + [right]
+    if isinstance(right, list):
+        return [left] + right
+    return [left, right]
+
+
+def _abp_merge_reducer(left: Any, right: Any) -> Any:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    if isinstance(left, dict) and isinstance(right, dict):
+        merged = dict(left)
+        merged.update(right)
+        return merged
+    return right
+
+
+def _abp_replace_reducer(left: Any, right: Any) -> Any:
+    if right is None:
+        return left
+    return right
+
+
 class AgentState(TypedDict):
 {% for field_name, field_def in ir.state.fields.items() %}
 {% if field_def.type == "list[message]" %}
     {{ field_name }}: Annotated[list, add_messages]
 {% elif field_def.type == "string" %}
-    {{ field_name }}: str | None
+    {{ field_name }}: Annotated[str | None, _abp_{{ field_def.reducer.value }}_reducer]
 {% elif field_def.type == "boolean" %}
-    {{ field_name }}: bool
+    {{ field_name }}: Annotated[bool, _abp_{{ field_def.reducer.value }}_reducer]
 {% elif field_def.type == "number" or field_def.type == "float" %}
-    {{ field_name }}: float | None
+    {{ field_name }}: Annotated[float | None, _abp_{{ field_def.reducer.value }}_reducer]
 {% elif field_def.type == "integer" %}
-    {{ field_name }}: int | None
+    {{ field_name }}: Annotated[int | None, _abp_{{ field_def.reducer.value }}_reducer]
 {% else %}
-    {{ field_name }}: Any
+    {{ field_name }}: Annotated[Any, _abp_{{ field_def.reducer.value }}_reducer]
 {% endif %}
 {% else %}
     pass

@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -197,20 +196,77 @@ class TestHarnessCompilerSupport:
         assert ir.artifact_owners == {"writer": ["prd_doc"]}
 
 
-class TestUnsupportedNodeTypes:
-    @pytest.mark.parametrize("node_type", ["parallel", "subgraph"])
-    def test_compile_fails_loudly_for_unsupported_node_types(self, node_type):
+class TestReusableSubgraphs:
+    def test_parallel_nodes_compile(self):
         spec = BlueprintSpec.model_validate({
             "blueprint": {"name": "test"},
             "graph": {
-                "entry_point": "n",
-                "nodes": {"n": {"type": node_type}},
-                "edges": [],
+                "entry_point": "fanout",
+                "nodes": {
+                    "fanout": {
+                        "type": "parallel",
+                        "branches": ["research", "pricing"],
+                        "join": "merge",
+                    },
+                    "research": {"type": "function"},
+                    "pricing": {"type": "function"},
+                    "merge": {"type": "function"},
+                },
+                "edges": [{"from": "merge", "to": "END"}],
             },
         })
 
-        with pytest.raises(BlueprintCompilationError) as exc_info:
-            compile_blueprint(spec)
+        ir = compile_blueprint(spec)
 
-        assert "Node 'n'" in str(exc_info.value)
-        assert f"unsupported node type '{node_type}'" in str(exc_info.value)
+        fanout = ir.get_node("fanout")
+        assert fanout is not None
+        assert fanout.node_def.type == "parallel"
+        assert fanout.node_def.branches == ["research", "pricing"]
+        assert fanout.node_def.join == "merge"
+
+    def test_subgraph_nodes_expand_with_namespaced_adapters(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "prd": {"type": "object", "default": None, "nullable": True},
+                }
+            },
+            "agents": {"writer_agent": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "prd_pipeline",
+                "nodes": {
+                    "prd_pipeline": {
+                        "type": "subgraph",
+                        "ref": "prd_generation_v1",
+                        "input_map": {"messages": "messages"},
+                        "output_map": {"prd": "prd"},
+                    },
+                    "after": {"type": "function"},
+                },
+                "edges": [{"from": "prd_pipeline", "to": "after"}],
+            },
+            "subgraphs": {
+                "prd_generation_v1": {
+                    "entry_point": "writer",
+                    "nodes": {"writer": {"agent": "writer_agent"}},
+                    "edges": [{"from": "writer", "to": "END"}],
+                }
+            },
+        })
+
+        ir = compile_blueprint(spec)
+
+        assert ir.entry_point == "prd_pipeline__entry"
+        assert ir.get_node("prd_pipeline") is None
+        assert ir.get_node("prd_pipeline__entry") is not None
+        assert ir.get_node("prd_pipeline__writer") is not None
+        assert ir.get_node("prd_pipeline__exit") is not None
+        assert "prd_pipeline__messages" in ir.state.fields
+        assert "prd_pipeline__prd" in ir.state.fields
+        assert [(edge.from_node, [target.target for target in edge.targets]) for edge in ir.edges] == [
+            ("prd_pipeline__entry", ["prd_pipeline__writer"]),
+            ("prd_pipeline__writer", ["prd_pipeline__exit"]),
+            ("prd_pipeline__exit", ["after"]),
+        ]

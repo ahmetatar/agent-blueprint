@@ -35,6 +35,27 @@ def build_graph():
     # Set entry point
     builder.add_edge(START, "{{ ir.entry_point }}")
 
+    # Add parallel fan-out and join edges
+{% for node in ir.nodes %}
+{% if node.node_def.type.value == "parallel" %}
+    def _fan_out_{{ node.id | safe_id }}(state: AgentState) -> list[str]:
+        return {{ node.node_def.branches | to_python }}
+
+    builder.add_conditional_edges(
+        "{{ node.id }}",
+        _fan_out_{{ node.id | safe_id }},
+        {
+{% for branch in node.node_def.branches %}
+            "{{ branch }}": "{{ branch }}",
+{% endfor %}
+        }
+    )
+{% for branch in node.node_def.branches %}
+    builder.add_edge("{{ branch }}", "{{ node.node_def.join }}")
+{% endfor %}
+{% endif %}
+{% endfor %}
+
     # Add edges
 {% for edge in ir.edges %}
 {% if edge.is_conditional %}

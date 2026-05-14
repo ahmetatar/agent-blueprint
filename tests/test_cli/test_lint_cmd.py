@@ -181,6 +181,90 @@ graph:
         assert "condition-overlap-ambiguity" in result.output
         assert "route order will decide" in result.output
 
+    def test_reports_compound_condition_overlap_warning(self, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "lint-compound-condition-overlap"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    route:
+      type: string
+      default: null
+    priority:
+      type: string
+      default: normal
+agents:
+  router:
+    model: "gpt-4o"
+graph:
+  entry_point: router
+  nodes:
+    router:
+      agent: router
+    billing:
+      agent: router
+    urgent:
+      agent: router
+  edges:
+    - from: router
+      to:
+        - condition: "state.route == 'billing' and state.priority != 'low'"
+          target: billing
+        - condition: "state.route in ['billing', 'sales']"
+          target: urgent
+        - default: END
+""",
+        )
+
+        result = runner.invoke(app, ["lint", str(blueprint)])
+        assert result.exit_code == 0
+        assert "condition-overlap-ambiguity" in result.output
+        assert "billing" in result.output
+        assert "urgent" in result.output
+
+    def test_reports_partially_analyzable_condition_warning(self, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "lint-partial-condition-analysis"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    score:
+      type: number
+      default: 0
+agents:
+  router:
+    model: "gpt-4o"
+graph:
+  entry_point: router
+  nodes:
+    router:
+      agent: router
+    review:
+      agent: router
+  edges:
+    - from: router
+      to:
+        - condition: "state.score >= 0.8"
+          target: review
+        - default: END
+""",
+        )
+
+        result = runner.invoke(app, ["lint", str(blueprint)])
+        assert result.exit_code == 0
+        assert "condition-partially-analyzable" in result.output
+        assert "valid and portable" in result.output
+
     def test_reports_conflicting_contracts_as_errors(self, tmp_path):
         blueprint = _write_blueprint(
             tmp_path,

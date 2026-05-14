@@ -126,6 +126,8 @@ def _load_generated_nodes_module(
 
         def invoke(self, working):
             item = self._script.pop(0)
+            if "raises" in item:
+                raise item["raises"]
             return FakeResponse(
                 content=item.get("content", ""),
                 tool_calls=item.get("tool_calls", []),
@@ -235,6 +237,180 @@ class TestLangGraphGenerator:
         assert "scores: Annotated[Any, _abp_merge_reducer]" in state_py
         assert "summary: Annotated[str | None, _abp_replace_reducer]" in state_py
 
+    def test_subgraph_node_generates_namespaced_adapters(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "subgraph-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "prd": {"type": "object", "reducer": "replace", "default": None, "nullable": True},
+                }
+            },
+            "agents": {"writer_agent": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "prd_pipeline",
+                "nodes": {
+                    "prd_pipeline": {
+                        "type": "subgraph",
+                        "ref": "prd_generation_v1",
+                        "input_map": {"messages": "messages"},
+                        "output_map": {"prd": "prd"},
+                    }
+                },
+                "edges": [{"from": "prd_pipeline", "to": "END"}],
+            },
+            "subgraphs": {
+                "prd_generation_v1": {
+                    "entry_point": "writer",
+                    "nodes": {"writer": {"agent": "writer_agent"}},
+                    "edges": [{"from": "writer", "to": "END"}],
+                }
+            },
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        ast.parse(files["graph.py"])
+        ast.parse(files["nodes.py"])
+        ast.parse(files["state.py"])
+        graph_py = files["graph.py"]
+        nodes_py = files["nodes.py"]
+        state_py = files["state.py"]
+
+        assert 'builder.add_edge(START, "prd_pipeline__entry")' in graph_py
+        assert 'builder.add_edge("prd_pipeline__entry", "prd_pipeline__writer")' in graph_py
+        assert 'builder.add_edge("prd_pipeline__writer", "prd_pipeline__exit")' in graph_py
+        assert '"subgraph_entered"' in nodes_py
+        assert '"subgraph_exited"' in nodes_py
+        assert '"prd_pipeline__messages": state.get("messages")' in nodes_py
+        assert '"prd": state.get("prd_pipeline__prd")' in nodes_py
+        assert 'working: list = list(state.get("prd_pipeline__messages", []))' in nodes_py
+        assert 'updates["prd_pipeline__messages"] = new_messages' in nodes_py
+        assert "prd_pipeline__messages: Annotated[list, add_messages]" in state_py
+        assert "prd_pipeline__prd: Annotated[Any, _abp_replace_reducer]" in state_py
+
+    def test_retry_policy_is_rendered_for_nodes(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "retry-render-test"},
+            "agents": {"researcher": {"model": "gpt-4o"}},
+            "graph": {
+                "entry_point": "researcher",
+                "nodes": {
+                    "researcher": {
+                        "agent": "researcher",
+                        "retry": {
+                            "max_attempts": 3,
+                            "backoff_seconds": 0.25,
+                            "on": ["exception"],
+                        },
+                    }
+                },
+                "edges": [],
+            },
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        ast.parse(files["nodes.py"])
+        nodes_py = files["nodes.py"]
+        assert "RETRY_POLICY_BY_NODE = {" in nodes_py
+        assert '"researcher": {' in nodes_py
+        assert '"max_attempts": 3' in nodes_py
+        assert '"backoff_seconds": 0.25' in nodes_py
+        assert '"on": [\'exception\']' in nodes_py
+        assert 'response = _invoke_llm_with_retry("researcher", llm, working)' in nodes_py
+
+    def test_node_retries_llm_exception_then_succeeds(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "retry-success-test"},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {
+                        "assistant": {
+                            "agent": "assistant",
+                            "retry": {"max_attempts": 2, "backoff_seconds": 0},
+                        }
+                    },
+                    "edges": [],
+                },
+            },
+            llm_script=[
+                {"raises": RuntimeError("temporary model failure")},
+                {"content": "recovered"},
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="retry-success-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["messages"][-1].content == "recovered"
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == [
+            "node_started",
+            "retry_scheduled",
+            "node_finished",
+        ]
+        retry_event = manifest["trace"][1]
+        assert retry_event["metadata"]["attempt"] == 1
+        assert retry_event["metadata"]["next_attempt"] == 2
+        assert retry_event["metadata"]["max_attempts"] == 2
+        assert retry_event["metadata"]["condition"] == "exception"
+
+    def test_node_retry_exhaustion_fails_deterministically(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "retry-exhausted-test"},
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "graph": {
+                    "entry_point": "assistant",
+                    "nodes": {
+                        "assistant": {
+                            "agent": "assistant",
+                            "retry": {"max_attempts": 2, "backoff_seconds": 0},
+                        }
+                    },
+                    "edges": [],
+                },
+            },
+            llm_script=[
+                {"raises": RuntimeError("first failure")},
+                {"raises": RuntimeError("second failure")},
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="retry-exhausted-test",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+
+        with pytest.raises(RuntimeError, match="second failure"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == [
+            "node_started",
+            "retry_scheduled",
+            "retry_exhausted",
+        ]
+        exhausted_event = manifest["trace"][-1]
+        assert exhausted_event["metadata"]["attempt"] == 2
+        assert exhausted_event["metadata"]["max_attempts"] == 2
+        assert exhausted_event["metadata"]["condition"] == "exception"
+
     def test_main_py_is_valid_python(self):
         ir = load_ir("basic_chatbot.yml")
         files = self.gen.generate(ir)
@@ -325,6 +501,71 @@ class TestLangGraphGenerator:
 
         with pytest.raises(RuntimeError, match="ABP runtime step limit exceeded"):
             module.run("hello")
+
+    def test_generated_main_enforces_latency_budget(self, tmp_path, monkeypatch):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "latency-budget-test"},
+            "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            "policies": {"budgets": {"max_latency_seconds": 0.5}},
+        })
+        files = self.gen.generate(compile_blueprint(spec))
+
+        _write_trace_helper(tmp_path, files)
+        _write_harness_helper(tmp_path, files)
+        (tmp_path / "langgraph").mkdir()
+        (tmp_path / "langgraph" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "langgraph" / "errors.py").write_text(
+            "class GraphRecursionError(Exception):\n    pass\n",
+            encoding="utf-8",
+        )
+
+        (tmp_path / "langchain_core").mkdir()
+        (tmp_path / "langchain_core" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "langchain_core" / "messages.py").write_text(
+            "class HumanMessage:\n"
+            "    def __init__(self, content):\n"
+            "        self.content = content\n",
+            encoding="utf-8",
+        )
+
+        (tmp_path / "graph.py").write_text(
+            "class DummyGraph:\n"
+            "    def invoke(self, state, config=None):\n"
+            "        return {'messages': []}\n\n"
+            "graph = DummyGraph()\n",
+            encoding="utf-8",
+        )
+        main_path = tmp_path / "generated_main.py"
+        main_path.write_text(files["main.py"], encoding="utf-8")
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+        monkeypatch.delitem(sys.modules, "graph", raising=False)
+        spec_obj = importlib.util.spec_from_file_location(
+            "generated_main_latency_budget_test",
+            main_path,
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+        monkeypatch.setattr(module, "monotonic", iter([10.0, 10.75]).__next__)
+
+        with pytest.raises(RuntimeError, match="run exceeded max_latency_seconds=0.5"):
+            module.run("hello")
+
+        trace_mod = sys.modules["_abp_trace"]
+        manifest = trace_mod.get_last_trace_manifest()
+        assert manifest is not None
+        assert manifest["trace"][-2]["event"] == "policy_violation"
+        assert manifest["trace"][-2]["metadata"]["policy_kind"] == "max_latency_seconds"
+        assert manifest["trace"][-2]["metadata"]["elapsed_seconds"] == 0.75
+        assert manifest["trace"][-1]["event"] == "run_finished"
+        assert manifest["trace"][-1]["metadata"]["status"] == "failed"
 
     def test_generated_main_rejects_invalid_input_before_graph_execution(self, tmp_path, monkeypatch):
         spec = BlueprintSpec.model_validate({

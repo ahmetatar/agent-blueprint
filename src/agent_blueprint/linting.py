@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -11,6 +10,7 @@ from pathlib import Path
 from ruamel.yaml.comments import CommentedMap
 
 from agent_blueprint.ir.compiler import AgentGraph
+from agent_blueprint.ir.expression import analyze_expression
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import dump_blueprint_document, load_blueprint_document
 
@@ -35,6 +35,7 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
     findings: list[LintFinding] = []
     findings.extend(_lint_unreachable_nodes(spec))
     findings.extend(_lint_missing_default_routes(spec))
+    findings.extend(_lint_condition_analyzability(spec))
     findings.extend(_lint_condition_overlap_ambiguity(spec))
     findings.extend(_lint_dead_state_fields(spec))
     findings.extend(_lint_contract_usage(spec))
@@ -139,19 +140,19 @@ def _lint_condition_overlap_ambiguity(spec: BlueprintSpec) -> list[LintFinding]:
     findings: list[LintFinding] = []
     for edge_index, edge in enumerate(spec.graph.edges):
         conditional_targets = [
-            (target_index, target)
+            (target_index, target, analyze_expression(target.condition or ""))
             for target_index, target in enumerate(edge.get_targets())
             if target.condition
         ]
-        for left_index, (target_index, target) in enumerate(conditional_targets):
-            left_constraint = _extract_simple_state_constraint(target.condition or "")
-            if left_constraint is None:
+        for left_index, (target_index, target, analysis) in enumerate(conditional_targets):
+            if not analysis.fully_analyzable:
                 continue
-            for other_target_index, other_target in conditional_targets[left_index + 1:]:
-                right_constraint = _extract_simple_state_constraint(other_target.condition or "")
-                if right_constraint is None:
+            for _other_target_index, other_target, other_analysis in conditional_targets[
+                left_index + 1:
+            ]:
+                if not other_analysis.fully_analyzable:
                     continue
-                if _constraints_overlap(left_constraint, right_constraint):
+                if analysis.overlaps(other_analysis):
                     findings.append(LintFinding(
                         severity=LintSeverity.warning,
                         code="condition-overlap-ambiguity",
@@ -162,6 +163,28 @@ def _lint_condition_overlap_ambiguity(spec: BlueprintSpec) -> list[LintFinding]:
                         ),
                         autofixable=False,
                     ))
+    return findings
+
+
+def _lint_condition_analyzability(spec: BlueprintSpec) -> list[LintFinding]:
+    findings: list[LintFinding] = []
+    for edge_index, edge in enumerate(spec.graph.edges):
+        for target_index, target in enumerate(edge.get_targets()):
+            if not target.condition:
+                continue
+            analysis = analyze_expression(target.condition)
+            if analysis.fully_analyzable:
+                continue
+            findings.append(LintFinding(
+                severity=LintSeverity.warning,
+                code="condition-partially-analyzable",
+                location=f"graph.edges[{edge_index}].to[{target_index}]",
+                message=(
+                    f"Condition for target '{target.target}' is valid and portable, "
+                    f"but lint can only partially analyze it: {analysis.reason}"
+                ),
+                autofixable=False,
+            ))
     return findings
 
 
@@ -248,53 +271,6 @@ def _lint_mutation_patterns(spec: BlueprintSpec) -> list[LintFinding]:
             ))
 
     return findings
-
-
-def _extract_simple_state_constraint(expr: str) -> tuple[str, set[object]] | None:
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError:
-        return None
-
-    body = tree.body
-    if not isinstance(body, ast.Compare):
-        return None
-    if len(body.ops) != 1 or len(body.comparators) != 1:
-        return None
-    if not (
-        isinstance(body.left, ast.Attribute)
-        and isinstance(body.left.value, ast.Name)
-        and body.left.value.id == "state"
-    ):
-        return None
-
-    field_name = body.left.attr
-    op = body.ops[0]
-    comparator = body.comparators[0]
-
-    if isinstance(op, ast.Eq) and isinstance(comparator, ast.Constant):
-        return field_name, {comparator.value}
-
-    if isinstance(op, ast.In) and isinstance(comparator, (ast.List, ast.Tuple)):
-        values: set[object] = set()
-        for item in comparator.elts:
-            if not isinstance(item, ast.Constant):
-                return None
-            values.add(item.value)
-        return field_name, values
-
-    return None
-
-
-def _constraints_overlap(
-    left: tuple[str, set[object]],
-    right: tuple[str, set[object]],
-) -> bool:
-    left_field, left_values = left
-    right_field, right_values = right
-    if left_field != right_field:
-        return False
-    return bool(left_values & right_values)
 
 
 def apply_auto_fixes(blueprint: Path, findings: list[LintFinding]) -> list[str]:

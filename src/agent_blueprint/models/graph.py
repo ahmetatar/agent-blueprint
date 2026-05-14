@@ -18,6 +18,16 @@ class ParallelFailurePolicy(str, Enum):
     fail_fast = "fail_fast"
 
 
+class RetryCondition(str, Enum):
+    exception = "exception"
+
+
+class RetryPolicyDef(BaseModel):
+    max_attempts: int = Field(default=1, ge=1)
+    backoff_seconds: float = Field(default=0.0, ge=0.0)
+    on: list[RetryCondition] = Field(default_factory=lambda: [RetryCondition.exception])
+
+
 class HandoffChannel(str, Enum):
     slack = "slack"
     email = "email"
@@ -59,6 +69,10 @@ class NodeDef(BaseModel):
     branches: list[str] = Field(default_factory=list)
     join: str | None = None
     failure_policy: ParallelFailurePolicy = ParallelFailurePolicy.fail_fast
+    ref: str | None = None
+    input_map: dict[str, str] = Field(default_factory=dict)
+    output_map: dict[str, str] = Field(default_factory=dict)
+    retry: RetryPolicyDef = Field(default_factory=RetryPolicyDef)
     description: str | None = None
     action: str | None = None
     channel: HandoffChannel | None = None
@@ -78,6 +92,15 @@ class NodeDef(BaseModel):
                 raise ValueError("parallel nodes require a 'join' target")
             if self.join in self.branches:
                 raise ValueError("parallel node 'join' target cannot also be a branch")
+        if self.type == NodeType.subgraph:
+            if self.agent:
+                raise ValueError("subgraph nodes cannot declare an 'agent' reference")
+            if not self.ref:
+                raise ValueError("subgraph nodes require a 'ref'")
+            if not self.input_map:
+                raise ValueError("subgraph nodes require an 'input_map'")
+            if not self.output_map:
+                raise ValueError("subgraph nodes require an 'output_map'")
         if self.type == NodeType.handoff and not self.channel:
             self.channel = HandoffChannel.console
         return self

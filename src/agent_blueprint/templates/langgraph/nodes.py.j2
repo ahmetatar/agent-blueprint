@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from time import sleep
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -60,6 +61,15 @@ ARTIFACTS_BY_NODE = {
     ],
 {% endfor %}
 }
+RETRY_POLICY_BY_NODE = {
+{% for node in ir.nodes %}
+    "{{ node.id }}": {
+        "max_attempts": {{ node.node_def.retry.max_attempts | to_python }},
+        "backoff_seconds": {{ node.node_def.retry.backoff_seconds | to_python }},
+        "on": {{ node.node_def.retry.on | map(attribute="value") | list | to_python }},
+    },
+{% endfor %}
+}
 
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
@@ -94,6 +104,46 @@ def _llm_trace_payload(response: Any) -> dict[str, Any]:
             for call in tool_calls
         ]
     return payload
+
+
+def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
+    retry_policy = RETRY_POLICY_BY_NODE.get(node_id, {})
+    max_attempts = int(retry_policy.get("max_attempts") or 1)
+    backoff_seconds = float(retry_policy.get("backoff_seconds") or 0.0)
+    retry_on = set(retry_policy.get("on") or [])
+    attempt = 1
+    while True:
+        try:
+            return llm.invoke(working)
+        except Exception as exc:
+            if "exception" not in retry_on or attempt >= max_attempts:
+                emit_trace_event(
+                    "retry_exhausted",
+                    node=node_id,
+                    error=str(exc),
+                    metadata={
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "condition": "exception",
+                    },
+                )
+                clear_current_node()
+                raise
+            emit_trace_event(
+                "retry_scheduled",
+                node=node_id,
+                error=str(exc),
+                metadata={
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "max_attempts": max_attempts,
+                    "condition": "exception",
+                    "backoff_seconds": backoff_seconds,
+                },
+            )
+            if backoff_seconds > 0:
+                sleep(backoff_seconds)
+            attempt += 1
 
 
 def _emit_human_review_event(
@@ -598,6 +648,7 @@ def _apply_low_confidence_escalation(node_id: str, updates: dict[str, Any]) -> s
 
 {% for node in ir.nodes %}
 {% if node.agent %}
+{% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """{{ node.description }}"""
 {% if node.agent.human_in_the_loop %}
@@ -624,7 +675,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         llm = llm.bind_tools(tools)
 {% endif %}
     # Working copy — system prompt prepended once, tool messages appended inline
-    working: list = list(state.get("messages", []))
+    working: list = list(state.get("{{ messages_key }}", []))
 {% if node.agent.system_prompt %}
     system_prompt = """{{ node.agent.system_prompt | escape_string }}"""
     if not any(isinstance(m, SystemMessage) for m in working):
@@ -654,7 +705,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% if node.tool_defs %}
     # ReAct loop: invoke LLM, execute any tool calls, repeat until plain response
     while True:
-        response = llm.invoke(working)
+        response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
         record_llm_output("{{ node.id }}", _llm_trace_payload(response))
         working.append(response)
@@ -680,13 +731,13 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
             working.append(tool_msg)
             new_messages.append(tool_msg)
 {% else %}
-    response = llm.invoke(working)
+    response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
     register_llm_budget_usage("{{ node.id }}", response)
     record_llm_output("{{ node.id }}", _llm_trace_payload(response))
     _require_human_review("{{ node.id }}", hitl, "before_response")
     new_messages.append(response)
 {% endif %}
-    updates["messages"] = new_messages
+    updates["{{ messages_key }}"] = new_messages
 {% if node.contract and node.contract.output_contract and ir.contracts %}
     validated_output = _validate_node_output_contract(
         "{{ node.id }}",
@@ -779,8 +830,50 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% elif node.node_def.type.value == "function" %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """Function node: {{ node.description }}"""
+{% if node.node_def.metadata.get("abp_subgraph_adapter") == "entry" %}
+    set_current_node("{{ node.id }}")
+    updates = {
+{% for outer_field, inner_field in node.node_def.metadata.get("input_map", {}).items() %}
+        "{{ node.node_def.metadata.get("subgraph_node") }}__{{ inner_field }}": state.get("{{ outer_field }}"),
+{% endfor %}
+    }
+    emit_trace_event(
+        "subgraph_entered",
+        node="{{ node.id }}",
+        input_state=state,
+        output_state=updates,
+        metadata={
+            "subgraph": "{{ node.node_def.metadata.get("subgraph_node") }}",
+            "ref": "{{ node.node_def.metadata.get("ref") }}",
+            "input_map": {{ node.node_def.metadata.get("input_map", {}) | to_python }},
+        },
+    )
+    clear_current_node()
+    return updates
+{% elif node.node_def.metadata.get("abp_subgraph_adapter") == "exit" %}
+    set_current_node("{{ node.id }}")
+    updates = {
+{% for inner_field, outer_field in node.node_def.metadata.get("output_map", {}).items() %}
+        "{{ outer_field }}": state.get("{{ node.node_def.metadata.get("subgraph_node") }}__{{ inner_field }}"),
+{% endfor %}
+    }
+    emit_trace_event(
+        "subgraph_exited",
+        node="{{ node.id }}",
+        input_state=state,
+        output_state=updates,
+        metadata={
+            "subgraph": "{{ node.node_def.metadata.get("subgraph_node") }}",
+            "ref": "{{ node.node_def.metadata.get("ref") }}",
+            "output_map": {{ node.node_def.metadata.get("output_map", {}) | to_python }},
+        },
+    )
+    clear_current_node()
+    return updates
+{% else %}
     # TODO: Implement action: {{ node.node_def.action or node.id }}
     return {}
+{% endif %}
 
 {% endif %}
 {% endfor %}

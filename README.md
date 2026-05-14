@@ -480,6 +480,45 @@ harness:
 
 > See [Runtime Guarantees](docs/runtime-guarantees.md) for concrete patterns and real-world examples using contracts, policies, and harness scenarios together.
 
+### `evals`
+
+Use eval suites when you want benchmark-style checks over datasets instead of fixed harness scenarios:
+
+```yaml
+evals:
+  suites:
+    - id: router_accuracy
+      metric: exact_match
+      dataset: datasets/router_cases.yaml
+
+    - id: tool_policy_compliance
+      metric: policy_violations
+      dataset: datasets/policy_cases.yaml
+
+    - id: prd_quality
+      metric: rubric
+      dataset: datasets/prd_cases.yaml
+```
+
+Supported initial metrics are `exact_match`, `policy_violations`, and `rubric`.
+
+Rubric evals can score generated artifacts with deterministic criteria:
+
+```yaml
+cases:
+  - id: prd_quality_case
+    input:
+      message: "Draft a refund PRD"
+    expected: {}
+    metadata:
+      rubric:
+        artifact: prd_doc
+        min_score: 0.75
+        required_sections: [Problem, Success Metrics]
+        required_terms: [refund]
+        min_word_count: 100
+```
+
 ### `memory`
 
 ```yaml
@@ -500,6 +539,8 @@ memory:
 | `abp validate <file>` | Validate a blueprint against the schema (`--quiet` for CI) |
 | `abp generate <file>` | Generate framework code (`--target langgraph\|crewai\|plain`, `--output-dir`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to temp dir and run locally (single-shot or REPL) |
+| `abp test <file>` | Run deterministic harness scenarios |
+| `abp eval <file>` | Run dataset-driven eval suites (`--suite`, `--output`, `--json`) |
 | `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
 | `abp inspect <file>` | Visualize graph as Mermaid diagram |
 | `abp schema` | Export JSON Schema (`--format json\|yaml`) |

@@ -8,6 +8,7 @@ from agent_blueprint.models.agents import AgentDef
 from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.contracts import ContractsDef
 from agent_blueprint.models.deploy import DeployConfig
+from agent_blueprint.models.evals import EvalsDef
 from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.mcp import McpServerDef
@@ -70,6 +71,7 @@ class BlueprintSpec(BaseModel):
     artifacts: dict[str, ArtifactDef] = Field(default_factory=dict)
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
+    evals: EvalsDef | None = None
     deploy: DeployConfig | None = None
 
     @model_validator(mode="after")

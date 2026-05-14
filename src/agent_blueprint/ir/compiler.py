@@ -9,6 +9,7 @@ from agent_blueprint.models.agents import AgentDef, RagMode
 from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
 from agent_blueprint.models.contracts import ContractsDef, NodeContractDef
+from agent_blueprint.models.evals import EvalsDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.graph import EdgeDef, NodeDef, NodeType
 from agent_blueprint.models.memory import MemoryConfig
@@ -72,6 +73,7 @@ class AgentGraph:
     artifact_owners: dict[str, list[str]] = field(default_factory=dict)
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
+    evals: EvalsDef | None = None
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -122,6 +124,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         artifact_owners=artifact_owners,
         policies=spec.policies,
         harness=spec.harness,
+        evals=spec.evals,
         warnings=warnings,
     )
 

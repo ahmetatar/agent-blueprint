@@ -20,6 +20,7 @@ from agent_blueprint.cli import lint_cmd
 from agent_blueprint.cli import doctor_cmd
 from agent_blueprint.cli import run_cmd
 from agent_blueprint.cli import test_cmd
+from agent_blueprint.cli import eval_cmd
 from agent_blueprint.cli import deploy_cmd
 from agent_blueprint.cli import github_cmd
 
@@ -89,6 +90,7 @@ app.command("lint")(lint_cmd.lint)
 app.command("doctor")(doctor_cmd.doctor)
 app.command("run")(run_cmd.run)
 app.command("test")(test_cmd.test)
+app.command("eval")(eval_cmd.eval_)
 app.command("deploy")(deploy_cmd.deploy)
 app.command("github")(github_cmd.github)
 

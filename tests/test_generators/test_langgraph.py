@@ -1980,7 +1980,8 @@ class TestLangGraphGenerator:
         assert "_require_approval" in tools_py
         assert '_emit_approval_event("approval_requested", tool_name, args)' in tools_py
         assert "ABP_APPROVED_TOOLS" in tools_py
-        assert '_require_approval("dangerous_tool", _abp_args)' in tools_py
+        assert '"dangerous_tool",' in tools_py
+        assert "per_tool_requires_approval=True" in tools_py
 
     def test_no_impl_tool_generates_stub(self):
         ir = load_ir("impl_tools.yml")
@@ -2934,3 +2935,513 @@ class TestLangGraphGenerator:
                 },
                 "graph": {"entry_point": "n", "nodes": {"n": {}}, "edges": []},
             })
+
+
+def _load_generated_main_module(
+    tmp_path,
+    monkeypatch,
+    *,
+    spec_data: dict,
+    graph_module_body: str,
+    module_name: str,
+):
+    gen = LangGraphGenerator()
+    spec = BlueprintSpec.model_validate(spec_data)
+    files = gen.generate(compile_blueprint(spec))
+
+    _write_trace_helper(tmp_path, files)
+    (tmp_path / "langgraph").mkdir()
+    (tmp_path / "langgraph" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "langgraph" / "errors.py").write_text(
+        "class GraphRecursionError(Exception):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "langchain_core").mkdir()
+    (tmp_path / "langchain_core" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "langchain_core" / "messages.py").write_text(
+        "class HumanMessage:\n"
+        "    def __init__(self, content):\n"
+        "        self.content = content\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "graph.py").write_text(graph_module_body, encoding="utf-8")
+    main_path = tmp_path / "generated_main.py"
+    main_path.write_text(files["main.py"], encoding="utf-8")
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+    monkeypatch.delitem(sys.modules, "graph", raising=False)
+    monkeypatch.delitem(sys.modules, "langchain_core.messages", raising=False)
+    spec_obj = importlib.util.spec_from_file_location(module_name, main_path)
+    assert spec_obj is not None
+    assert spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    sys.modules[spec_obj.name] = module
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+_REQUIRED_FIELDS_GRAPH_TEMPLATE = (
+    "class DummyMessage:\n"
+    "    def __init__(self, content):\n"
+    "        self.content = content\n\n"
+    "class DummyGraph:\n"
+    "    def invoke(self, state, config=None):\n"
+    "        return {RESULT}\n\n"
+    "graph = DummyGraph()\n"
+)
+
+
+class TestStateRequiredFieldsEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data() -> dict:
+        return {
+            "blueprint": {"name": "required-fields-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "summary": {"type": "string", "default": None, "nullable": True},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {"state": {"required_fields": ["summary"]}},
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+
+    def test_required_state_fields_rendered_in_main(self):
+        spec = BlueprintSpec.model_validate(self._spec_data())
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "STATE_REQUIRED_FIELDS = ['summary']" in files["main.py"]
+        assert "_validate_required_state_fields" in files["main.py"]
+        ast.parse(files["main.py"])
+
+    def test_required_field_missing_emits_contract_failed_state_stage(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')]}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_missing_test",
+        )
+
+        with pytest.raises(ValueError, match="required field\\(s\\) 'summary'"):
+            module.run("hello")
+
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        assert [event["event"] for event in manifest["trace"]] == ["contract_failed", "run_finished"]
+        assert manifest["trace"][0]["metadata"]["stage"] == "state_required_fields"
+        assert manifest["trace"][-1]["metadata"]["status"] == "failed"
+
+    def test_required_field_none_value_fails(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')], 'summary': None}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_none_test",
+        )
+
+        with pytest.raises(ValueError, match="required field\\(s\\) 'summary'"):
+            module.run("hello")
+
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        assert manifest["trace"][0]["event"] == "contract_failed"
+        assert manifest["trace"][0]["metadata"]["stage"] == "state_required_fields"
+
+    def test_required_fields_pass_when_present(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')], 'summary': 'done'}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_present_test",
+        )
+
+        response = module.run("hello")
+
+        assert response == "ok"
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        events = [event["event"] for event in manifest["trace"]]
+        assert "contract_failed" not in events
+        assert manifest["trace"][-1]["metadata"]["status"] == "success"
+
+
+class TestStateInvariantEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data(*, with_output_contract: bool) -> dict:
+        spec: dict = {
+            "blueprint": {"name": "invariant-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "count": {"type": "integer", "nullable": True, "default": None},
+                    "route": {"type": "string", "nullable": True, "default": None},
+                    "items": {"type": "list", "reducer": "append", "default": []},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {
+                "state": {"invariants": ["state.count >= 0"]},
+            },
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+        if with_output_contract:
+            spec["contracts"]["nodes"] = {
+                "assistant": {
+                    "output_contract": "count_payload",
+                    "produces": ["count", "route"],
+                }
+            }
+            spec["contracts"]["outputs"] = {
+                "count_payload": {
+                    "type": "object",
+                    "required": ["count", "route"],
+                    "properties": {
+                        "count": {"type": "integer"},
+                        "route": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                }
+            }
+        return spec
+
+    def test_state_invariants_rendered_in_nodes(self):
+        spec = BlueprintSpec.model_validate(self._spec_data(with_output_contract=False))
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "STATE_INVARIANTS" in files["nodes.py"]
+        assert "STATE_REDUCERS" in files["nodes.py"]
+        assert "_check_state_invariants" in files["nodes.py"]
+        assert "'state.count >= 0'" in files["nodes.py"]
+        assert "lambda merged:" in files["nodes.py"]
+        ast.parse(files["nodes.py"])
+
+    def test_state_invariant_violation_emits_contract_failed(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=True),
+            llm_script=[{"content": '{"count": -1, "route": "x"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="invariant violated"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        failure = manifest["trace"][-1]
+        assert failure["metadata"]["stage"] == "state_invariant"
+        assert failure["metadata"]["contract_kind"] == "invariant"
+        assert failure["metadata"]["expression"] == "state.count >= 0"
+
+    def test_state_invariant_holds_no_event(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=True),
+            llm_script=[{"content": '{"count": 5, "route": "x"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["count"] == 5
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_invariant_skips_when_field_not_yet_populated(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=False),
+            llm_script=[{"content": "plain response"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        # count is None everywhere: "None >= 0" raises TypeError -> invariant skipped.
+        module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_merge_state_for_invariants_is_reducer_aware(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=False),
+            llm_script=[{"content": "plain response"}],
+        )
+
+        merged = module._merge_state_for_invariants(
+            {"items": ["a"], "count": 1, "route": "old"},
+            {"items": ["b"], "count": 2, "route": None},
+        )
+
+        assert merged["items"] == ["a", "b"]  # append reducer concatenates
+        assert merged["count"] == 2  # replace reducer overwrites
+        assert merged["route"] == "old"  # replace reducer keeps left on None
+
+
+def _load_generated_tools_module(tmp_path, monkeypatch, *, spec_data: dict, module_name: str):
+    gen = LangGraphGenerator()
+    spec = BlueprintSpec.model_validate(spec_data)
+    files = gen.generate(compile_blueprint(spec))
+
+    _write_trace_helper(tmp_path, files)
+    _write_harness_helper(tmp_path, files)
+    tools_path = tmp_path / "generated_tools.py"
+    tools_path.write_text(files["tools.py"], encoding="utf-8")
+
+    monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+    monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    fake_langchain_core = types.ModuleType("langchain_core")
+    fake_tools_mod = types.ModuleType("langchain_core.tools")
+
+    class FakeTool:
+        def __init__(self, func, name=None, description=None):
+            self.func = func
+            self.name = name or func.__name__
+            self.description = description or ""
+
+        def invoke(self, args):
+            return self.func(**args)
+
+    def tool(func):
+        return FakeTool(func, name=func.__name__, description=func.__doc__)
+
+    class StructuredTool:
+        @classmethod
+        def from_function(cls, func, name=None, description=None):
+            return FakeTool(func, name=name, description=description)
+
+    fake_tools_mod.tool = tool
+    fake_tools_mod.StructuredTool = StructuredTool
+    fake_langchain_core.tools = fake_tools_mod
+    monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools_mod)
+
+    spec_obj = importlib.util.spec_from_file_location(module_name, tools_path)
+    assert spec_obj is not None
+    assert spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    sys.modules[spec_obj.name] = module
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+class TestApprovalPolicyEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data(approvals: dict | None = None) -> dict:
+        spec: dict = {
+            "blueprint": {"name": "approval-policy-test"},
+            "tools": {
+                "safe_tool": {
+                    "type": "function",
+                    "description": "Safe operation",
+                    "parameters": {"message": {"type": "string", "required": True}},
+                },
+                "danger_tool": {
+                    "type": "function",
+                    "description": "Dangerous operation",
+                    "parameters": {"message": {"type": "string", "required": True}},
+                },
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["safe_tool", "danger_tool"]}},
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+        if approvals is not None:
+            spec["policies"] = {"approvals": approvals}
+        return spec
+
+    @staticmethod
+    def _clear_approval_env(monkeypatch):
+        monkeypatch.delenv("ABP_TOOL_APPROVAL_MODE", raising=False)
+        monkeypatch.delenv("ABP_APPROVED_TOOLS", raising=False)
+        monkeypatch.delenv("ABP_APPROVE_TOOL_SAFE_TOOL", raising=False)
+        monkeypatch.delenv("ABP_APPROVE_TOOL_DANGER_TOOL", raising=False)
+
+    @staticmethod
+    def _start_trace(blueprint: str):
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint=blueprint,
+            blueprint_version="1.0",
+            mode="live",
+        )
+        return trace_mod
+
+    def test_approval_policy_rendered_in_tools(self):
+        spec = BlueprintSpec.model_validate(
+            self._spec_data({"mode": "all", "on_violation": "warn"})
+        )
+        files = self.gen.generate(compile_blueprint(spec))
+        tools_py = files["tools.py"]
+        assert "APPROVAL_POLICY = {" in tools_py
+        assert "\"mode\": 'all'" in tools_py
+        assert "\"on_violation\": 'warn'" in tools_py
+        assert "_policy_requires_approval" in tools_py
+        # The gate is now unconditional, even for tools without requires_approval.
+        assert tools_py.count("per_tool_requires_approval=False") == 2
+        ast.parse(tools_py)
+
+    def test_approval_policy_all_blocks_unapproved_tool(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all"}),
+            module_name="generated_tools_policy_all_block_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(PermissionError, match="Approval required for tool 'safe_tool'"):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert "approval_requested" in events
+        assert "approval_denied" in events
+        assert events.count("approval_requested") == 1
+
+    def test_approval_policy_warn_continues_and_emits_policy_violation(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all", "on_violation": "warn"}),
+            module_name="generated_tools_policy_warn_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            # NotImplementedError (the stub tool body) proves execution continued
+            # past the approval gate instead of raising PermissionError.
+            with pytest.raises(NotImplementedError, match="safe_tool is not implemented yet"):
+                module.safe_tool.invoke({"message": "hi"})
+
+        trace = trace_mod.current_recorder().manifest["trace"]
+        events = [event["event"] for event in trace]
+        assert "approval_denied" in events
+        violations = [event for event in trace if event["event"] == "policy_violation"]
+        assert len(violations) == 1
+        assert violations[0]["metadata"]["policy_kind"] == "approval"
+        assert violations[0]["metadata"]["tool"] == "safe_tool"
+
+    def test_approval_policy_selective_only_lists_named_tools(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "selective", "tools": ["danger_tool"]}),
+            module_name="generated_tools_policy_selective_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+            with pytest.raises(PermissionError, match="danger_tool"):
+                module.danger_tool.invoke({"message": "hi"})
+
+        trace = trace_mod.current_recorder().manifest["trace"]
+        approval_events = [event for event in trace if event["event"].startswith("approval_")]
+        assert all(event["tool"] == "danger_tool" for event in approval_events)
+        assert any(event["event"] == "approval_requested" for event in approval_events)
+
+    def test_approval_warn_with_env_approval_grants(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        monkeypatch.setenv("ABP_TOOL_APPROVAL_MODE", "allow")
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all", "on_violation": "warn"}),
+            module_name="generated_tools_policy_warn_granted_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert "approval_granted" in events
+        assert "approval_denied" not in events
+        assert "policy_violation" not in events
+
+    def test_no_policy_emits_no_approval_events_for_unprotected_tool(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(None),
+            module_name="generated_tools_policy_absent_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert not any(event.startswith("approval_") for event in events)

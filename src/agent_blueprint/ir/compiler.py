@@ -74,6 +74,7 @@ class AgentGraph:
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     evals: EvalsDef | None = None
+    compiled_invariants: list[CompiledExpression] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -104,6 +105,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     edges = _compile_edges(expanded.edges)
     warnings = _collect_warnings(nodes)
     artifact_owners = _compile_artifact_owners(spec.artifacts)
+    compiled_invariants = _compile_invariants(spec.contracts)
 
     return AgentGraph(
         name=spec.blueprint.name,
@@ -125,8 +127,23 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         policies=spec.policies,
         harness=spec.harness,
         evals=spec.evals,
+        compiled_invariants=compiled_invariants,
         warnings=warnings,
     )
+
+
+def _compile_invariants(contracts: ContractsDef | None) -> list[CompiledExpression]:
+    if contracts is None:
+        return []
+    compiled: list[CompiledExpression] = []
+    for index, invariant in enumerate(contracts.state.invariants):
+        try:
+            compiled.append(parse_expression(invariant))
+        except Exception as e:
+            raise BlueprintCompilationError(
+                f"contracts.state.invariants[{index}] is invalid: {e}"
+            ) from e
+    return compiled
 
 
 def _namespace_id(subgraph_node_id: str, inner_node_id: str) -> str:

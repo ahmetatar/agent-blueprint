@@ -70,6 +70,20 @@ RETRY_POLICY_BY_NODE = {
     },
 {% endfor %}
 }
+STATE_REDUCERS = {
+{% for field_name, field_def in ir.state.fields.items() %}
+{% if field_def.type == "list[message]" %}
+    "{{ field_name }}": "append",
+{% else %}
+    "{{ field_name }}": "{{ field_def.reducer.value }}",
+{% endif %}
+{% endfor %}
+}
+STATE_INVARIANTS = [
+{% for inv in ir.compiled_invariants %}
+    ({{ inv.source | to_python }}, lambda merged: {{ inv.to_dict_access('merged') }}),
+{% endfor %}
+]
 
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
@@ -269,6 +283,72 @@ def _ensure_fields_not_mutated(
             stage="node_postcondition",
             contract_kind=contract_kind,
         )
+
+
+def _apply_invariant_reducer(reducer: str, left: Any, right: Any) -> Any:
+    # Mirrors the _abp_*_reducer semantics in state.py so invariants see the
+    # post-reduction state, not just the node's delta.
+    if reducer == "append":
+        if left is None:
+            return right
+        if right is None:
+            return left
+        if isinstance(left, list) and isinstance(right, list):
+            return left + right
+        if isinstance(left, list):
+            return left + [right]
+        if isinstance(right, list):
+            return [left] + right
+        return [left, right]
+    if reducer == "merge":
+        if left is None:
+            return right
+        if right is None:
+            return left
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = dict(left)
+            merged.update(right)
+            return merged
+        return right
+    if right is None:
+        return left
+    return right
+
+
+def _merge_state_for_invariants(state: AgentState, updates: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(state)
+    for key, value in updates.items():
+        reducer = STATE_REDUCERS.get(key, "replace")
+        merged[key] = _apply_invariant_reducer(reducer, merged.get(key), value)
+    return merged
+
+
+def _check_state_invariants(node_id: str, state: AgentState, updates: dict[str, Any]) -> None:
+    if not STATE_INVARIANTS:
+        return
+    merged = _merge_state_for_invariants(state, updates)
+    for source, predicate in STATE_INVARIANTS:
+        try:
+            holds = bool(predicate(merged))
+        except (TypeError, AttributeError, KeyError):
+            # Field not yet populated — invariant is not evaluable, skip.
+            continue
+        if not holds:
+            message = f"State contract error: invariant violated after node '{node_id}': {source}"
+            emit_trace_event(
+                "contract_failed",
+                node=node_id,
+                input_state=state,
+                output_state=updates,
+                error=message,
+                metadata={
+                    "stage": "state_invariant",
+                    "contract_kind": "invariant",
+                    "expression": source,
+                },
+            )
+            clear_current_node()
+            raise ValueError(message)
 
 
 def _validate_schema_value(path: str, value: Any, schema: dict[str, Any]) -> Any:
@@ -779,6 +859,9 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% endif %}
 {% if node.contract and node.contract.produces %}
     _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
+{% endif %}
+{% if ir.compiled_invariants %}
+    _check_state_invariants("{{ node.id }}", state, updates)
 {% endif %}
     _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
     escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)

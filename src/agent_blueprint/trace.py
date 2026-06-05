@@ -43,8 +43,15 @@ class TraceEventType(str, Enum):
     policy_violation = "policy_violation"
     approval_requested = "approval_requested"
     approval_granted = "approval_granted"
+    approval_denied = "approval_denied"
     contract_failed = "contract_failed"
     artifact_written = "artifact_written"
+    retry_scheduled = "retry_scheduled"
+    retry_exhausted = "retry_exhausted"
+    parallel_started = "parallel_started"
+    parallel_finished = "parallel_finished"
+    subgraph_entered = "subgraph_entered"
+    subgraph_exited = "subgraph_exited"
     run_finished = "run_finished"
 
 

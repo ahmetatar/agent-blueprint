@@ -77,6 +77,10 @@ ABP enforces both tool-level approvals and agent-level human review triggers.
 Use cases covered today:
 
 - `requires_approval` on sensitive tools
+- `policies.approvals` with `mode: all` (every tool call needs approval) or
+  `mode: selective` (only the tools listed in `policies.approvals.tools`)
+- `policies.approvals.on_violation: block` (default — unapproved calls raise) or
+  `warn` (unapproved calls continue but emit `approval_denied` + `policy_violation`)
 - `human_in_the_loop` before a tool call
 - `human_in_the_loop` after a tool call
 - `human_in_the_loop` before a final response
@@ -90,6 +94,12 @@ tools:
     type: function
     requires_approval: true
 
+policies:
+  approvals:
+    mode: selective
+    tools: [issue_refund]
+    on_violation: block
+
 agents:
   billing_agent:
     model: gpt-4o
@@ -99,6 +109,10 @@ agents:
       trigger: before_tool_call
       tools: [issue_refund]
 ```
+
+Approval grants are environment-driven in both modes (`ABP_TOOL_APPROVAL_MODE=allow`,
+`ABP_APPROVED_TOOLS`, or a tool-specific `ABP_APPROVE_TOOL_*` variable); `on_violation`
+only changes what happens when approval is required and not granted.
 
 Real-life use case:
 
@@ -116,6 +130,7 @@ Important runtime events already available:
 - `tool_failed`
 - `approval_requested`
 - `approval_granted`
+- `approval_denied`
 - `contract_failed`
 - `policy_violation`
 - `run_finished`
@@ -151,6 +166,15 @@ ABP can enforce:
 - forbidden mutation for node-local fields
 - immutable state fields across the workflow
 - structured node output contracts
+- `state.required_fields` must be non-null when the workflow completes
+  (checked at graph exit, before output-schema validation; failures emit
+  `contract_failed` with stage `state_required_fields`)
+- `state.invariants` must hold throughout execution (checked after every
+  agent node against the post-reduction state; failures emit `contract_failed`
+  with stage `state_invariant` and the violated expression in metadata).
+  Invariants that reference not-yet-populated fields are skipped, not failed.
+  Note: invariants are currently checked after agent nodes only — function,
+  handoff, and parallel adapter nodes do not mutate blueprint state fields.
 
 Example:
 
@@ -159,6 +183,8 @@ contracts:
   state:
     required_fields: [messages]
     immutable_fields: [request_id]
+    invariants:
+      - "state.confidence >= 0"
 
   nodes:
     router:

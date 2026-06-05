@@ -75,6 +75,21 @@ def normalize_for_trace(value: Any) -> Any:
     return repr(value)
 
 
+def _summarize_state_for_trace(value: Any) -> Any:
+    # Final-state snapshot for harness state_assertions: keep scalar fields
+    # (normalized for replay stability) but collapse message lists to a count
+    # so the manifest stays small and deterministic.
+    if isinstance(value, dict):
+        summarized: dict[str, Any] = {}
+        for key, val in value.items():
+            if isinstance(val, list) and val and all(hasattr(item, "content") for item in val):
+                summarized[str(key)] = {"__messages__": len(val)}
+            else:
+                summarized[str(key)] = normalize_for_trace(val)
+        return summarized
+    return normalize_for_trace(value)
+
+
 def stable_trace_json(value: Any) -> str:
     normalized = normalize_for_trace(value)
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -175,6 +190,8 @@ class TraceRecorder:
             error=error,
             metadata={"status": status},
         )
+        if output_state is not None:
+            self.manifest["final_state"] = _summarize_state_for_trace(output_state)
         if self._trace_file:
             with open(self._trace_file, "w", encoding="utf-8") as handle:
                 json.dump(self.manifest, handle, indent=2, ensure_ascii=True)

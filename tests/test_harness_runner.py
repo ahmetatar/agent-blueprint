@@ -102,37 +102,190 @@ class TestHarnessRunner:
         assert result.passed is True
         assert result.checks == ["tools_called", "outputs"]
 
-    def test_run_harness_scenario_fails_unsupported_assertions(self, monkeypatch):
-        ir = _build_ir({
+    @staticmethod
+    def _run_scenario(monkeypatch, *, expected: dict, stdout: str = "ok",
+                      trace_manifest: dict | None = None, extra_spec: dict | None = None):
+        raw = {
             "blueprint": {"name": "test"},
             "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
             "harness": {
                 "defaults": {"llm_mode": "live", "tool_mode": "live"},
                 "scenarios": [
-                    {
-                        "id": "route_case",
-                        "input": {"message": "hello"},
-                        "expected": {"route": "billing"},
-                    }
+                    {"id": "case", "input": {"message": "hello"}, "expected": expected}
                 ],
             },
-        })
+        }
+        if extra_spec:
+            raw.update(extra_spec)
+        ir = _build_ir(raw)
 
         from agent_blueprint.runners.local import LocalRunResult
 
         def fake_run_capture(self, user_input=None, **kwargs):
             return LocalRunResult(
                 returncode=0,
-                stdout="ok",
+                stdout=stdout,
                 stderr="",
                 trace_file=None,
-                trace_manifest={"trace": []},
+                trace_manifest=trace_manifest if trace_manifest is not None else {"trace": []},
             )
 
-        monkeypatch.setattr("agent_blueprint.runners.local.LocalRunner.run_capture", fake_run_capture)
-        result = run_harness_scenario(ir, ir.harness.scenarios[0], install=False)  # type: ignore[union-attr]
+        monkeypatch.setattr(
+            "agent_blueprint.runners.local.LocalRunner.run_capture", fake_run_capture
+        )
+        return run_harness_scenario(ir, ir.harness.scenarios[0], install=False)  # type: ignore[union-attr]
+
+    def test_route_passes_on_last_node(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"route": "billing"},
+            trace_manifest={"trace": [
+                {"event": "node_finished", "node": "router"},
+                {"event": "node_finished", "node": "billing"},
+            ]},
+        )
+        assert result.passed is True
+        assert "route" in result.checks
+
+    def test_route_fails_when_not_reached(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"route": "billing"},
+            trace_manifest={"trace": [{"event": "node_finished", "node": "support"}]},
+        )
         assert result.passed is False
-        assert "Unsupported harness assertion(s)" in result.failures[0]
+        assert "route mismatch: expected 'billing', ended on 'support'" in result.failures[0]
+
+    def test_route_passes_on_escalation_target(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"route": "handoff_review"},
+            trace_manifest={"trace": [
+                {"event": "node_finished", "node": "router", "route": "handoff_review"},
+                {"event": "node_finished", "node": "router"},
+            ]},
+        )
+        assert result.passed is True
+        assert "route" in result.checks
+
+    def test_state_assertions_pass(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"state_assertions": ["state.route == 'billing'", "state.confidence > 0.5"]},
+            trace_manifest={
+                "trace": [],
+                "final_state": {"route": "billing", "confidence": 0.9},
+            },
+        )
+        assert result.passed is True
+        assert "state_assertions" in result.checks
+
+    def test_state_assertions_fail(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"state_assertions": ["state.route == 'billing'"]},
+            trace_manifest={"trace": [], "final_state": {"route": "support"}},
+        )
+        assert result.passed is False
+        assert "state assertion not satisfied: state.route == 'billing'" in result.failures
+
+    def test_state_assertions_missing_final_state(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"state_assertions": ["state.route == 'billing'"]},
+            trace_manifest={"trace": []},
+        )
+        assert result.passed is False
+        assert "require a final_state" in result.failures[0]
+
+    def test_state_assertions_invalid_expression(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"state_assertions": ["len(state.messages) > 0"]},
+            trace_manifest={"trace": [], "final_state": {"route": "billing"}},
+        )
+        assert result.passed is False
+        assert "state assertion invalid" in result.failures[0]
+
+    def test_state_assertions_unevaluable_comparison_reported(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"state_assertions": ["state.confidence > 0.5"]},
+            trace_manifest={"trace": [], "final_state": {"route": "billing"}},
+        )
+        assert result.passed is False
+        assert "failed to evaluate" in result.failures[0]
+
+    def test_output_contract_passes(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"output_contract": "reply_contract"},
+            stdout='{"title": "x"}',
+            extra_spec={
+                "contracts": {
+                    "outputs": {
+                        "reply_contract": {
+                            "type": "object",
+                            "required": ["title"],
+                            "properties": {"title": {"type": "string"}},
+                        }
+                    }
+                }
+            },
+        )
+        assert result.passed is True
+        assert "output_contract" in result.checks
+
+    def test_output_contract_violation(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"output_contract": "reply_contract"},
+            stdout="{}",
+            extra_spec={
+                "contracts": {
+                    "outputs": {
+                        "reply_contract": {
+                            "type": "object",
+                            "required": ["title"],
+                            "properties": {"title": {"type": "string"}},
+                        }
+                    }
+                }
+            },
+        )
+        assert result.passed is False
+        assert "output_contract violations" in result.failures[0]
+        assert "title" in result.failures[0]
+
+    def test_output_contract_unknown_name(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"output_contract": "missing_contract"},
+            stdout="{}",
+        )
+        assert result.passed is False
+        assert "unknown contract 'missing_contract'" in result.failures[0]
+
+    def test_artifacts_subset_passes(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"artifacts": ["prd_doc"]},
+            trace_manifest={"trace": [
+                {"event": "artifact_written", "metadata": {"artifact": "prd_doc"}},
+                {"event": "artifact_written", "metadata": {"artifact": "extra_doc"}},
+            ]},
+        )
+        assert result.passed is True
+        assert "artifacts" in result.checks
+
+    def test_artifacts_missing_fails(self, monkeypatch):
+        result = self._run_scenario(
+            monkeypatch,
+            expected={"artifacts": ["prd_doc"]},
+            trace_manifest={"trace": []},
+        )
+        assert result.passed is False
+        assert "artifacts not written: ['prd_doc']" in result.failures[0]
 
     def test_run_harness_scenario_passes_fixture_env_to_runner(self, monkeypatch):
         ir = _build_ir({

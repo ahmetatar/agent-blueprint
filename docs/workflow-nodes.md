@@ -35,6 +35,18 @@ default `replace` reducer collide at runtime. Declare branch outputs in
 `parallel-branch-conflict` lint check flags collisions statically; use an
 `append`/`merge` reducer or distinct fields.
 
+## Loops
+
+Cycles are a first-class agent pattern (reflection, revision, retry-until-ok)
+and are fully supported — route back with a conditional edge and exit on a
+state condition. Two safety nets apply:
+
+- the `unbounded-loop` lint check (error) statically flags any cycle with
+  **no route out** — no conditional exit to `END` or to a node outside the
+  loop — in the main graph and inside every subgraph;
+- at runtime, `settings.max_graph_steps` (default 25) bounds total steps via
+  LangGraph's `recursion_limit`.
+
 ## Subgraph
 
 ```yaml

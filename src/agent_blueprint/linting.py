@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -12,6 +13,7 @@ from ruamel.yaml.comments import CommentedMap
 from agent_blueprint.ir.compiler import AgentGraph
 from agent_blueprint.ir.expression import analyze_expression
 from agent_blueprint.models.blueprint import BlueprintSpec
+from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.utils.yaml_loader import dump_blueprint_document, load_blueprint_document
 
 _STATE_REF_RE = re.compile(r"\bstate\.([A-Za-z_][A-Za-z0-9_]*)")
@@ -41,7 +43,113 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
     findings.extend(_lint_contract_usage(spec))
     findings.extend(_lint_mutation_patterns(spec))
     findings.extend(_lint_parallel_branch_conflicts(spec))
+    findings.extend(_lint_unbounded_loops(spec))
     return findings
+
+
+def _lint_unbounded_loops(spec: BlueprintSpec) -> list[LintFinding]:
+    """Flag cycles with no route out: once entered, the run can never reach
+    END and will always exhaust settings.max_graph_steps.
+
+    Loops with a (conditional) exit are a legitimate agent pattern
+    (reflection, revision) and are not flagged.
+    """
+    findings = _unbounded_loops_for_graph(spec.graph, location_prefix="graph")
+    for name, subgraph in sorted(spec.subgraphs.items()):
+        findings.extend(
+            _unbounded_loops_for_graph(subgraph, location_prefix=f"subgraphs.{name}")
+        )
+    return findings
+
+
+def _unbounded_loops_for_graph(graph: GraphDef, *, location_prefix: str) -> list[LintFinding]:
+    adjacency: dict[str, set[str]] = {node_id: set() for node_id in graph.nodes}
+    exits_to_end: set[str] = set()
+
+    for node_id, node in graph.nodes.items():
+        if node.type.value == "parallel":
+            adjacency[node_id].update(b for b in node.branches if b in adjacency)
+            if node.join:
+                for branch in node.branches:
+                    adjacency.setdefault(branch, set()).add(node.join)
+    for edge in graph.edges:
+        if edge.from_node not in adjacency:
+            continue
+        for target in edge.get_targets():
+            if target.target == "END":
+                exits_to_end.add(edge.from_node)
+            elif target.target in adjacency:
+                adjacency[edge.from_node].add(target.target)
+
+    findings: list[LintFinding] = []
+    for component in _strongly_connected_components(adjacency):
+        is_cycle = len(component) > 1 or any(n in adjacency[n] for n in component)
+        if not is_cycle:
+            continue
+        has_exit = any(n in exits_to_end for n in component) or any(
+            target not in component
+            for n in component
+            for target in adjacency[n]
+        )
+        if has_exit:
+            continue
+        ordered = sorted(component)
+        rendered = " -> ".join(ordered)
+        findings.append(LintFinding(
+            severity=LintSeverity.error,
+            code="unbounded-loop",
+            location=f"{location_prefix}.nodes.{ordered[0]}",
+            message=(
+                f"Node(s) {rendered} form a loop with no route to END or to any node "
+                "outside the loop; once entered, the run can never terminate and will "
+                "always exhaust settings.max_graph_steps. Add a conditional exit edge."
+            ),
+            autofixable=False,
+        ))
+    return findings
+
+
+def _strongly_connected_components(adjacency: dict[str, set[str]]) -> list[set[str]]:
+    """Kosaraju's algorithm (iterative) — small graphs, clarity over speed."""
+    order: list[str] = []
+    visited: set[str] = set()
+    for start in adjacency:
+        if start in visited:
+            continue
+        visited.add(start)
+        stack: list[tuple[str, Iterator[str]]] = [(start, iter(sorted(adjacency[start])))]
+        while stack:
+            node, children = stack[-1]
+            child = next(children, None)
+            if child is None:
+                order.append(node)
+                stack.pop()
+            elif child not in visited:
+                visited.add(child)
+                stack.append((child, iter(sorted(adjacency[child]))))
+
+    reverse: dict[str, set[str]] = {node: set() for node in adjacency}
+    for node, targets in adjacency.items():
+        for target in targets:
+            reverse[target].add(node)
+
+    components: list[set[str]] = []
+    assigned: set[str] = set()
+    for node in reversed(order):
+        if node in assigned:
+            continue
+        component = {node}
+        assigned.add(node)
+        pending = [node]
+        while pending:
+            current = pending.pop()
+            for parent in reverse[current]:
+                if parent not in assigned:
+                    assigned.add(parent)
+                    component.add(parent)
+                    pending.append(parent)
+        components.append(component)
+    return components
 
 
 def _lint_parallel_branch_conflicts(spec: BlueprintSpec) -> list[LintFinding]:

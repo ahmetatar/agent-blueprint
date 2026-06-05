@@ -46,7 +46,7 @@ YAML blueprint
 
 Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/*_cmd.py`) over a logic module:
 
-- `linting.py` — 8 lint checks, 2 autofixes. Note: `lint_cmd.py` compiles **before** linting, so compile errors surface before lint findings.
+- `linting.py` — 9 lint checks, 2 autofixes (incl. `unbounded-loop`: SCC-based detection of cycles with no route out; loops with conditional exits are a legitimate pattern and not flagged). Note: `lint_cmd.py` compiles **before** linting, so compile errors surface before lint findings.
 - `doctoring.py` — target-compatibility + env diagnostics; blocks unsupported features (parallel nodes, subgraph nesting) at generation time.
 - `harness_runner.py` — deterministic test harness (`abp test`): mock/replay/live LLM, stub/live tools; route / state / artifact / output-contract assertions; writes a manifest incl. `final_state`.
 - `eval_runner.py` — eval suites (exact_match, policy_violations, rubric).

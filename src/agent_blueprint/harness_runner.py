@@ -117,6 +117,8 @@ def run_harness_scenario(
     scenario: HarnessScenario,
     *,
     install: bool,
+    trace_store: Path | None = None,
+    save_traces: str = "all",
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
     tool_mode = (scenario.tool_mode or ir.harness.defaults.tool_mode).value  # type: ignore[union-attr]
@@ -175,16 +177,27 @@ def run_harness_scenario(
         )
     if captured.returncode != 0:
         result.failures.append(f"Scenario process exited with code {captured.returncode}")
-        return result
+        result.passed = False
+    else:
+        evaluate_scenario_expectations(ir, scenario, captured, result)
+        if golden_trace is not None and captured.trace_manifest is not None:
+            diff = diff_trace_manifests(golden_trace, captured.trace_manifest)
+            if diff:
+                result.failures.append("replay trace drift detected:\n" + diff)
+            else:
+                result.checks.append("replay_trace")
+        result.passed = not result.failures
 
-    evaluate_scenario_expectations(ir, scenario, captured, result)
-    if golden_trace is not None and captured.trace_manifest is not None:
-        diff = diff_trace_manifests(golden_trace, captured.trace_manifest)
-        if diff:
-            result.failures.append("replay trace drift detected:\n" + diff)
-        else:
-            result.checks.append("replay_trace")
-    result.passed = not result.failures
+    if trace_store is not None and (save_traces == "all" or not result.passed):
+        # Local import: trace_store imports ScenarioResult from this module.
+        from agent_blueprint.trace_store import build_trace_record, save_trace_record
+
+        record = build_trace_record(
+            scenario_id=scenario.id,
+            input=scenario.input,
+            result=result,
+        )
+        save_trace_record(record, store_dir=trace_store)
     return result
 
 

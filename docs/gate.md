@@ -109,3 +109,9 @@ Because harness scenarios run with mock/replay fixtures and eval results carry
 no timestamps, gate runs are deterministic — the same blueprint and fixtures
 produce a byte-identical snapshot, so baseline diffs in code review show only
 real behavioral change.
+
+## Failed runs become regression tests
+
+The gate persists failing scenario traces to `.abp/traces/` by default
+(`--save-traces failed|all|none`). Export them as eval dataset cases with
+[`abp traces export`](traces.md) — the trace → eval flywheel.

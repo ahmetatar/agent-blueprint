@@ -475,3 +475,87 @@ class TestHarnessRunner:
         result = run_harness_scenario(ir, ir.harness.scenarios[0], install=False)  # type: ignore[union-attr]
         assert result.passed is False
         assert "replay trace drift detected" in result.failures[0]
+
+
+class TestTracePersistence:
+    @staticmethod
+    def _ir_and_scenario(passed: bool):
+        ir = _build_ir({
+            "blueprint": {"name": "test"},
+            "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+            "harness": {
+                "defaults": {"llm_mode": "live", "tool_mode": "live"},
+                "scenarios": [
+                    {
+                        "id": "case",
+                        "input": {"message": "hello"},
+                        # tools_called assertion drives pass/fail deterministically
+                        "expected": {"tools_called": ["lookup_invoice"]} if not passed else {},
+                    }
+                ],
+            },
+        })
+        return ir, ir.harness.scenarios[0]
+
+    @staticmethod
+    def _patch_capture(monkeypatch):
+        from agent_blueprint.runners.local import LocalRunResult
+
+        def fake_run_capture(self, user_input=None, **kwargs):
+            return LocalRunResult(
+                returncode=0,
+                stdout="ok",
+                stderr="",
+                trace_file=None,
+                trace_manifest={
+                    "run": {"run_id": "case", "blueprint": "test",
+                            "blueprint_version": "1.0", "mode": "live"},
+                    "trace": [],
+                    "replay": {"llm_outputs": {}, "tool_outputs": {}},
+                },
+            )
+
+        monkeypatch.setattr(
+            "agent_blueprint.runners.local.LocalRunner.run_capture", fake_run_capture
+        )
+
+    def test_saves_failed_record(self, tmp_path, monkeypatch):
+        ir, scenario = self._ir_and_scenario(passed=False)
+        self._patch_capture(monkeypatch)
+        store = tmp_path / "traces"
+        result = run_harness_scenario(
+            ir, scenario, install=False, trace_store=store, save_traces="failed"
+        )
+        assert result.passed is False
+        files = list(store.glob("*.json"))
+        assert len(files) == 1
+        record = json.loads(files[0].read_text(encoding="utf-8"))
+        assert record["status"] == "failed"
+        assert record["input"] == {"message": "hello"}
+
+    def test_skips_passed_when_failed_only(self, tmp_path, monkeypatch):
+        ir, scenario = self._ir_and_scenario(passed=True)
+        self._patch_capture(monkeypatch)
+        store = tmp_path / "traces"
+        result = run_harness_scenario(
+            ir, scenario, install=False, trace_store=store, save_traces="failed"
+        )
+        assert result.passed is True
+        assert not store.exists()
+
+    def test_saves_passed_when_all(self, tmp_path, monkeypatch):
+        ir, scenario = self._ir_and_scenario(passed=True)
+        self._patch_capture(monkeypatch)
+        store = tmp_path / "traces"
+        run_harness_scenario(
+            ir, scenario, install=False, trace_store=store, save_traces="all"
+        )
+        files = list(store.glob("*.json"))
+        assert len(files) == 1
+        assert json.loads(files[0].read_text(encoding="utf-8"))["status"] == "passed"
+
+    def test_no_store_writes_nothing(self, tmp_path, monkeypatch):
+        ir, scenario = self._ir_and_scenario(passed=False)
+        self._patch_capture(monkeypatch)
+        run_harness_scenario(ir, scenario, install=False)
+        assert list(tmp_path.glob("**/*.json")) == []

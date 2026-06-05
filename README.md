@@ -558,6 +558,7 @@ memory:
 | `abp test <file>` | Run deterministic harness scenarios |
 | `abp eval <file>` | Run dataset-driven eval suites (`--suite`, `--output`, `--json`) |
 | `abp gate <file>` | CI merge gate: run harness + evals, diff against a committed baseline, fail on regression (`--baseline`, `--update-baseline`, `--tolerance`, `--json`, [details](docs/gate.md)) |
+| `abp traces list/export` | Inspect persisted trace records and export them as eval dataset cases — failures become regression tests ([details](docs/traces.md)) |
 | `abp deploy <file>` | Deploy to cloud (`--platform azure\|aws\|gcp`, [details](docs/deploy.md)) |
 | `abp inspect <file>` | Visualize graph as Mermaid diagram |
 | `abp schema` | Export JSON Schema (`--format json\|yaml`) |

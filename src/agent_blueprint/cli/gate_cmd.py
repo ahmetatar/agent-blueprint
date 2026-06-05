@@ -55,6 +55,14 @@ def gate(
         "--install/--no-install",
         help="pip install dependencies before running scenarios and eval cases",
     ),
+    save_traces: str = typer.Option(
+        "failed",
+        "--save-traces",
+        help="Persist harness trace records to the trace store: failed|all|none",
+    ),
+    trace_dir: Path | None = typer.Option(
+        None, "--trace-dir", help="Trace store dir (default <blueprint_dir>/.abp/traces)"
+    ),
 ) -> None:
     """Run harness + evals and fail on regression against a stored baseline."""
     try:
@@ -80,8 +88,18 @@ def gate(
         )
         raise typer.Exit(1)
 
+    if save_traces not in {"failed", "all", "none"}:
+        err_console.print("[bold red]Gate error:[/] --save-traces must be failed, all, or none")
+        raise typer.Exit(1)
+    trace_store = (
+        None if save_traces == "none" else (trace_dir or blueprint.parent / ".abp" / "traces")
+    )
+
     harness_results: list[ScenarioResult] = [
-        run_harness_scenario(ir, scenario, install=install) for scenario in scenarios
+        run_harness_scenario(
+            ir, scenario, install=install, trace_store=trace_store, save_traces=save_traces
+        )
+        for scenario in scenarios
     ]
     eval_result: EvalRunResult | None = None
     if suites:

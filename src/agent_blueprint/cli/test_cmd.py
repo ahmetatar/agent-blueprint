@@ -30,6 +30,14 @@ def test(
     install: bool = typer.Option(
         False, "--install/--no-install", help="pip install dependencies before running scenarios"
     ),
+    save_traces: str = typer.Option(
+        "failed",
+        "--save-traces",
+        help="Persist trace records to the trace store: failed|all|none",
+    ),
+    trace_dir: Path | None = typer.Option(
+        None, "--trace-dir", help="Trace store dir (default <blueprint_dir>/.abp/traces)"
+    ),
 ) -> None:
     """Run harness scenarios defined for a blueprint."""
     try:
@@ -59,7 +67,19 @@ def test(
             err_console.print(f"[bold red]Harness error:[/] scenario '{scenario}' was not found")
             raise typer.Exit(1)
 
-    results = [run_harness_scenario(ir, item, install=install) for item in scenarios]
+    if save_traces not in {"failed", "all", "none"}:
+        err_console.print("[bold red]Harness error:[/] --save-traces must be failed, all, or none")
+        raise typer.Exit(1)
+    trace_store = (
+        None if save_traces == "none" else (trace_dir or blueprint.parent / ".abp" / "traces")
+    )
+
+    results = [
+        run_harness_scenario(
+            ir, item, install=install, trace_store=trace_store, save_traces=save_traces
+        )
+        for item in scenarios
+    ]
 
     table = Table(title=f"Harness Results — {spec.blueprint.name}")
     table.add_column("Scenario")
@@ -81,6 +101,10 @@ def test(
         table.add_row(item.scenario_id, status, checks, notes)
 
     console.print(table)
+    if trace_store is not None:
+        saved = len(results) if save_traces == "all" else failed
+        if saved:
+            console.print(f"Saved {saved} trace record(s) to {trace_store}")
     summary = f"{len(results) - failed} passed, {failed} failed"
     if failed:
         err_console.print(f"[bold red]{summary}[/]")

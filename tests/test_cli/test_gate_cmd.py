@@ -87,7 +87,7 @@ def _patch_runners(
     suite_score: float = 1.0,
     install_seen: list | None = None,
 ):
-    def fake_run_harness_scenario(ir, scenario, *, install):
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
         if install_seen is not None:
             install_seen.append(("harness", install))
         return ScenarioResult(
@@ -293,3 +293,37 @@ class TestGateCli:
         result = runner.invoke(app, ["gate", str(blueprint), "--baseline", str(custom)])
         assert result.exit_code == 0
         assert "Gate PASSED" in result.output
+
+    def test_gate_threads_trace_store_to_harness_only(self, tmp_path, monkeypatch):
+        blueprint = _write_blueprint(tmp_path, _BLUEPRINT_WITH_BOTH)
+        harness_kwargs: list[dict] = []
+        eval_kwargs: list[dict] = []
+
+        def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
+            harness_kwargs.append(dict(kwargs))
+            return ScenarioResult(scenario_id=scenario.id, passed=True, returncode=0)
+
+        def fake_run_eval_suites(ir, suites, **kwargs):
+            eval_kwargs.append(dict(kwargs))
+            return EvalRunResult(
+                blueprint=ir.name, blueprint_version=ir.version, passed=True,
+                suites=[
+                    EvalSuiteResult(
+                        suite_id=suite.id, metric=suite.metric.value, dataset=suite.dataset,
+                        passed=True, score=1.0, total=1, passed_cases=1, failed_cases=0,
+                    )
+                    for suite in suites
+                ],
+            )
+
+        monkeypatch.setattr(
+            "agent_blueprint.cli.gate_cmd.run_harness_scenario", fake_run_harness_scenario
+        )
+        monkeypatch.setattr(
+            "agent_blueprint.cli.gate_cmd.run_eval_suites", fake_run_eval_suites
+        )
+        result = runner.invoke(app, ["gate", str(blueprint), "--update-baseline"])
+        assert result.exit_code == 0
+        assert harness_kwargs[0]["trace_store"] == tmp_path / ".abp" / "traces"
+        assert harness_kwargs[0]["save_traces"] == "failed"
+        assert "trace_store" not in eval_kwargs[0]

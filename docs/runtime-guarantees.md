@@ -122,6 +122,21 @@ Real-life use case:
 
 Every run emits machine-readable trace events. Harness scenarios can execute with live, mock, stubbed, or replay-oriented modes depending on the fixture setup.
 
+Supported scenario assertions (`expected:` block):
+
+- `tools_called` — exact ordered list of tool invocations
+- `approvals_triggered` — whether any approval was requested
+- `outputs` — exact values of structured output fields
+- `route` — the node the workflow ended on, or an escalation target it routed to
+- `state_assertions` — expressions (same grammar as edge conditions, e.g.
+  `state.route == 'billing'`) evaluated against the normalized final state
+  recorded in the trace manifest; message-list fields are summarized as
+  `{"__messages__": <count>}` and cannot be asserted on by content
+- `output_contract` — final stdout payload validated against a named
+  `contracts.outputs` schema
+- `artifacts` — declared artifact names that must have been written
+  (subset semantics: extra artifacts are allowed)
+
 Important runtime events already available:
 
 - `node_started`
@@ -149,8 +164,13 @@ harness:
       input:
         message: "Refund invoice 123"
       expected:
+        route: billing
         tools_called: [lookup_invoice, issue_refund]
         approvals_triggered: true
+        state_assertions:
+          - "state.route == 'billing'"
+        output_contract: refund_response
+        artifacts: [refund_receipt]
 ```
 
 Real-life use case:

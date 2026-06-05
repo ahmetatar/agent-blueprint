@@ -482,9 +482,17 @@ harness:
       input:
         message: "Refund invoice 123"
       expected:
+        route: billing                          # node the workflow ended on (or escalated to)
         tools_called: [lookup_invoice, issue_refund]
         approvals_triggered: true
+        state_assertions:                       # evaluated against the final state
+          - "state.route == 'billing'"
+        output_contract: refund_response        # validate stdout against contracts.outputs
+        artifacts: [refund_receipt]             # artifact names that must have been written
 ```
+
+All scenario assertions are executed by `abp test` — `route`, `state_assertions`,
+`output_contract`, and `artifacts` included.
 
 > See [Runtime Guarantees](docs/runtime-guarantees.md) for concrete patterns and real-world examples using contracts, policies, and harness scenarios together.
 

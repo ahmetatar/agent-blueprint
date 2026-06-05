@@ -426,3 +426,76 @@ contracts:
         assert "No lint findings" in result.output
         content = blueprint.read_text(encoding="utf-8")
         assert "never_used" not in content
+
+    def test_invalid_state_invariant_surfaces_as_compilation_error(self, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "lint-bad-invariant"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    count:
+      type: integer
+      default: 0
+agents:
+  assistant:
+    model: "gpt-4o"
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+contracts:
+  state:
+    invariants:
+      - "len(state.messages) > 0"
+""",
+        )
+
+        result = runner.invoke(app, ["lint", str(blueprint)])
+        assert result.exit_code == 1
+        output = result.output + str(result.exception or "")
+        assert "Compilation error" in output or "contracts.state.invariants[0]" in output
+
+    def test_valid_state_invariant_passes_lint(self, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "lint-good-invariant"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    count:
+      type: integer
+      default: 0
+agents:
+  assistant:
+    model: "gpt-4o"
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+contracts:
+  state:
+    invariants:
+      - "state.count >= 0"
+""",
+        )
+
+        result = runner.invoke(app, ["lint", str(blueprint)])
+        assert result.exit_code == 0
+        assert "No lint findings" in result.output

@@ -109,6 +109,8 @@ def _lint_dead_state_fields(spec: BlueprintSpec) -> list[LintFinding]:
     if spec.contracts:
         used_fields.update(spec.contracts.state.required_fields)
         used_fields.update(spec.contracts.state.immutable_fields)
+        for invariant in spec.contracts.state.invariants:
+            used_fields.update(_STATE_REF_RE.findall(invariant))
         for contract in spec.contracts.nodes.values():
             used_fields.update(contract.requires)
             used_fields.update(contract.produces)

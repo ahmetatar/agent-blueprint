@@ -3083,3 +3083,146 @@ class TestStateRequiredFieldsEnforcement:
         events = [event["event"] for event in manifest["trace"]]
         assert "contract_failed" not in events
         assert manifest["trace"][-1]["metadata"]["status"] == "success"
+
+
+class TestStateInvariantEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data(*, with_output_contract: bool) -> dict:
+        spec: dict = {
+            "blueprint": {"name": "invariant-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "count": {"type": "integer", "nullable": True, "default": None},
+                    "route": {"type": "string", "nullable": True, "default": None},
+                    "items": {"type": "list", "reducer": "append", "default": []},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {
+                "state": {"invariants": ["state.count >= 0"]},
+            },
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+        if with_output_contract:
+            spec["contracts"]["nodes"] = {
+                "assistant": {
+                    "output_contract": "count_payload",
+                    "produces": ["count", "route"],
+                }
+            }
+            spec["contracts"]["outputs"] = {
+                "count_payload": {
+                    "type": "object",
+                    "required": ["count", "route"],
+                    "properties": {
+                        "count": {"type": "integer"},
+                        "route": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                }
+            }
+        return spec
+
+    def test_state_invariants_rendered_in_nodes(self):
+        spec = BlueprintSpec.model_validate(self._spec_data(with_output_contract=False))
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "STATE_INVARIANTS" in files["nodes.py"]
+        assert "STATE_REDUCERS" in files["nodes.py"]
+        assert "_check_state_invariants" in files["nodes.py"]
+        assert "'state.count >= 0'" in files["nodes.py"]
+        assert "lambda merged:" in files["nodes.py"]
+        ast.parse(files["nodes.py"])
+
+    def test_state_invariant_violation_emits_contract_failed(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=True),
+            llm_script=[{"content": '{"count": -1, "route": "x"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        with pytest.raises(ValueError, match="invariant violated"):
+            module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "contract_failed"]
+        failure = manifest["trace"][-1]
+        assert failure["metadata"]["stage"] == "state_invariant"
+        assert failure["metadata"]["contract_kind"] == "invariant"
+        assert failure["metadata"]["expression"] == "state.count >= 0"
+
+    def test_state_invariant_holds_no_event(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=True),
+            llm_script=[{"content": '{"count": 5, "route": "x"}'}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        assert result["count"] == 5
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_invariant_skips_when_field_not_yet_populated(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=False),
+            llm_script=[{"content": "plain response"}],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint="invariant-test",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        # count is None everywhere: "None >= 0" raises TypeError -> invariant skipped.
+        module.node_assistant({"messages": [module.HumanMessage("hello")]})
+
+        manifest = trace_mod.current_recorder().manifest
+        assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
+
+    def test_merge_state_for_invariants_is_reducer_aware(self, tmp_path, monkeypatch):
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(with_output_contract=False),
+            llm_script=[{"content": "plain response"}],
+        )
+
+        merged = module._merge_state_for_invariants(
+            {"items": ["a"], "count": 1, "route": "old"},
+            {"items": ["b"], "count": 2, "route": None},
+        )
+
+        assert merged["items"] == ["a", "b"]  # append reducer concatenates
+        assert merged["count"] == 2  # replace reducer overwrites
+        assert merged["route"] == "old"  # replace reducer keeps left on None

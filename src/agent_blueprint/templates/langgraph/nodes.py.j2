@@ -726,6 +726,74 @@ def _apply_low_confidence_escalation(node_id: str, updates: dict[str, Any]) -> s
     updates["__abp_escalation_source"] = node_id
     return target
 
+{% if ir.nodes | selectattr("node_def.type.value", "equalto", "handoff") | list %}
+
+class _HandoffStateDict(dict):
+    """format_map helper: missing state fields keep their placeholder."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _render_handoff_message(template: str, state: Any) -> str:
+    try:
+        return template.format_map(_HandoffStateDict(dict(state)))
+    except Exception:
+        return template
+
+
+def _handoff_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Handoff channel requires the {name} environment variable")
+    return value
+
+
+def _deliver_handoff_console(payload: dict[str, Any]) -> None:
+    print(f"[HANDOFF] {payload['message']}")
+
+
+def _deliver_handoff_webhook(payload: dict[str, Any]) -> None:
+    url = _handoff_env("ABP_HANDOFF_WEBHOOK_URL")
+    import httpx
+
+    response = httpx.post(url, json=payload, timeout=10.0)
+    response.raise_for_status()
+
+
+def _deliver_handoff_slack(payload: dict[str, Any]) -> None:
+    url = _handoff_env("ABP_HANDOFF_SLACK_WEBHOOK_URL")
+    import httpx
+
+    response = httpx.post(
+        url,
+        json={"text": f"[{payload['blueprint']}] {payload['message']}"},
+        timeout=10.0,
+    )
+    response.raise_for_status()
+
+
+def _deliver_handoff_email(payload: dict[str, Any]) -> None:
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = f"[{payload['blueprint']}] Handoff: {payload['node']}"
+    msg["From"] = _handoff_env("ABP_HANDOFF_EMAIL_FROM")
+    msg["To"] = _handoff_env("ABP_HANDOFF_EMAIL_TO")
+    msg.set_content(payload["message"])
+
+    host = _handoff_env("ABP_HANDOFF_SMTP_HOST")
+    port = int(os.environ.get("ABP_HANDOFF_SMTP_PORT", "587"))
+    user = os.environ.get("ABP_HANDOFF_SMTP_USER", "")
+    password = os.environ.get("ABP_HANDOFF_SMTP_PASSWORD", "")
+    with smtplib.SMTP(host, port, timeout=15) as smtp:
+        smtp.starttls()
+        if user:
+            smtp.login(user, password)
+        smtp.send_message(msg)
+
+{% endif %}
 {% for node in ir.nodes %}
 {% if node.agent %}
 {% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
@@ -742,6 +810,18 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     hitl = None
 {% endif %}
     set_current_node("{{ node.id }}")
+{% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
+    emit_trace_event(
+        "parallel_finished",
+        node="{{ p.id }}",
+        input_state=state,
+        metadata={
+            "branches": {{ p.node_def.branches | to_python }},
+            "join": {{ p.node_def.join | to_python }},
+            "failure_policy": "{{ p.node_def.failure_policy.value }}",
+        },
+    )
+{% endfor %}
     emit_trace_event("node_started", node="{{ node.id }}", input_state=state)
 {% if node.contract and node.contract.requires %}
     _require_state_fields("{{ node.id }}", state, {{ node.contract.requires | to_python }})
@@ -879,7 +959,56 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% elif node.node_def.type.value == "handoff" %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """Human handoff: {{ node.description }}"""
-    print("[HANDOFF] {{ node.description }}")
+    set_current_node("{{ node.id }}")
+{% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
+    emit_trace_event(
+        "parallel_finished",
+        node="{{ p.id }}",
+        input_state=state,
+        metadata={
+            "branches": {{ p.node_def.branches | to_python }},
+            "join": {{ p.node_def.join | to_python }},
+            "failure_policy": "{{ p.node_def.failure_policy.value }}",
+        },
+    )
+{% endfor %}
+    emit_trace_event("node_started", node="{{ node.id }}", input_state=state)
+    message = _render_handoff_message(
+        {{ (node.node_def.message_template or node.description) | to_python }},
+        state,
+    )
+    payload = {
+        "blueprint": "{{ ir.name }}",
+        "node": "{{ node.id }}",
+        "action": {{ node.node_def.action | to_python }},
+        "channel": "{{ node.node_def.channel.value }}",
+        "message": message,
+        "thread_id": os.environ.get("ABP_THREAD_ID", "default"),
+        "metadata": {{ node.node_def.metadata | to_python }},
+    }
+    emit_trace_event(
+        "handoff_requested",
+        node="{{ node.id }}",
+        metadata={
+            "channel": "{{ node.node_def.channel.value }}",
+            "action": {{ node.node_def.action | to_python }},
+        },
+    )
+    if os.environ.get("ABP_TOOL_MODE", "live") == "live":
+        try:
+            _deliver_handoff_{{ node.node_def.channel.value }}(payload)
+        except Exception as exc:
+            emit_trace_event(
+                "handoff_failed",
+                node="{{ node.id }}",
+                error=str(exc),
+                metadata={"channel": "{{ node.node_def.channel.value }}"},
+            )
+            raise RuntimeError(
+                f"Handoff delivery failed on channel '{{ node.node_def.channel.value }}': {exc}"
+            ) from exc
+    emit_trace_event("node_finished", node="{{ node.id }}", input_state=state, output_state={})
+    clear_current_node()
     return {}
 
 {% elif node.node_def.type.value == "parallel" %}
@@ -896,17 +1025,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
             "failure_policy": "{{ node.node_def.failure_policy.value }}",
         },
     )
-    emit_trace_event(
-        "parallel_finished",
-        node="{{ node.id }}",
-        input_state=state,
-        output_state={},
-        metadata={
-            "branches": {{ node.node_def.branches | to_python }},
-            "join": {{ node.node_def.join | to_python }},
-            "failure_policy": "{{ node.node_def.failure_policy.value }}",
-        },
-    )
+    # parallel_finished is emitted by the join node once all branches merge
     clear_current_node()
     return {}
 
@@ -954,6 +1073,18 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     clear_current_node()
     return updates
 {% else %}
+{% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
+    emit_trace_event(
+        "parallel_finished",
+        node="{{ p.id }}",
+        input_state=state,
+        metadata={
+            "branches": {{ p.node_def.branches | to_python }},
+            "join": {{ p.node_def.join | to_python }},
+            "failure_policy": "{{ p.node_def.failure_policy.value }}",
+        },
+    )
+{% endfor %}
     # TODO: Implement action: {{ node.node_def.action or node.id }}
     return {}
 {% endif %}

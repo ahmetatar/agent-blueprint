@@ -149,10 +149,10 @@ class BlueprintSpec(BaseModel):
                         f"Subgraph '{subgraph_name}' node '{node_name}' references undefined "
                         f"agent '{node.agent}'"
                     )
-                if node.type.value == "subgraph":
+                if node.type.value == "subgraph" and node.ref not in self.subgraphs:
                     raise ValueError(
-                        f"Subgraph '{subgraph_name}' node '{node_name}' uses nested subgraph "
-                        "semantics, which are not supported yet"
+                        f"Subgraph '{subgraph_name}' node '{node_name}' references undefined "
+                        f"subgraph '{node.ref}'"
                     )
 
         if self.contracts:

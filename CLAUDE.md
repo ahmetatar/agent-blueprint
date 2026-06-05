@@ -46,7 +46,7 @@ YAML blueprint
 
 Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/*_cmd.py`) over a logic module:
 
-- `linting.py` — 7 lint checks, 2 autofixes. Note: `lint_cmd.py` compiles **before** linting, so compile errors surface before lint findings.
+- `linting.py` — 8 lint checks, 2 autofixes. Note: `lint_cmd.py` compiles **before** linting, so compile errors surface before lint findings.
 - `doctoring.py` — target-compatibility + env diagnostics; blocks unsupported features (parallel nodes, subgraph nesting) at generation time.
 - `harness_runner.py` — deterministic test harness (`abp test`): mock/replay/live LLM, stub/live tools; route / state / artifact / output-contract assertions; writes a manifest incl. `final_state`.
 - `eval_runner.py` — eval suites (exact_match, policy_violations, rubric).
@@ -58,7 +58,7 @@ Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/
 
 ### Declared vs. enforced (the recurring theme)
 
-Many blueprint features exist as Pydantic models + lint checks but have incomplete runtime enforcement in generated code. State contracts and approval policies ARE enforced at runtime; retry policy, handoff nodes, escalation routing, parallel/subgraph generation are modeled but not (fully) generated. Before adding a new lint or validator, check `models/blueprint.py` model validators — cross-reference validation often already exists there.
+Many blueprint features started as Pydantic models + lint checks with incomplete runtime enforcement; most are now generated: state contracts, approval policies, retry, escalation routing, parallel fan-out/join (with `parallel-branch-conflict` lint), nested subgraphs (compile-time flattening with namespaced ids/state keys and condition remapping, cycle detection), and handoff channel delivery (console/webhook/slack/email; delivery skipped when `ABP_TOOL_MODE != live`). Before adding a new lint or validator, check `models/blueprint.py` model validators — cross-reference validation often already exists there.
 
 ## Gotchas
 

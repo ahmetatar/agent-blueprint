@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp traces list/export`: persisted trace records under `.abp/traces/` and a
+  merge-with-dedup export into eval dataset cases — failed runs become regression
+  tests (empty `expected`), passing runs become golden behavior locks (`--golden`)
 - `abp gate <blueprint>` CI merge-gate command: runs harness scenarios and eval suites,
   diffs the result against a committed baseline (`.abp/gate-baseline.json`), and exits
   non-zero on regression (`--update-baseline`, `--tolerance`, `--json`)
@@ -24,6 +27,8 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Changed
 
+- `abp test` and `abp gate` now persist failing harness traces to `.abp/traces/`
+  by default (`--save-traces none` to disable)
 - development workflow documentation now points contributors to explicit local checks
 - release publishing now supports prerelease uploads to TestPyPI and published releases to PyPI
 - root `abp` help now shows a branded welcome banner and supports no-arg help output

@@ -29,6 +29,35 @@ _CURRENT_NODE = None
 _LAST_TRACE_MANIFEST = None
 _BUDGET_STATE = {"total_tokens": 0, "cost_usd": 0.0}
 
+# Trace observers (e.g. the OTel bridge) are notified of run lifecycle and
+# events as they are recorded. Observers never alter the JSON manifest, and
+# observer failures never break the run.
+_TRACE_OBSERVERS: list[Any] = []
+
+
+def register_trace_observer(observer: Any) -> None:
+    """Register an observer with optional on_run_started(run_info),
+    on_event(payload), on_llm_usage(node_id, usage, cost_usd), and
+    on_run_finished(status, error) callbacks."""
+    if observer not in _TRACE_OBSERVERS:
+        _TRACE_OBSERVERS.append(observer)
+
+
+def unregister_trace_observer(observer: Any) -> None:
+    if observer in _TRACE_OBSERVERS:
+        _TRACE_OBSERVERS.remove(observer)
+
+
+def _notify_observers(method: str, *args: Any) -> None:
+    for observer in _TRACE_OBSERVERS:
+        callback = getattr(observer, method, None)
+        if callback is None:
+            continue
+        try:
+            callback(*args)
+        except Exception:
+            pass  # observability must never break the run
+
 BUDGET_POLICY = {
     "max_tokens_per_run": {{ (ir.policies.budgets.max_tokens_per_run if ir.policies else none) | to_python }},
     "max_cost_usd": {{ (ir.policies.budgets.max_cost_usd if ir.policies else none) | to_python }},
@@ -173,6 +202,7 @@ class TraceRecorder:
             payload["metadata"] = normalize_for_trace(metadata)
         self.manifest["trace"].append(payload)
         self._sequence += 1
+        _notify_observers("on_event", payload)
         return payload
 
     def record_llm_output(self, node_id: str, payload: Any) -> None:
@@ -223,6 +253,7 @@ def start_trace(
         metadata=metadata,
     )
     _CURRENT_RECORDER = recorder
+    _notify_observers("on_run_started", recorder.manifest["run"])
     return recorder
 
 
@@ -247,6 +278,7 @@ def finalize_trace(*, status: str, error: str | None = None, output_state: Any =
     manifest = recorder.finalize(status=status, error=error, output_state=output_state)
     _CURRENT_RECORDER = None
     _CURRENT_NODE = None
+    _notify_observers("on_run_finished", status, error)
     return manifest
 
 
@@ -443,6 +475,7 @@ def register_llm_budget_usage(node_id: str, response: Any) -> dict[str, Any]:
 
     if usage is not None:
         budget_metadata["usage"] = usage
+    _notify_observers("on_llm_usage", node_id, usage, budget_metadata.get("cost_usd"))
     return budget_metadata
 
 

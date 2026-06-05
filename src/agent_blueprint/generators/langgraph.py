@@ -24,6 +24,16 @@ _TEMPLATES = [
 
 _RUNNER_TEMPLATE = ("_abp_runner.py.j2", "_abp_runner.py")
 
+_OTEL_TEMPLATE = ("_abp_otel.py.j2", "_abp_otel.py")
+
+
+def _tracing_enabled(ir: AgentGraph) -> bool:
+    return bool(
+        ir.observability
+        and ir.observability.tracing
+        and ir.observability.tracing.enabled
+    )
+
 
 def _safe_id(value: str) -> str:
     """Convert a node ID to a safe Python identifier."""
@@ -179,6 +189,18 @@ class LangGraphGenerator(BaseGenerator):
             except Exception as e:
                 raise GeneratorError(
                     f"Failed to render template '{template_name}': {e}"
+                ) from e
+
+        if _tracing_enabled(ir):
+            tmpl_name, out_name = _OTEL_TEMPLATE
+            try:
+                template = self._env.get_template(tmpl_name)
+                assert ir.observability is not None  # _tracing_enabled checked
+                content = template.render(ir=ir, tracing=ir.observability.tracing)
+                files[out_name] = content
+            except Exception as e:
+                raise GeneratorError(
+                    f"Failed to render template '{tmpl_name}': {e}"
                 ) from e
 
         if runner_thread_id is not None:

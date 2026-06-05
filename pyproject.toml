@@ -36,6 +36,7 @@ abp = "agent_blueprint.cli.app:app"
 dev = [
     "build>=1.2",
     "commitizen>=3.27",
+    "opentelemetry-sdk>=1.25",  # exercises the generated _abp_otel bridge in tests
     "pre-commit>=3.7",
     "pytest>=7.0",
     "pytest-cov>=4.0",

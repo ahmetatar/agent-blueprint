@@ -19,6 +19,7 @@ traces_app = typer.Typer(
 )
 
 _STATUS_CHOICES = {"failed", "passed", "all"}
+_ORIGIN_CHOICES = {"harness", "eval", "all"}
 
 
 def _validated_status(status: str) -> str:
@@ -28,6 +29,13 @@ def _validated_status(status: str) -> str:
     return status
 
 
+def _validated_origin(origin: str) -> str:
+    if origin not in _ORIGIN_CHOICES:
+        err_console.print("[bold red]Traces error:[/] --origin must be harness, eval, or all")
+        raise typer.Exit(1)
+    return origin
+
+
 @traces_app.command("list")
 def list_(
     dir: Path = typer.Option(
@@ -35,10 +43,14 @@ def list_(
     ),
     status: str = typer.Option("all", "--status", help="Filter by status: failed|passed|all"),
     blueprint: str | None = typer.Option(None, "--blueprint", help="Filter by blueprint name"),
+    origin: str = typer.Option("all", "--origin", help="Filter by origin: harness|eval|all"),
 ) -> None:
     """List persisted trace records."""
     records = list_trace_records(
-        store_dir=dir, status=_validated_status(status), blueprint=blueprint
+        store_dir=dir,
+        status=_validated_status(status),
+        blueprint=blueprint,
+        origin=_validated_origin(origin),
     )
     if not records:
         console.print(f"No trace records found in {dir}")
@@ -48,6 +60,7 @@ def list_(
     table.add_column("Scenario")
     table.add_column("Blueprint")
     table.add_column("Status")
+    table.add_column("Origin")
     table.add_column("Saved at")
     table.add_column("Failures")
 
@@ -62,6 +75,7 @@ def list_(
             str(record.get("scenario_id", "-")),
             str(record.get("blueprint", "-")),
             style,
+            str(record.get("origin", "harness")),
             str(record.get("saved_at", "-")),
             summary or "-",
         )
@@ -82,10 +96,20 @@ def export(
         "--golden",
         help="Fill expected (route, tools_called) from each trace to lock in current behavior",
     ),
+    origin: str = typer.Option(
+        "harness",
+        "--origin",
+        help="Export records with this origin: harness|eval|all "
+        "(default harness — eval-origin records are skipped to avoid re-exporting "
+        "already-exported cases)",
+    ),
 ) -> None:
     """Export trace records as eval dataset cases (merge-with-dedup, idempotent)."""
     records = list_trace_records(
-        store_dir=dir, status=_validated_status(status), blueprint=blueprint
+        store_dir=dir,
+        status=_validated_status(status),
+        blueprint=blueprint,
+        origin=_validated_origin(origin),
     )
     if not records:
         console.print(f"No matching trace records in {dir}; nothing to export")

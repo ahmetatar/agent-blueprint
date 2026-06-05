@@ -20,8 +20,8 @@ live API calls.
 
 ## Saving trace records
 
-`abp test` and `abp gate` persist records to `<blueprint_dir>/.abp/traces/`
-controlled by `--save-traces`:
+`abp test`, `abp eval`, and `abp gate` (both surfaces) persist records to
+`<blueprint_dir>/.abp/traces/` controlled by `--save-traces`:
 
 | Mode | Behavior |
 |---|---|
@@ -52,6 +52,20 @@ Override the store location with `--trace-dir PATH`.
 `status` reflects the **scenario assertion outcome** (`ScenarioResult.passed`),
 not just whether the process completed. The record wraps the manifest because
 the original scenario input is not part of the manifest itself.
+
+## Eval-run traces and the `origin` tag
+
+Eval-case runs (`abp eval`, and the eval half of `abp gate`) also persist
+records, tagged `"origin": "eval"`; harness scenario runs are tagged
+`"origin": "harness"` (records written before origin tagging count as
+harness).
+
+**`abp traces export` skips eval-origin records by default.** This prevents
+the loop where an exported regression case fails under eval, gets persisted
+again, and re-exports as a duplicate of itself. Use `--origin all` (or
+`--origin eval`) to include them — you generally don't want to: an eval-origin
+failure means an *existing* dataset case is still red, not that a new
+regression case is needed.
 
 ## Listing records
 

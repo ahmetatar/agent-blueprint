@@ -40,12 +40,14 @@ ABP is no longer just a YAML-to-code scaffold. It already gives you practical wo
 - node and state contracts
 - tool usage policies and execution budgets
 - low-confidence escalation to a specific review or handoff node
+- sandboxed local runs in a container (docker or podman), declared in the blueprint
 
 If you want the short version of what is implemented today, why it matters, and how to apply it, start here:
 
 - [Runtime Guarantees](docs/runtime-guarantees.md)
 - [Model Providers](docs/model-providers.md)
 - [Tools](docs/tools.md)
+- [Sandboxed Runs](docs/sandbox.md)
 
 ---
 
@@ -575,6 +577,9 @@ abp run my-agent.yml
 
 # With options
 abp run my-agent.yml --thread-id session-1 --install --env .env.local
+
+# Inside a container (docker or podman), isolated from the host
+abp run my-agent.yml "hello" --sandbox --engine podman
 ```
 
 | Flag | Default | Description |
@@ -583,6 +588,8 @@ abp run my-agent.yml --thread-id session-1 --install --env .env.local
 | `--thread-id` | `default` | Conversation thread ID |
 | `--install` | `true` | Run `pip install -r requirements.txt` before executing |
 | `--env` | `.env` | Path to a `.env` file to load |
+| `--sandbox / --no-sandbox` | blueprint `run.sandbox.enabled` | Run inside a container ([details](docs/sandbox.md)) |
+| `--engine` | blueprint `run.sandbox.engine` | Sandbox engine: `auto` \| `docker` \| `podman` |
 
 ### Harness and Replay
 

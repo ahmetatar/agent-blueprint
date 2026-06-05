@@ -23,3 +23,7 @@ class GeneratorError(BlueprintError):
 
 class DeployerError(BlueprintError):
     """Raised during deployment."""
+
+
+class SandboxError(BlueprintError):
+    """Raised when a sandboxed run cannot be prepared or executed."""

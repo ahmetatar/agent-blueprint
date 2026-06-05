@@ -45,17 +45,30 @@ class LocalRunner:
         env_file: Path | None = None,
         keep_temp: bool = False,
     ) -> int:
-        """Generate, optionally install deps, then execute.
+        """Generate, optionally install deps, then execute with inherited stdio.
 
+        Used by `abp run` — stdout/stderr stream to the terminal so the
+        one-shot output and the interactive REPL are visible.
         Returns the subprocess exit code.
         """
-        result = self.run_capture(
+        self._tempdir = Path(tempfile.mkdtemp(prefix="abp_run_"))
+        if not keep_temp:
+            atexit.register(self._cleanup)
+
+        self._generate()
+        self._warn_stubs()
+
+        if install:
+            rc = self._install_deps()
+            if rc != 0:
+                return rc
+
+        proc = self._execute(
             user_input=user_input,
-            install=install,
             env_file=env_file,
-            keep_temp=keep_temp,
+            capture_output=False,
         )
-        return result.returncode
+        return proc.returncode
 
     def run_capture(
         self,

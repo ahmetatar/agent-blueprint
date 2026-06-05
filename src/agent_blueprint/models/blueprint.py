@@ -16,6 +16,7 @@ from agent_blueprint.models.memory import MemoryConfig
 from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
+from agent_blueprint.models.run import RunConfig
 from agent_blueprint.models.state import StateDef
 from agent_blueprint.models.tools import ToolDef, ToolType
 
@@ -72,6 +73,7 @@ class BlueprintSpec(BaseModel):
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     evals: EvalsDef | None = None
+    run: RunConfig | None = None
     deploy: DeployConfig | None = None
 
     @model_validator(mode="after")

@@ -112,6 +112,27 @@ class TestLocalRunnerEnv:
         assert env["EXISTING_VAR"] == "original"
 
 
+class TestRunStreamsOutput:
+    def test_run_executes_with_inherited_stdio(self, monkeypatch):
+        """Regression: run() must not capture output — the REPL and one-shot
+        replies stream to the terminal (run_capture is the harness path)."""
+        import subprocess
+
+        ir = load_ir("basic_chatbot.yml")
+        runner = LocalRunner(ir)
+        seen = {}
+
+        def fake_execute(*, user_input, env_file, extra_env=None, capture_output=False):
+            seen["capture_output"] = capture_output
+            return subprocess.CompletedProcess([], 0)
+
+        monkeypatch.setattr(runner, "_generate", lambda: None)
+        monkeypatch.setattr(runner, "_execute", fake_execute)
+        rc = runner.run(user_input="hi")
+        assert rc == 0
+        assert seen["capture_output"] is False
+
+
 class TestStubWarning:
     def test_warns_for_stub_tools(self, capsys):
         ir = load_ir("impl_tools.yml")  # has send_email without impl

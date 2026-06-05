@@ -2934,3 +2934,152 @@ class TestLangGraphGenerator:
                 },
                 "graph": {"entry_point": "n", "nodes": {"n": {}}, "edges": []},
             })
+
+
+def _load_generated_main_module(
+    tmp_path,
+    monkeypatch,
+    *,
+    spec_data: dict,
+    graph_module_body: str,
+    module_name: str,
+):
+    gen = LangGraphGenerator()
+    spec = BlueprintSpec.model_validate(spec_data)
+    files = gen.generate(compile_blueprint(spec))
+
+    _write_trace_helper(tmp_path, files)
+    (tmp_path / "langgraph").mkdir()
+    (tmp_path / "langgraph" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "langgraph" / "errors.py").write_text(
+        "class GraphRecursionError(Exception):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "langchain_core").mkdir()
+    (tmp_path / "langchain_core" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "langchain_core" / "messages.py").write_text(
+        "class HumanMessage:\n"
+        "    def __init__(self, content):\n"
+        "        self.content = content\n",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "graph.py").write_text(graph_module_body, encoding="utf-8")
+    main_path = tmp_path / "generated_main.py"
+    main_path.write_text(files["main.py"], encoding="utf-8")
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+    monkeypatch.delitem(sys.modules, "graph", raising=False)
+    monkeypatch.delitem(sys.modules, "langchain_core.messages", raising=False)
+    spec_obj = importlib.util.spec_from_file_location(module_name, main_path)
+    assert spec_obj is not None
+    assert spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    sys.modules[spec_obj.name] = module
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+_REQUIRED_FIELDS_GRAPH_TEMPLATE = (
+    "class DummyMessage:\n"
+    "    def __init__(self, content):\n"
+    "        self.content = content\n\n"
+    "class DummyGraph:\n"
+    "    def invoke(self, state, config=None):\n"
+    "        return {RESULT}\n\n"
+    "graph = DummyGraph()\n"
+)
+
+
+class TestStateRequiredFieldsEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data() -> dict:
+        return {
+            "blueprint": {"name": "required-fields-test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "list[message]", "reducer": "append"},
+                    "summary": {"type": "string", "default": None, "nullable": True},
+                }
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {"state": {"required_fields": ["summary"]}},
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+
+    def test_required_state_fields_rendered_in_main(self):
+        spec = BlueprintSpec.model_validate(self._spec_data())
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "STATE_REQUIRED_FIELDS = ['summary']" in files["main.py"]
+        assert "_validate_required_state_fields" in files["main.py"]
+        ast.parse(files["main.py"])
+
+    def test_required_field_missing_emits_contract_failed_state_stage(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')]}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_missing_test",
+        )
+
+        with pytest.raises(ValueError, match="required field\\(s\\) 'summary'"):
+            module.run("hello")
+
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        assert [event["event"] for event in manifest["trace"]] == ["contract_failed", "run_finished"]
+        assert manifest["trace"][0]["metadata"]["stage"] == "state_required_fields"
+        assert manifest["trace"][-1]["metadata"]["status"] == "failed"
+
+    def test_required_field_none_value_fails(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')], 'summary': None}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_none_test",
+        )
+
+        with pytest.raises(ValueError, match="required field\\(s\\) 'summary'"):
+            module.run("hello")
+
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        assert manifest["trace"][0]["event"] == "contract_failed"
+        assert manifest["trace"][0]["metadata"]["stage"] == "state_required_fields"
+
+    def test_required_fields_pass_when_present(self, tmp_path, monkeypatch):
+        graph_body = _REQUIRED_FIELDS_GRAPH_TEMPLATE.replace(
+            "{RESULT}", "{'messages': [DummyMessage('ok')], 'summary': 'done'}"
+        )
+        module = _load_generated_main_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(),
+            graph_module_body=graph_body,
+            module_name="generated_main_required_present_test",
+        )
+
+        response = module.run("hello")
+
+        assert response == "ok"
+        manifest = sys.modules["_abp_trace"].get_last_trace_manifest()
+        assert manifest is not None
+        events = [event["event"] for event in manifest["trace"]]
+        assert "contract_failed" not in events
+        assert manifest["trace"][-1]["metadata"]["status"] == "success"

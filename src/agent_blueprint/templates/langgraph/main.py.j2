@@ -51,6 +51,8 @@ BUDGET_POLICY = {
     "max_latency_seconds": {{ (ir.policies.budgets.max_latency_seconds if ir.policies else none) | to_python }},
 }
 
+STATE_REQUIRED_FIELDS = {{ (ir.contracts.state.required_fields if ir.contracts else []) | to_python }}
+
 
 def _validate_input_value(field_name: str, value: Any, field_def: dict[str, Any]) -> Any:
     if value is None:
@@ -155,6 +157,19 @@ def _validate_output_payload(result: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
+def _validate_required_state_fields(result: dict[str, Any]) -> None:
+    missing = [
+        field_name
+        for field_name in STATE_REQUIRED_FIELDS
+        if field_name not in result or result.get(field_name) is None
+    ]
+    if missing:
+        quoted = ", ".join(f"'{name}'" for name in missing)
+        raise ValueError(
+            f"State contract error: required field(s) {quoted} are null or missing at completion"
+        )
+
+
 def _default_run_id(thread_id: str) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{thread_id}"
@@ -229,6 +244,18 @@ def run(user_input: Any, thread_id: str = "default") -> Any:
         )
         finalize_trace(status="failed", error=error, output_state=result)
         raise RuntimeError(error)
+    if STATE_REQUIRED_FIELDS:
+        try:
+            _validate_required_state_fields(result)
+        except ValueError as exc:
+            emit_trace_event(
+                "contract_failed",
+                error=str(exc),
+                output_state=result,
+                metadata={"stage": "state_required_fields"},
+            )
+            finalize_trace(status="failed", error=str(exc), output_state=result)
+            raise
     if OUTPUT_SCHEMA:
         try:
             validated_output = _validate_output_payload(result)

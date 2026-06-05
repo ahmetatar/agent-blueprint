@@ -416,6 +416,8 @@ contracts:
   state:
     required_fields: [messages]
     immutable_fields: [request_id]
+    invariants:
+      - "state.confidence >= 0"
 
   nodes:
     router:
@@ -432,6 +434,11 @@ contracts:
         confidence: { type: number }
 ```
 
+All contract layers are enforced at runtime by the generated code:
+`required_fields` must be non-null at workflow completion, `invariants`
+are re-checked after every agent node, and violations emit `contract_failed`
+trace events before raising.
+
 ### `policies`
 
 Use policies when you want the runtime to enforce safety and noise limits:
@@ -439,8 +446,9 @@ Use policies when you want the runtime to enforce safety and noise limits:
 ```yaml
 policies:
   approvals:
-    mode: selective
+    mode: selective          # or "all" to gate every tool call
     tools: [issue_refund]
+    on_violation: block      # or "warn" to continue and emit policy_violation
 
   tool_usage:
     max_calls_per_node: 2

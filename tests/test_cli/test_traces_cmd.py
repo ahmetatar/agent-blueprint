@@ -96,7 +96,7 @@ class TestTracesExport:
             app, ["traces", "export", "--dir", str(tmp_path), "--output", str(output)]
         )
         assert result.exit_code == 0
-        assert "1 new case(s)" in result.output
+        assert "1 new case(s)" in " ".join(result.output.split())
         payload = json.loads(output.read_text(encoding="utf-8"))
         case = payload["cases"][0]
         assert case["expected"] == {}
@@ -122,13 +122,15 @@ class TestTracesExport:
         first = runner.invoke(
             app, ["traces", "export", "--dir", str(tmp_path), "--output", str(output)]
         )
-        assert "1 new case(s)" in first.output
+        assert "1 new case(s)" in " ".join(first.output.split())
         second = runner.invoke(
             app, ["traces", "export", "--dir", str(tmp_path), "--output", str(output)]
         )
         assert second.exit_code == 0
-        assert "0 new case(s)" in second.output
-        assert "1 already present" in second.output
+        # Rich wraps long lines (CI tmp paths are long) — compare unwrapped text.
+        unwrapped = " ".join(second.output.split())
+        assert "0 new case(s)" in unwrapped
+        assert "1 already present" in unwrapped
 
     def test_no_records_exits_zero(self, tmp_path):
         output = tmp_path / "regressions.json"

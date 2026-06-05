@@ -59,7 +59,7 @@ cases:
     })
     ir = compile_blueprint(spec)
 
-    def fake_run_harness_scenario(ir, scenario, *, install):
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
         return ScenarioResult(
             scenario_id=scenario.id,
             passed=scenario.id == "pass_case",
@@ -105,7 +105,7 @@ def test_policy_violations_metric_counts_trace_events(monkeypatch, tmp_path: Pat
     })
     ir = compile_blueprint(spec)
 
-    def fake_run_harness_scenario(ir, scenario, *, install):
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
         return ScenarioResult(
             scenario_id=scenario.id,
             passed=True,
@@ -174,7 +174,7 @@ cases:
     })
     ir = compile_blueprint(spec)
 
-    def fake_run_harness_scenario(ir, scenario, *, install):
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
         return ScenarioResult(
             scenario_id=scenario.id,
             passed=True,
@@ -249,7 +249,7 @@ metadata:
     })
     ir = compile_blueprint(spec)
 
-    def fake_run_harness_scenario(ir, scenario, *, install):
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
         return ScenarioResult(
             scenario_id=scenario.id,
             passed=True,
@@ -280,3 +280,52 @@ metadata:
     assert result.score == 0.5
     assert "missing required artifact section: Success Metrics" in result.cases[0].failures
     assert "rubric score 0.500 is below minimum 1.000" in result.cases[0].failures
+
+
+def test_eval_suite_threads_trace_store_with_eval_origin(monkeypatch, tmp_path: Path):
+    dataset = tmp_path / "cases.yaml"
+    dataset.write_text(
+        """\
+cases:
+  - id: fail_case
+    input:
+      message: "hi"
+    expected: {}
+""",
+        encoding="utf-8",
+    )
+    spec = BlueprintSpec.model_validate({
+        "blueprint": {"name": "eval-test"},
+        "graph": {"entry_point": "n", "nodes": {"n": {"type": "function"}}, "edges": []},
+        "evals": {
+            "suites": [
+                {"id": "suite", "metric": "exact_match", "dataset": "cases.yaml"}
+            ]
+        },
+    })
+    ir = compile_blueprint(spec)
+    seen_kwargs: list[dict] = []
+
+    def fake_run_harness_scenario(ir, scenario, *, install, **kwargs):
+        seen_kwargs.append(dict(kwargs))
+        return ScenarioResult(
+            scenario_id=scenario.id, passed=False, returncode=1, failures=["boom"],
+        )
+
+    monkeypatch.setattr(
+        "agent_blueprint.eval_runner.run_harness_scenario", fake_run_harness_scenario
+    )
+
+    store = tmp_path / "traces"
+    run_eval_suite(
+        ir,
+        ir.evals.suites[0],
+        blueprint_dir=tmp_path,
+        install=False,
+        trace_store=store,
+        save_traces="failed",
+    )
+
+    assert seen_kwargs[0]["trace_store"] == store
+    assert seen_kwargs[0]["save_traces"] == "failed"
+    assert seen_kwargs[0]["origin"] == "eval"

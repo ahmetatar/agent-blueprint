@@ -140,3 +140,66 @@ class TestTracesExport:
         assert result.exit_code == 0
         assert "nothing to export" in result.output
         assert not output.exists()
+
+
+def _store_eval_record(store: Path, *, scenario_id: str = "exported__a1b2c3d4") -> Path:
+    result = ScenarioResult(
+        scenario_id=scenario_id,
+        passed=False,
+        returncode=0,
+        failures=["still failing"],
+        trace_manifest={
+            "run": {"run_id": scenario_id, "blueprint": "test-agent",
+                    "blueprint_version": "1.0", "mode": "mock"},
+            "trace": [],
+            "replay": {"llm_outputs": {}, "tool_outputs": {}},
+        },
+    )
+    record = build_trace_record(
+        scenario_id=scenario_id,
+        input={"message": "hi"},
+        result=result,
+        saved_at="2026-06-05T12:00:00Z",
+        origin="eval",
+    )
+    return save_trace_record(record, store_dir=store)
+
+
+class TestOriginFiltering:
+    def test_export_skips_eval_origin_by_default(self, tmp_path):
+        _store_record(tmp_path, passed=False)
+        _store_eval_record(tmp_path)
+        output = tmp_path / "regressions.json"
+        result = runner.invoke(
+            app, ["traces", "export", "--dir", str(tmp_path), "--output", str(output)]
+        )
+        assert result.exit_code == 0
+        assert "1 new case(s)" in " ".join(result.output.split())
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert len(payload["cases"]) == 1
+        assert payload["cases"][0]["id"].startswith("happy_path__")
+
+    def test_export_origin_all_includes_eval(self, tmp_path):
+        _store_record(tmp_path, passed=False)
+        _store_eval_record(tmp_path)
+        output = tmp_path / "regressions.json"
+        result = runner.invoke(
+            app,
+            ["traces", "export", "--dir", str(tmp_path), "--output", str(output),
+             "--origin", "all"],
+        )
+        assert result.exit_code == 0
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert len(payload["cases"]) == 2
+
+    def test_list_origin_filter_and_column(self, tmp_path):
+        _store_record(tmp_path, passed=False)
+        _store_eval_record(tmp_path)
+        result = runner.invoke(
+            app, ["traces", "list", "--dir", str(tmp_path), "--origin", "eval"]
+        )
+        assert result.exit_code == 0
+        # Rich truncates long cell values — assert on the filtered count instead.
+        assert "1 record(s)" in result.output
+        assert "happy_path" not in result.output
+        assert "eval" in result.output

@@ -8,6 +8,11 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- trace records carry an `origin` tag (`harness`|`eval`); `abp traces list/export`
+  gain `--origin` filters and export skips eval-origin records by default to
+  prevent re-exporting already-exported cases
+- `abp eval` gains `--save-traces`/`--trace-dir`; failing eval cases now persist
+  trace records, and `abp gate` applies its `--save-traces` policy to both surfaces
 - `abp traces list/export`: persisted trace records under `.abp/traces/` and a
   merge-with-dedup export into eval dataset cases — failed runs become regression
   tests (empty `expected`), passing runs become golden behavior locks (`--golden`)

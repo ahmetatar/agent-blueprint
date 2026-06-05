@@ -119,6 +119,7 @@ def run_harness_scenario(
     install: bool,
     trace_store: Path | None = None,
     save_traces: str = "all",
+    origin: str = "harness",
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
     tool_mode = (scenario.tool_mode or ir.harness.defaults.tool_mode).value  # type: ignore[union-attr]
@@ -196,6 +197,7 @@ def run_harness_scenario(
             scenario_id=scenario.id,
             input=scenario.input,
             result=result,
+            origin=origin,
         )
         save_trace_record(record, store_dir=trace_store)
     return result

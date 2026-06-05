@@ -112,6 +112,9 @@ real behavioral change.
 
 ## Failed runs become regression tests
 
-The gate persists failing scenario traces to `.abp/traces/` by default
-(`--save-traces failed|all|none`). Export them as eval dataset cases with
-[`abp traces export`](traces.md) — the trace → eval flywheel.
+The gate persists failing traces from **both surfaces** — harness scenarios
+(`origin: harness`) and eval cases (`origin: eval`) — to `.abp/traces/` by
+default (`--save-traces failed|all|none`). Export them as eval dataset cases
+with [`abp traces export`](traces.md) — the trace → eval flywheel. Export
+skips eval-origin records by default, so already-exported cases never
+duplicate themselves.

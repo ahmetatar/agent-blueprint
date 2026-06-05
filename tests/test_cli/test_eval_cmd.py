@@ -63,7 +63,7 @@ evals:
         )
         seen: list[str] = []
 
-        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install):
+        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install, **kwargs):
             seen.extend(item.id for item in suites)
             return EvalRunResult(
                 blueprint=ir.name,
@@ -118,7 +118,7 @@ evals:
 """,
         )
 
-        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install):
+        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install, **kwargs):
             return EvalRunResult(
                 blueprint=ir.name,
                 blueprint_version=ir.version,
@@ -145,3 +145,68 @@ evals:
         assert result.exit_code == 1
         assert "FAIL" in result.output
         assert "case failed" in result.output
+
+    def test_threads_trace_store_by_default(self, monkeypatch, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+evals:
+  suites:
+    - id: suite
+      metric: exact_match
+      dataset: datasets/cases.yaml
+""",
+        )
+        seen_kwargs: list[dict] = []
+
+        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install, **kwargs):
+            seen_kwargs.append(dict(kwargs))
+            return EvalRunResult(
+                blueprint=ir.name, blueprint_version=ir.version, passed=True, suites=[],
+            )
+
+        monkeypatch.setattr("agent_blueprint.cli.eval_cmd.run_eval_suites", fake_run_eval_suites)
+        result = runner.invoke(app, ["eval", str(blueprint)])
+        assert result.exit_code == 0
+        assert seen_kwargs[0]["trace_store"] == tmp_path / ".abp" / "traces"
+        assert seen_kwargs[0]["save_traces"] == "failed"
+
+    def test_save_traces_none_disables_store(self, monkeypatch, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "test-agent"
+graph:
+  entry_point: n
+  nodes:
+    n:
+      type: function
+  edges: []
+evals:
+  suites:
+    - id: suite
+      metric: exact_match
+      dataset: datasets/cases.yaml
+""",
+        )
+        seen_kwargs: list[dict] = []
+
+        def fake_run_eval_suites(ir, suites, *, blueprint_dir, install, **kwargs):
+            seen_kwargs.append(dict(kwargs))
+            return EvalRunResult(
+                blueprint=ir.name, blueprint_version=ir.version, passed=True, suites=[],
+            )
+
+        monkeypatch.setattr("agent_blueprint.cli.eval_cmd.run_eval_suites", fake_run_eval_suites)
+        result = runner.invoke(app, ["eval", str(blueprint), "--save-traces", "none"])
+        assert result.exit_code == 0
+        assert seen_kwargs[0]["trace_store"] is None

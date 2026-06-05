@@ -28,6 +28,14 @@ def eval_(
     install: bool = typer.Option(
         False, "--install/--no-install", help="pip install dependencies before running eval cases"
     ),
+    save_traces: str = typer.Option(
+        "failed",
+        "--save-traces",
+        help="Persist eval-case trace records to the trace store: failed|all|none",
+    ),
+    trace_dir: Path | None = typer.Option(
+        None, "--trace-dir", help="Trace store dir (default <blueprint_dir>/.abp/traces)"
+    ),
 ) -> None:
     """Run eval suites defined for a blueprint."""
     try:
@@ -55,8 +63,22 @@ def eval_(
             err_console.print(f"[bold red]Eval error:[/] suite '{suite}' was not found")
             raise typer.Exit(1)
 
+    if save_traces not in {"failed", "all", "none"}:
+        err_console.print("[bold red]Eval error:[/] --save-traces must be failed, all, or none")
+        raise typer.Exit(1)
+    trace_store = (
+        None if save_traces == "none" else (trace_dir or blueprint.parent / ".abp" / "traces")
+    )
+
     try:
-        result = run_eval_suites(ir, suites, blueprint_dir=blueprint.parent, install=install)
+        result = run_eval_suites(
+            ir,
+            suites,
+            blueprint_dir=blueprint.parent,
+            install=install,
+            trace_store=trace_store,
+            save_traces=save_traces,
+        )
     except BlueprintValidationError as e:
         err_console.print(f"[bold red]Eval error:[/] {e}")
         raise typer.Exit(1) from e

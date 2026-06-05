@@ -105,7 +105,12 @@ def gate(
     if suites:
         try:
             eval_result = run_eval_suites(
-                ir, suites, blueprint_dir=blueprint.parent, install=install
+                ir,
+                suites,
+                blueprint_dir=blueprint.parent,
+                install=install,
+                trace_store=trace_store,
+                save_traces=save_traces,
             )
         except BlueprintValidationError as e:
             err_console.print(f"[bold red]Gate error:[/] {e}")

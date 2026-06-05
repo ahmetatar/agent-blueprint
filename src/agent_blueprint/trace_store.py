@@ -38,11 +38,14 @@ def build_trace_record(
     input: dict[str, Any],
     result: ScenarioResult,
     saved_at: str | None = None,
+    origin: str = "harness",
 ) -> dict[str, Any]:
     """Wrap a scenario result + its trace manifest into a persistable record.
 
     `status` comes from ScenarioResult.passed (assertion outcome), NOT the
     manifest's run_finished status (which only reflects internal completion).
+    `origin` distinguishes harness-scenario runs from eval-case runs so the
+    export step can skip eval-origin records by default (loop prevention).
     Tolerates a missing manifest (subprocess crashed before writing a trace).
     """
     manifest = result.trace_manifest or {}
@@ -54,6 +57,7 @@ def build_trace_record(
         "blueprint_version": str(run_meta.get("blueprint_version") or ""),
         "scenario_id": scenario_id,
         "status": "passed" if result.passed else "failed",
+        "origin": origin,
         "saved_at": saved_at or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "input": input,
         "failures": list(result.failures),
@@ -78,10 +82,13 @@ def list_trace_records(
     store_dir: Path,
     status: str = "all",
     blueprint: str | None = None,
+    origin: str = "all",
 ) -> list[dict[str, Any]]:
     """Load records from the store, oldest first.
 
-    Unparseable files and unknown schema versions are skipped, never fatal.
+    Records without an origin field (written before origin tagging) count as
+    "harness". Unparseable files and unknown schema versions are skipped,
+    never fatal.
     """
     if not store_dir.is_dir():
         return []
@@ -98,6 +105,8 @@ def list_trace_records(
         if status != "all" and data.get("status") != status:
             continue
         if blueprint is not None and data.get("blueprint") != blueprint:
+            continue
+        if origin != "all" and data.get("origin", "harness") != origin:
             continue
         records.append(data)
     records.sort(key=lambda record: str(record.get("saved_at", "")))

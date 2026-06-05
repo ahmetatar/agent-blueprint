@@ -47,6 +47,17 @@ class TestTraceSchema:
         assert event.tool == "lookup_invoice"
         assert event.args_hash == "ghi"
 
+    def test_manifest_accepts_final_state(self):
+        run = TraceRunMetadata(
+            run_id="run-1",
+            blueprint="customer-support",
+            blueprint_version="1.2",
+            mode="mock",
+        )
+        manifest = TraceManifest(run=run, final_state={"route": "billing"})
+        assert manifest.final_state == {"route": "billing"}
+        assert TraceManifest(run=run).final_state is None
+
 
 class TestTraceNormalization:
     def test_state_hash_is_stable_across_dict_key_order(self):
@@ -102,6 +113,18 @@ class TestTraceNormalization:
             "replay": {},
         }
         assert trace_replay_json(left) == trace_replay_json(right)
+
+    def test_trace_replay_json_ignores_final_state(self):
+        base = {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "run": {"blueprint": "agent", "blueprint_version": "1.0", "scenario_id": "case-1"},
+            "trace": [],
+            "replay": {},
+        }
+        with_state = {**base, "final_state": {"route": "billing"}}
+        without_state = {**base, "final_state": {"route": "support"}}
+        assert trace_replay_json(with_state) == trace_replay_json(without_state)
+        assert trace_replay_json(with_state) == trace_replay_json(base)
 
     def test_diff_trace_manifests_reports_drift(self):
         left = {

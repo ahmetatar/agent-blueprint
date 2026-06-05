@@ -83,6 +83,7 @@ class TraceManifest(BaseModel):
     schema_version: str = TRACE_SCHEMA_VERSION
     run: TraceRunMetadata
     trace: list[TraceEvent] = Field(default_factory=list)
+    final_state: Any | None = None
 
 
 def normalize_for_trace(value: Any) -> Any:

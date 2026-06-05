@@ -3445,3 +3445,72 @@ class TestApprovalPolicyEnforcement:
 
         events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
         assert not any(event.startswith("approval_") for event in events)
+
+
+class TestTraceFinalState:
+    def test_finalize_records_summarized_final_state(self, tmp_path, monkeypatch):
+        files = LangGraphGenerator().generate(load_ir("basic_chatbot.yml"))
+        _write_trace_helper(tmp_path, files)
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        spec_obj = importlib.util.spec_from_file_location(
+            "abp_trace_final_state_test",
+            tmp_path / "_abp_trace.py",
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        class FakeMessage:
+            def __init__(self, content):
+                self.content = content
+
+        recorder = module.start_trace(
+            run_id="run-1",
+            blueprint="basic-chatbot",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        manifest = recorder.finalize(
+            status="success",
+            output_state={
+                "messages": [FakeMessage("hi"), FakeMessage("yo")],
+                "route": "billing",
+                "confidence": 0.9,
+            },
+        )
+
+        assert manifest["final_state"] == {
+            "messages": {"__messages__": 2},
+            "route": "billing",
+            "confidence": 0.9,
+        }
+
+    def test_finalize_without_output_state_omits_final_state(self, tmp_path, monkeypatch):
+        files = LangGraphGenerator().generate(load_ir("basic_chatbot.yml"))
+        _write_trace_helper(tmp_path, files)
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+        spec_obj = importlib.util.spec_from_file_location(
+            "abp_trace_no_final_state_test",
+            tmp_path / "_abp_trace.py",
+        )
+        assert spec_obj is not None
+        assert spec_obj.loader is not None
+        module = importlib.util.module_from_spec(spec_obj)
+        sys.modules[spec_obj.name] = module
+        spec_obj.loader.exec_module(module)
+
+        recorder = module.start_trace(
+            run_id="run-1",
+            blueprint="basic-chatbot",
+            blueprint_version="1.0",
+            mode="mock",
+        )
+        manifest = recorder.finalize(status="failed", error="boom")
+
+        assert "final_state" not in manifest

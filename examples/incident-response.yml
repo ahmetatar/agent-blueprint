@@ -1,0 +1,109 @@
+blueprint:
+  name: "incident-response"
+  version: "1.0"
+  description: "Parallel incident analysis with a triage subgraph and on-call handoff"
+
+settings:
+  default_model: "openai/gpt-4o-mini"
+  default_temperature: 0.2
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+    findings:
+      type: list
+      reducer: append
+      default: []
+    severity:
+      type: string
+      default: null
+    summary:
+      type: string
+      default: null
+
+agents:
+  log_analyst:
+    name: "Log Analyst"
+    model: "${settings.default_model}"
+    system_prompt: |
+      You analyze application logs for the reported incident.
+      Append your findings as short bullet points.
+
+  metric_analyst:
+    name: "Metric Analyst"
+    model: "${settings.default_model}"
+    system_prompt: |
+      You analyze infrastructure metrics for the reported incident.
+      Append your findings as short bullet points.
+
+  triage_writer:
+    name: "Triage Writer"
+    model: "${settings.default_model}"
+    system_prompt: |
+      Combine the incident findings into a one-paragraph summary and decide
+      the severity. Respond with JSON: {"summary": "...", "severity": "low"|"high"}
+
+graph:
+  entry_point: analyze
+  nodes:
+    analyze:
+      type: parallel
+      branches: [logs, metrics]
+      join: triage
+      description: "Fan out to log and metric analysis"
+    logs:
+      agent: log_analyst
+    metrics:
+      agent: metric_analyst
+    triage:
+      type: subgraph
+      ref: triage_flow
+      input_map:
+        findings: raw_findings
+      output_map:
+        verdict_summary: summary
+        verdict_severity: severity
+    page_oncall:
+      type: handoff
+      channel: console
+      action: page_oncall
+      message_template: "Incident severity {severity}: {summary}"
+      description: "Escalate high-severity incidents to the on-call engineer"
+  edges:
+    - from: triage
+      to:
+        - condition: "state.severity == 'high'"
+          target: page_oncall
+        - default: END
+    - from: page_oncall
+      to: END
+
+subgraphs:
+  triage_flow:
+    entry_point: write
+    nodes:
+      write:
+        agent: triage_writer
+    edges:
+      - from: write
+        to: END
+
+contracts:
+  nodes:
+    logs:
+      produces: [findings]
+    metrics:
+      produces: [findings]
+
+output:
+  schema:
+    summary:
+      type: string
+    severity:
+      type: string
+      enum: [low, high]
+    findings:
+      type: list
+      required: false

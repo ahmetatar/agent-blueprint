@@ -4,7 +4,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent_blueprint.exceptions import BlueprintCompilationError
-from agent_blueprint.ir.expression import CompiledExpression, parse_expression
+from agent_blueprint.ir.expression import (
+    CompiledExpression,
+    parse_expression,
+    rename_state_fields,
+)
 from agent_blueprint.models.agents import AgentDef, RagMode
 from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.blueprint import BlueprintSpec, BlueprintSettings, IOSchema
@@ -157,14 +161,47 @@ def _namespace_state_key(subgraph_node_id: str, inner_field: str) -> str:
     return f"{subgraph_node_id}__{inner_field}"
 
 
+#: Safety bound for recursive subgraph nesting (cycles are caught separately)
+_MAX_SUBGRAPH_DEPTH = 10
+
+
 def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
+    """Flatten subgraph nodes, one nesting level per pass, until none remain."""
+    nodes: dict[str, NodeDef] = dict(spec.graph.nodes)
+    edges: list[EdgeDef] = list(spec.graph.edges)
+    state = spec.state.model_copy(deep=True)
+    entry_point = spec.graph.entry_point
+
+    depth = 0
+    while any(node.type == NodeType.subgraph for node in nodes.values()):
+        if depth >= _MAX_SUBGRAPH_DEPTH:
+            raise BlueprintCompilationError(
+                f"Subgraph nesting exceeds the maximum depth of {_MAX_SUBGRAPH_DEPTH}"
+            )
+        nodes, edges, entry_point = _expand_one_level(spec, nodes, edges, state, entry_point)
+        depth += 1
+
+    return ExpandedGraph(
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry_point=entry_point,
+    )
+
+
+def _expand_one_level(
+    spec: BlueprintSpec,
+    in_nodes: dict[str, NodeDef],
+    in_edges: list[EdgeDef],
+    state: StateDef,
+    in_entry_point: str,
+) -> tuple[dict[str, NodeDef], list[EdgeDef], str]:
     nodes: dict[str, NodeDef] = {}
     edges: list[EdgeDef] = []
-    state = spec.state.model_copy(deep=True)
     subgraph_entry_nodes: dict[str, str] = {}
     subgraph_exit_nodes: dict[str, str] = {}
 
-    for node_id, node_def in spec.graph.nodes.items():
+    for node_id, node_def in in_nodes.items():
         if node_def.type != NodeType.subgraph:
             nodes[node_id] = node_def
             continue
@@ -173,6 +210,16 @@ def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
             raise BlueprintCompilationError(
                 f"Node '{node_id}' references undefined subgraph '{node_def.ref}'"
             )
+
+        # Cycle guard: the chain of refs that produced this node must not
+        # contain the ref it expands to.
+        ref_chain: list[str] = list(node_def.metadata.get("abp_subgraph_ref_chain", []))
+        if node_def.ref in ref_chain:
+            rendered = " -> ".join([*ref_chain, node_def.ref])
+            raise BlueprintCompilationError(
+                f"Subgraph reference cycle detected: {rendered}"
+            )
+        ref_chain = [*ref_chain, node_def.ref]
 
         subgraph = spec.subgraphs[node_def.ref]
         entry_id = _namespace_id(node_id, "entry")
@@ -201,17 +248,19 @@ def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
             },
         )
 
+        # Consult the evolving state so nested expansion sees fields added by
+        # the previous pass (e.g. "outer__q" produced while expanding "outer").
         for outer_field, inner_field in node_def.input_map.items():
-            if outer_field in spec.state.fields:
+            if outer_field in state.fields:
                 state.fields.setdefault(
                     _namespace_state_key(node_id, inner_field),
-                    spec.state.fields[outer_field].model_copy(deep=True),
+                    state.fields[outer_field].model_copy(deep=True),
                 )
         for inner_field, outer_field in node_def.output_map.items():
-            if outer_field in spec.state.fields:
+            if outer_field in state.fields:
                 state.fields.setdefault(
                     _namespace_state_key(node_id, inner_field),
-                    spec.state.fields[outer_field].model_copy(deep=True),
+                    state.fields[outer_field].model_copy(deep=True),
                 )
 
         state_key_map = {
@@ -233,6 +282,18 @@ def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
                 ]
                 if expanded_node.join:
                     expanded_node.join = _namespace_id(node_id, expanded_node.join)
+            if expanded_node.type == NodeType.subgraph:
+                # Nested subgraph: carry the cycle chain and remap the
+                # outer-facing side of its maps into this pass's namespace.
+                expanded_node.metadata["abp_subgraph_ref_chain"] = ref_chain
+                expanded_node.input_map = {
+                    state_key_map.get(outer, outer): inner
+                    for outer, inner in expanded_node.input_map.items()
+                }
+                expanded_node.output_map = {
+                    inner: state_key_map.get(outer, outer)
+                    for inner, outer in expanded_node.output_map.items()
+                }
             nodes[_namespace_id(node_id, inner_node_id)] = expanded_node
 
         edges.append(EdgeDef.model_validate({
@@ -247,10 +308,12 @@ def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
                 remapped.target = (
                     exit_id if remapped.target == "END" else _namespace_id(node_id, remapped.target)
                 )
+                if remapped.condition:
+                    remapped.condition = rename_state_fields(remapped.condition, state_key_map)
                 remapped_targets.append(remapped)
             edges.append(EdgeDef.model_validate({"from": edge_source, "to": remapped_targets}))
 
-    for edge in spec.graph.edges:
+    for edge in in_edges:
         from_node = subgraph_exit_nodes.get(edge.from_node, edge.from_node)
         remapped_targets = []
         for target in edge.get_targets():
@@ -259,13 +322,8 @@ def _expand_subgraphs(spec: BlueprintSpec) -> ExpandedGraph:
             remapped_targets.append(remapped)
         edges.append(EdgeDef.model_validate({"from": from_node, "to": remapped_targets}))
 
-    entry_point = subgraph_entry_nodes.get(spec.graph.entry_point, spec.graph.entry_point)
-    return ExpandedGraph(
-        state=state,
-        nodes=nodes,
-        edges=edges,
-        entry_point=entry_point,
-    )
+    entry_point = subgraph_entry_nodes.get(in_entry_point, in_entry_point)
+    return nodes, edges, entry_point
 
 
 def _compile_artifact_owners(artifacts: dict[str, ArtifactDef]) -> dict[str, list[str]]:

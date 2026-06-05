@@ -136,6 +136,35 @@ def parse_expression(expr: str) -> CompiledExpression:
     return CompiledExpression(source=expr, ast_node=tree)
 
 
+def rename_state_fields(expr: str, mapping: dict[str, str]) -> str:
+    """Rewrite `state.<field>` references using `mapping`; other fields stay.
+
+    Used by subgraph expansion to namespace inner-edge conditions. Invalid
+    expressions are returned unchanged so compilation can fail later with the
+    original source in the error message.
+    """
+    if not mapping:
+        return expr
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return expr
+
+    class _Renamer(ast.NodeTransformer):
+        def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+            self.generic_visit(node)
+            if _is_state_attribute(node) and node.attr in mapping:
+                return ast.copy_location(
+                    ast.Attribute(value=node.value, attr=mapping[node.attr], ctx=node.ctx),
+                    node,
+                )
+            return node
+
+    renamed = _Renamer().visit(tree)
+    ast.fix_missing_locations(renamed)
+    return ast.unparse(renamed)
+
+
 def analyze_expression(expr: str | CompiledExpression) -> ConditionAnalysis:
     """Return normalized condition semantics for static linting and portability checks."""
     compiled = parse_expression(expr) if isinstance(expr, str) else expr

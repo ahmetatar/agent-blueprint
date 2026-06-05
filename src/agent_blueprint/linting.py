@@ -40,6 +40,47 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
     findings.extend(_lint_dead_state_fields(spec))
     findings.extend(_lint_contract_usage(spec))
     findings.extend(_lint_mutation_patterns(spec))
+    findings.extend(_lint_parallel_branch_conflicts(spec))
+    return findings
+
+
+def _lint_parallel_branch_conflicts(spec: BlueprintSpec) -> list[LintFinding]:
+    """Branches of a parallel node that produce the same state field need an
+    append/merge reducer — with `replace` the concurrent updates collide and
+    LangGraph raises at runtime."""
+    findings: list[LintFinding] = []
+    if not spec.contracts:
+        return findings
+
+    for node_id, node in sorted(spec.graph.nodes.items()):
+        if node.type.value != "parallel":
+            continue
+        produced_by: dict[str, list[str]] = {}
+        for branch in node.branches:
+            contract = spec.contracts.nodes.get(branch)
+            if contract is None:
+                continue
+            for field_name in contract.produces:
+                produced_by.setdefault(field_name, []).append(branch)
+        for field_name, branches in sorted(produced_by.items()):
+            if len(branches) < 2:
+                continue
+            field_def = spec.state.fields.get(field_name)
+            reducer = field_def.reducer.value if field_def else "replace"
+            if reducer == "replace":
+                rendered = ", ".join(f"'{b}'" for b in sorted(branches))
+                findings.append(LintFinding(
+                    severity=LintSeverity.error,
+                    code="parallel-branch-conflict",
+                    location=f"graph.nodes.{node_id}",
+                    message=(
+                        f"Parallel node '{node_id}' branches {rendered} all produce state "
+                        f"field '{field_name}', which uses the 'replace' reducer — concurrent "
+                        "updates will collide at runtime. Use an 'append' or 'merge' reducer, "
+                        "or write to distinct fields."
+                    ),
+                    autofixable=False,
+                ))
     return findings
 
 

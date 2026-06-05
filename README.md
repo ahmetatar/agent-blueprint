@@ -42,6 +42,7 @@ ABP is no longer just a YAML-to-code scaffold. It already gives you practical wo
 - low-confidence escalation to a specific review or handoff node
 - sandboxed local runs in a container (docker or podman), declared in the blueprint
 - OpenTelemetry span export to any OTLP backend, declared in the blueprint
+- parallel fan-out/join, nested subgraphs, and human handoff nodes (console/webhook/slack/email)
 
 If you want the short version of what is implemented today, why it matters, and how to apply it, start here:
 
@@ -50,6 +51,7 @@ If you want the short version of what is implemented today, why it matters, and 
 - [Tools](docs/tools.md)
 - [Sandboxed Runs](docs/sandbox.md)
 - [Observability](docs/observability.md)
+- [Workflow Nodes](docs/workflow-nodes.md)
 
 ---
 

@@ -240,4 +240,23 @@ class LangGraphGenerator(BaseGenerator):
         if ir.memory.connection_string_env and ir.memory.connection_string_env not in seen:
             lines.append(f"{ir.memory.connection_string_env}=")
 
+        handoff_channels = {
+            node.node_def.channel.value
+            for node in ir.nodes
+            if node.node_def.type.value == "handoff" and node.node_def.channel
+        }
+        if "webhook" in handoff_channels:
+            lines.append("ABP_HANDOFF_WEBHOOK_URL=")
+        if "slack" in handoff_channels:
+            lines.append("ABP_HANDOFF_SLACK_WEBHOOK_URL=")
+        if "email" in handoff_channels:
+            lines += [
+                "ABP_HANDOFF_SMTP_HOST=",
+                "ABP_HANDOFF_SMTP_PORT=587",
+                "ABP_HANDOFF_SMTP_USER=",
+                "ABP_HANDOFF_SMTP_PASSWORD=",
+                "ABP_HANDOFF_EMAIL_FROM=",
+                "ABP_HANDOFF_EMAIL_TO=",
+            ]
+
         return "\n".join(lines) + "\n"

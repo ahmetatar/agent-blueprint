@@ -611,7 +611,7 @@ class TestInvalidBlueprints:
             })
         assert "Node 'pipeline' references undefined subgraph 'missing'" in str(exc_info.value)
 
-    def test_nested_subgraph_raises(self):
+    def test_nested_subgraph_undefined_ref_raises(self):
         with pytest.raises(ValidationError) as exc_info:
             BlueprintSpec.model_validate({
                 "blueprint": {"name": "test"},
@@ -642,7 +642,44 @@ class TestInvalidBlueprints:
                     }
                 },
             })
-        assert "uses nested subgraph semantics" in str(exc_info.value)
+        assert "references undefined subgraph 'other'" in str(exc_info.value)
+
+    def test_nested_subgraph_with_valid_ref_is_accepted(self):
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "graph": {
+                "entry_point": "pipeline",
+                "nodes": {
+                    "pipeline": {
+                        "type": "subgraph",
+                        "ref": "outer",
+                        "input_map": {"messages": "messages"},
+                        "output_map": {"result": "result"},
+                    }
+                },
+                "edges": [],
+            },
+            "subgraphs": {
+                "outer": {
+                    "entry_point": "inner",
+                    "nodes": {
+                        "inner": {
+                            "type": "subgraph",
+                            "ref": "leaf",
+                            "input_map": {"messages": "messages"},
+                            "output_map": {"result": "result"},
+                        }
+                    },
+                    "edges": [],
+                },
+                "leaf": {
+                    "entry_point": "f",
+                    "nodes": {"f": {"type": "function"}},
+                    "edges": [],
+                },
+            },
+        })
+        assert spec.subgraphs["outer"].nodes["inner"].type.value == "subgraph"
 
     def test_legacy_agent_output_schema_is_rejected(self):
         with pytest.raises(ValidationError) as exc_info:

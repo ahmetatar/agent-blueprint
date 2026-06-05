@@ -1,6 +1,7 @@
 """Main Typer CLI application."""
 
-import click
+from typing import Any
+
 import typer
 from rich.align import Align
 from rich.box import HEAVY
@@ -37,7 +38,9 @@ _WELCOME_BANNER = """\
 class BannerGroup(TyperGroup):
     """Render a styled splash before the standard help output."""
 
-    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+    # typer >= 0.26 vendors click as typer._click, so click types are not
+    # importable; the override stays structurally compatible via Any.
+    def format_help(self, ctx: Any, formatter: Any) -> None:
         if HAS_RICH and self.rich_markup_mode is not None:
             console = rich_utils._get_rich_console()
             banner = Text(_WELCOME_BANNER, style="bold white")
@@ -59,7 +62,7 @@ class BannerGroup(TyperGroup):
         formatter.write(f"{_WELCOME_BANNER}\n\n")
         formatter.write_text("THE OPEN AGENT BLUEPRINT ECOSYSTEM")
         formatter.write_paragraph()
-        click.Group.format_help(self, ctx, formatter)
+        super().format_help(ctx, formatter)
 
 
 app = typer.Typer(

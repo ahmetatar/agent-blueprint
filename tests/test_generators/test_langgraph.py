@@ -1980,7 +1980,8 @@ class TestLangGraphGenerator:
         assert "_require_approval" in tools_py
         assert '_emit_approval_event("approval_requested", tool_name, args)' in tools_py
         assert "ABP_APPROVED_TOOLS" in tools_py
-        assert '_require_approval("dangerous_tool", _abp_args)' in tools_py
+        assert '"dangerous_tool",' in tools_py
+        assert "per_tool_requires_approval=True" in tools_py
 
     def test_no_impl_tool_generates_stub(self):
         ir = load_ir("impl_tools.yml")
@@ -3226,3 +3227,221 @@ class TestStateInvariantEnforcement:
         assert merged["items"] == ["a", "b"]  # append reducer concatenates
         assert merged["count"] == 2  # replace reducer overwrites
         assert merged["route"] == "old"  # replace reducer keeps left on None
+
+
+def _load_generated_tools_module(tmp_path, monkeypatch, *, spec_data: dict, module_name: str):
+    gen = LangGraphGenerator()
+    spec = BlueprintSpec.model_validate(spec_data)
+    files = gen.generate(compile_blueprint(spec))
+
+    _write_trace_helper(tmp_path, files)
+    _write_harness_helper(tmp_path, files)
+    tools_path = tmp_path / "generated_tools.py"
+    tools_path.write_text(files["tools.py"], encoding="utf-8")
+
+    monkeypatch.delitem(sys.modules, "_abp_trace", raising=False)
+    monkeypatch.delitem(sys.modules, "_abp_harness", raising=False)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    fake_langchain_core = types.ModuleType("langchain_core")
+    fake_tools_mod = types.ModuleType("langchain_core.tools")
+
+    class FakeTool:
+        def __init__(self, func, name=None, description=None):
+            self.func = func
+            self.name = name or func.__name__
+            self.description = description or ""
+
+        def invoke(self, args):
+            return self.func(**args)
+
+    def tool(func):
+        return FakeTool(func, name=func.__name__, description=func.__doc__)
+
+    class StructuredTool:
+        @classmethod
+        def from_function(cls, func, name=None, description=None):
+            return FakeTool(func, name=name, description=description)
+
+    fake_tools_mod.tool = tool
+    fake_tools_mod.StructuredTool = StructuredTool
+    fake_langchain_core.tools = fake_tools_mod
+    monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools_mod)
+
+    spec_obj = importlib.util.spec_from_file_location(module_name, tools_path)
+    assert spec_obj is not None
+    assert spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    sys.modules[spec_obj.name] = module
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+class TestApprovalPolicyEnforcement:
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data(approvals: dict | None = None) -> dict:
+        spec: dict = {
+            "blueprint": {"name": "approval-policy-test"},
+            "tools": {
+                "safe_tool": {
+                    "type": "function",
+                    "description": "Safe operation",
+                    "parameters": {"message": {"type": "string", "required": True}},
+                },
+                "danger_tool": {
+                    "type": "function",
+                    "description": "Dangerous operation",
+                    "parameters": {"message": {"type": "string", "required": True}},
+                },
+            },
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["safe_tool", "danger_tool"]}},
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+        }
+        if approvals is not None:
+            spec["policies"] = {"approvals": approvals}
+        return spec
+
+    @staticmethod
+    def _clear_approval_env(monkeypatch):
+        monkeypatch.delenv("ABP_TOOL_APPROVAL_MODE", raising=False)
+        monkeypatch.delenv("ABP_APPROVED_TOOLS", raising=False)
+        monkeypatch.delenv("ABP_APPROVE_TOOL_SAFE_TOOL", raising=False)
+        monkeypatch.delenv("ABP_APPROVE_TOOL_DANGER_TOOL", raising=False)
+
+    @staticmethod
+    def _start_trace(blueprint: str):
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-1",
+            blueprint=blueprint,
+            blueprint_version="1.0",
+            mode="live",
+        )
+        return trace_mod
+
+    def test_approval_policy_rendered_in_tools(self):
+        spec = BlueprintSpec.model_validate(
+            self._spec_data({"mode": "all", "on_violation": "warn"})
+        )
+        files = self.gen.generate(compile_blueprint(spec))
+        tools_py = files["tools.py"]
+        assert "APPROVAL_POLICY = {" in tools_py
+        assert "\"mode\": 'all'" in tools_py
+        assert "\"on_violation\": 'warn'" in tools_py
+        assert "_policy_requires_approval" in tools_py
+        # The gate is now unconditional, even for tools without requires_approval.
+        assert tools_py.count("per_tool_requires_approval=False") == 2
+        ast.parse(tools_py)
+
+    def test_approval_policy_all_blocks_unapproved_tool(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all"}),
+            module_name="generated_tools_policy_all_block_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(PermissionError, match="Approval required for tool 'safe_tool'"):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert "approval_requested" in events
+        assert "approval_denied" in events
+        assert events.count("approval_requested") == 1
+
+    def test_approval_policy_warn_continues_and_emits_policy_violation(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all", "on_violation": "warn"}),
+            module_name="generated_tools_policy_warn_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            # NotImplementedError (the stub tool body) proves execution continued
+            # past the approval gate instead of raising PermissionError.
+            with pytest.raises(NotImplementedError, match="safe_tool is not implemented yet"):
+                module.safe_tool.invoke({"message": "hi"})
+
+        trace = trace_mod.current_recorder().manifest["trace"]
+        events = [event["event"] for event in trace]
+        assert "approval_denied" in events
+        violations = [event for event in trace if event["event"] == "policy_violation"]
+        assert len(violations) == 1
+        assert violations[0]["metadata"]["policy_kind"] == "approval"
+        assert violations[0]["metadata"]["tool"] == "safe_tool"
+
+    def test_approval_policy_selective_only_lists_named_tools(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "selective", "tools": ["danger_tool"]}),
+            module_name="generated_tools_policy_selective_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+            with pytest.raises(PermissionError, match="danger_tool"):
+                module.danger_tool.invoke({"message": "hi"})
+
+        trace = trace_mod.current_recorder().manifest["trace"]
+        approval_events = [event for event in trace if event["event"].startswith("approval_")]
+        assert all(event["tool"] == "danger_tool" for event in approval_events)
+        assert any(event["event"] == "approval_requested" for event in approval_events)
+
+    def test_approval_warn_with_env_approval_grants(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        monkeypatch.setenv("ABP_TOOL_APPROVAL_MODE", "allow")
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data({"mode": "all", "on_violation": "warn"}),
+            module_name="generated_tools_policy_warn_granted_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert "approval_granted" in events
+        assert "approval_denied" not in events
+        assert "policy_violation" not in events
+
+    def test_no_policy_emits_no_approval_events_for_unprotected_tool(self, tmp_path, monkeypatch):
+        self._clear_approval_env(monkeypatch)
+        module = _load_generated_tools_module(
+            tmp_path,
+            monkeypatch,
+            spec_data=self._spec_data(None),
+            module_name="generated_tools_policy_absent_test",
+        )
+        trace_mod = self._start_trace("approval-policy-test")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with pytest.raises(NotImplementedError):
+                module.safe_tool.invoke({"message": "hi"})
+
+        events = [event["event"] for event in trace_mod.current_recorder().manifest["trace"]]
+        assert not any(event.startswith("approval_") for event in events)

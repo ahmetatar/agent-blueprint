@@ -51,10 +51,40 @@ def _is_tool_approved(tool_name: str) -> bool:
     return decision in {"1", "true", "yes", "allow", "approved"}
 
 
-def _require_approval(tool_name: str, args: dict[str, Any]) -> None:
+APPROVAL_POLICY = {
+    "mode": {{ (ir.policies.approvals.mode.value if ir.policies else "selective") | to_python }},
+    "tools": {{ (ir.policies.approvals.tools if ir.policies else []) | to_python }},
+    "on_violation": {{ (ir.policies.approvals.on_violation.value if ir.policies else "block") | to_python }},
+}
+
+
+def _policy_requires_approval(tool_name: str) -> bool:
+    if APPROVAL_POLICY["mode"] == "all":
+        return True
+    return tool_name in APPROVAL_POLICY["tools"]
+
+
+def _require_approval(
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    per_tool_requires_approval: bool = False,
+) -> None:
+    if not (per_tool_requires_approval or _policy_requires_approval(tool_name)):
+        return
     _emit_approval_event("approval_requested", tool_name, args)
     if _is_tool_approved(tool_name):
         _emit_approval_event("approval_granted", tool_name, args)
+        return
+    _emit_approval_event("approval_denied", tool_name, args)
+    if APPROVAL_POLICY["on_violation"] == "warn":
+        emit_trace_event(
+            "policy_violation",
+            tool=tool_name,
+            args=args,
+            error=f"Approval not granted for tool '{tool_name}' (approval policy on_violation=warn)",
+            metadata={"policy_kind": "approval", "tool": tool_name},
+        )
         return
     raise PermissionError(
         f"Approval required for tool '{tool_name}'. "
@@ -248,9 +278,11 @@ def _approved_{{ tool_name | safe_id }}(
     _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
-{% if tool_def.requires_approval %}
-        _require_approval("{{ tool_name }}", _abp_args)
-{% endif %}
+        _require_approval(
+            "{{ tool_name }}",
+            _abp_args,
+            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+        )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
         result = {{ p.alias }}(
@@ -284,9 +316,11 @@ def {{ tool_name }}(
     _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
-{% if tool_def.requires_approval %}
-        _require_approval("{{ tool_name }}", _abp_args)
-{% endif %}
+        _require_approval(
+            "{{ tool_name }}",
+            _abp_args,
+            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+        )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
         # TODO: implement {{ tool_name }}
@@ -316,9 +350,11 @@ def {{ tool_name }}(
     _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
-{% if tool_def.requires_approval %}
-        _require_approval("{{ tool_name }}", _abp_args)
-{% endif %}
+        _require_approval(
+            "{{ tool_name }}",
+            _abp_args,
+            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+        )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
 {% if tool_def.auth %}
@@ -348,9 +384,11 @@ def {{ tool_name }}(query: str) -> str:
     _enforce_tool_policy("{{ tool_name }}", _abp_args)
     emit_trace_event("tool_called", tool="{{ tool_name }}", args=_abp_args)
     try:
-{% if tool_def.requires_approval %}
-        _require_approval("{{ tool_name }}", _abp_args)
-{% endif %}
+        _require_approval(
+            "{{ tool_name }}",
+            _abp_args,
+            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+        )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
         retriever = _ABP_RETRIEVERS["{{ tool_def.retriever }}"]

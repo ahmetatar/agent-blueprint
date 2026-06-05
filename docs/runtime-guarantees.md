@@ -177,6 +177,9 @@ Real-life use case:
 
 - a team changes the router prompt and wants to confirm that the same tool path still happens before merging
 
+To turn these scenarios (plus eval suites) into an automated CI merge gate with
+a committed baseline, see [`abp gate`](gate.md).
+
 ### 5. Node and state contracts
 
 ABP can enforce:

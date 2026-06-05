@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp gate <blueprint>` CI merge-gate command: runs harness scenarios and eval suites,
+  diffs the result against a committed baseline (`.abp/gate-baseline.json`), and exits
+  non-zero on regression (`--update-baseline`, `--tolerance`, `--json`)
+- harness scenario assertions for `route`, `state_assertions`, `output_contract`, and
+  `artifacts`; trace manifests now record a summarized `final_state`
+- runtime enforcement for state contracts (`required_fields`, `invariants`) and
+  approval policy (`mode: all|selective`, `on_violation: block|warn`)
 - contributor standards, governance documents, issue and PR templates
 - GitHub Actions CI and PR title validation workflows
 - pre-commit and Commitizen configuration for local quality and Conventional Commits

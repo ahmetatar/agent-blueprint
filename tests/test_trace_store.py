@@ -216,3 +216,38 @@ def yaml_load(path: Path):
     from agent_blueprint.utils.yaml_loader import yaml
 
     return yaml.load(path.read_text(encoding="utf-8"))
+
+
+class TestOriginTagging:
+    def test_default_origin_is_harness(self):
+        assert _record()["origin"] == "harness"
+
+    def test_explicit_origin_is_recorded(self):
+        record = build_trace_record(
+            scenario_id="case-1",
+            input={"message": "hi"},
+            result=_result(passed=False, manifest=_manifest()),
+            origin="eval",
+        )
+        assert record["origin"] == "eval"
+
+    def test_list_filters_by_origin(self, tmp_path):
+        save_trace_record(_record(), store_dir=tmp_path)
+        eval_record = build_trace_record(
+            scenario_id="case-1",
+            input={"message": "hi"},
+            result=_result(passed=False, manifest=_manifest()),
+            origin="eval",
+        )
+        save_trace_record(eval_record, store_dir=tmp_path)
+        assert len(list_trace_records(store_dir=tmp_path, origin="all")) == 2
+        assert len(list_trace_records(store_dir=tmp_path, origin="eval")) == 1
+        assert len(list_trace_records(store_dir=tmp_path, origin="harness")) == 1
+
+    def test_legacy_record_without_origin_counts_as_harness(self, tmp_path):
+        legacy = _record()
+        del legacy["origin"]
+        (tmp_path / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+        harness_records = list_trace_records(store_dir=tmp_path, origin="harness")
+        assert len(harness_records) == 1
+        assert list_trace_records(store_dir=tmp_path, origin="eval") == []

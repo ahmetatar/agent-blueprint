@@ -559,3 +559,15 @@ class TestTracePersistence:
         self._patch_capture(monkeypatch)
         run_harness_scenario(ir, scenario, install=False)
         assert list(tmp_path.glob("**/*.json")) == []
+
+    def test_origin_is_threaded_into_record(self, tmp_path, monkeypatch):
+        ir, scenario = self._ir_and_scenario(passed=False)
+        self._patch_capture(monkeypatch)
+        store = tmp_path / "traces"
+        run_harness_scenario(
+            ir, scenario, install=False,
+            trace_store=store, save_traces="failed", origin="eval",
+        )
+        files = list(store.glob("*.json"))
+        assert len(files) == 1
+        assert json.loads(files[0].read_text(encoding="utf-8"))["origin"] == "eval"

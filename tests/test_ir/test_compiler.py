@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from agent_blueprint.exceptions import BlueprintCompilationError
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -295,3 +296,50 @@ class TestReusableSubgraphs:
             ("prd_pipeline__writer", ["prd_pipeline__exit"]),
             ("prd_pipeline__exit", ["after"]),
         ]
+
+
+class TestStateInvariantCompilation:
+    @staticmethod
+    def _spec_with_invariants(invariants: list[str]) -> BlueprintSpec:
+        return BlueprintSpec.model_validate({
+            "blueprint": {"name": "test"},
+            "state": {
+                "fields": {
+                    "messages": {"type": "array", "default": []},
+                    "count": {"type": "integer", "default": 0},
+                }
+            },
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [],
+            },
+            "agents": {"assistant": {"model": "gpt-4o"}},
+            "contracts": {"state": {"invariants": invariants}},
+        })
+
+    def test_invariants_are_compiled_into_ir(self):
+        spec = self._spec_with_invariants(["state.count >= 0"])
+        ir = compile_blueprint(spec)
+        assert len(ir.compiled_invariants) == 1
+        assert ir.compiled_invariants[0].source == "state.count >= 0"
+        code = ir.compiled_invariants[0].to_dict_access("merged")
+        assert eval(code, {}, {"merged": {"count": 1}}) is True
+        assert eval(code, {}, {"merged": {"count": -1}}) is False
+
+    def test_no_contracts_yields_empty_invariants(self):
+        spec = load_spec("basic_chatbot.yml")
+        ir = compile_blueprint(spec)
+        assert ir.compiled_invariants == []
+
+    def test_invalid_invariant_raises_compilation_error(self):
+        spec = self._spec_with_invariants(["state.count >= "])
+        with pytest.raises(BlueprintCompilationError) as exc_info:
+            compile_blueprint(spec)
+        assert "contracts.state.invariants[0]" in str(exc_info.value)
+
+    def test_invariant_referencing_function_call_is_rejected(self):
+        spec = self._spec_with_invariants(["state.count >= 0", "len(state.messages) > 0"])
+        with pytest.raises(BlueprintCompilationError) as exc_info:
+            compile_blueprint(spec)
+        assert "contracts.state.invariants[1]" in str(exc_info.value)

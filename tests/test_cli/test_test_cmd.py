@@ -17,11 +17,11 @@ def _write_blueprint(tmp_path: Path, content: str) -> Path:
 
 
 class TestHarnessCli:
-    def test_requires_harness_scenarios(self):
-        with runner.isolated_filesystem():
-            blueprint = Path("agent.yml")
-            blueprint.write_text(
-                """\
+    def test_requires_harness_scenarios(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        blueprint = Path("agent.yml")
+        blueprint.write_text(
+            """\
 blueprint:
   name: "test-agent"
 graph:
@@ -31,11 +31,11 @@ graph:
       type: function
   edges: []
 """,
-                encoding="utf-8",
-            )
-            result = runner.invoke(app, ["test", str(blueprint)])
-            assert result.exit_code == 1
-            assert "no harness scenarios are defined" in result.output
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["test", str(blueprint)])
+        assert result.exit_code == 1
+        assert "no harness scenarios are defined" in result.output
 
     def test_filters_to_single_scenario(self, monkeypatch, tmp_path):
         blueprint = _write_blueprint(

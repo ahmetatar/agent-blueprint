@@ -14,7 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_blueprint.contracts_validation import validate_output_contract
+from agent_blueprint.exceptions import ExpressionError
 from agent_blueprint.ir.compiler import AgentGraph
+from agent_blueprint.ir.expression import parse_expression
 from agent_blueprint.models.harness import HarnessFixtures, HarnessScenario
 from agent_blueprint.runners.local import LocalRunResult, LocalRunner
 from agent_blueprint.trace import diff_trace_manifests
@@ -174,7 +177,7 @@ def run_harness_scenario(
         result.failures.append(f"Scenario process exited with code {captured.returncode}")
         return result
 
-    evaluate_scenario_expectations(scenario, captured, result)
+    evaluate_scenario_expectations(ir, scenario, captured, result)
     if golden_trace is not None and captured.trace_manifest is not None:
         diff = diff_trace_manifests(golden_trace, captured.trace_manifest)
         if diff:
@@ -186,6 +189,7 @@ def run_harness_scenario(
 
 
 def evaluate_scenario_expectations(
+    ir: AgentGraph,
     scenario: HarnessScenario,
     captured: LocalRunResult,
     result: ScenarioResult,
@@ -231,16 +235,71 @@ def evaluate_scenario_expectations(
             else:
                 result.checks.append("outputs")
 
-    unsupported = []
     if expected.route is not None:
-        unsupported.append("route")
+        finished = [event for event in events if event.get("event") == "node_finished"]
+        last_node = finished[-1].get("node") if finished else None
+        escalated_to = any(event.get("route") == expected.route for event in finished)
+        if last_node == expected.route or escalated_to:
+            result.checks.append("route")
+        else:
+            result.failures.append(
+                f"route mismatch: expected {expected.route!r}, ended on {last_node!r}"
+            )
+
     if expected.output_contract is not None:
-        unsupported.append("output_contract")
+        contracts = ir.contracts.outputs if ir.contracts else {}
+        contract = contracts.get(expected.output_contract)
+        if contract is None:
+            result.failures.append(
+                f"output_contract references unknown contract '{expected.output_contract}'"
+            )
+        else:
+            violations = validate_output_contract(parse_runner_output(captured.stdout), contract)
+            if violations:
+                result.failures.append("output_contract violations: " + "; ".join(violations))
+            else:
+                result.checks.append("output_contract")
+
     if expected.state_assertions:
-        unsupported.append("state_assertions")
+        final_state = manifest.get("final_state")
+        if not isinstance(final_state, dict):
+            result.failures.append(
+                "state_assertions require a final_state in the trace manifest "
+                "(regenerate the project with the current abp version)"
+            )
+        else:
+            all_passed = True
+            for assertion in expected.state_assertions:
+                try:
+                    code = parse_expression(assertion).to_dict_access("state")
+                    # Safe: the parser forbids calls/subscripts in the source
+                    # expression, so the rendered code only reads dict fields.
+                    passed = bool(eval(code, {"__builtins__": {}}, {"state": final_state}))  # noqa: S307
+                except ExpressionError as exc:
+                    result.failures.append(f"state assertion invalid: {exc}")
+                    all_passed = False
+                    continue
+                except Exception as exc:  # noqa: BLE001 — report, don't crash the harness
+                    result.failures.append(
+                        f"state assertion {assertion!r} failed to evaluate: {exc}"
+                    )
+                    all_passed = False
+                    continue
+                if not passed:
+                    result.failures.append(f"state assertion not satisfied: {assertion}")
+                    all_passed = False
+            if all_passed:
+                result.checks.append("state_assertions")
+
     if expected.artifacts:
-        unsupported.append("artifacts")
-    if unsupported:
-        result.failures.append(
-            "Unsupported harness assertion(s) in this slice: " + ", ".join(unsupported)
-        )
+        written = {
+            event.get("metadata", {}).get("artifact")
+            for event in events
+            if event.get("event") == "artifact_written"
+        }
+        missing = [name for name in expected.artifacts if name not in written]
+        if missing:
+            wrote = sorted(name for name in written if name)
+            result.failures.append(f"artifacts not written: {missing} (wrote {wrote})")
+        else:
+            result.checks.append("artifacts")

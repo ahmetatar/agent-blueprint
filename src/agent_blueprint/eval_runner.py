@@ -78,9 +78,18 @@ def run_eval_suites(
     *,
     blueprint_dir: Path,
     install: bool,
+    trace_store: Path | None = None,
+    save_traces: str = "all",
 ) -> EvalRunResult:
     results = [
-        run_eval_suite(ir, suite, blueprint_dir=blueprint_dir, install=install)
+        run_eval_suite(
+            ir,
+            suite,
+            blueprint_dir=blueprint_dir,
+            install=install,
+            trace_store=trace_store,
+            save_traces=save_traces,
+        )
         for suite in suites
     ]
     return EvalRunResult(
@@ -97,13 +106,22 @@ def run_eval_suite(
     *,
     blueprint_dir: Path,
     install: bool,
+    trace_store: Path | None = None,
+    save_traces: str = "all",
 ) -> EvalSuiteResult:
     cases = load_eval_dataset(suite.dataset, blueprint_dir=blueprint_dir)
     effective_ir = replace(ir, harness=ir.harness or HarnessDef())
     case_results: list[EvalCaseResult] = []
     for case in cases:
         scenario = _case_to_scenario(case)
-        scenario_result = run_harness_scenario(effective_ir, scenario, install=install)
+        scenario_result = run_harness_scenario(
+            effective_ir,
+            scenario,
+            install=install,
+            trace_store=trace_store,
+            save_traces=save_traces,
+            origin="eval",
+        )
         case_results.append(_evaluate_case_result(suite, case, scenario_result))
 
     total = len(case_results)

@@ -97,7 +97,7 @@ def _patch_runners(
             failures=[] if scenario_passed else ["boom"],
         )
 
-    def fake_run_eval_suites(ir, suites, *, blueprint_dir, install):
+    def fake_run_eval_suites(ir, suites, *, blueprint_dir, install, **kwargs):
         if install_seen is not None:
             install_seen.append(("evals", install))
         return EvalRunResult(
@@ -294,7 +294,7 @@ class TestGateCli:
         assert result.exit_code == 0
         assert "Gate PASSED" in result.output
 
-    def test_gate_threads_trace_store_to_harness_only(self, tmp_path, monkeypatch):
+    def test_gate_threads_trace_store_to_both_surfaces(self, tmp_path, monkeypatch):
         blueprint = _write_blueprint(tmp_path, _BLUEPRINT_WITH_BOTH)
         harness_kwargs: list[dict] = []
         eval_kwargs: list[dict] = []
@@ -326,4 +326,5 @@ class TestGateCli:
         assert result.exit_code == 0
         assert harness_kwargs[0]["trace_store"] == tmp_path / ".abp" / "traces"
         assert harness_kwargs[0]["save_traces"] == "failed"
-        assert "trace_store" not in eval_kwargs[0]
+        assert eval_kwargs[0]["trace_store"] == tmp_path / ".abp" / "traces"
+        assert eval_kwargs[0]["save_traces"] == "failed"

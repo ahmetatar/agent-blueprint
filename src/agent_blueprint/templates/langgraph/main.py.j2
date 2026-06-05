@@ -12,12 +12,19 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 
 from _abp_trace import emit_trace_event, finalize_trace, reset_budget_state, start_trace
+{% if ir.observability and ir.observability.tracing and ir.observability.tracing.enabled %}
+from _abp_otel import init_tracing as _abp_init_tracing
+{% endif %}
 from graph import graph
 try:
     from tools import reset_tool_policy_state
 except ImportError:
     def reset_tool_policy_state() -> None:
         return None
+{% if ir.observability and ir.observability.tracing and ir.observability.tracing.enabled %}
+
+_abp_init_tracing()
+{% endif %}
 
 INPUT_SCHEMA = {
 {% if ir.input_schema %}

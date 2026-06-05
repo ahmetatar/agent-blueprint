@@ -13,6 +13,7 @@ from agent_blueprint.models.evals import EvalsDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.graph import EdgeDef, NodeDef, NodeType
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.observability import ObservabilityConfig
 from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
@@ -74,6 +75,7 @@ class AgentGraph:
     policies: PoliciesDef | None = None
     harness: HarnessDef | None = None
     evals: EvalsDef | None = None
+    observability: ObservabilityConfig | None = None
     compiled_invariants: list[CompiledExpression] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -127,6 +129,7 @@ def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
         policies=spec.policies,
         harness=spec.harness,
         evals=spec.evals,
+        observability=spec.observability,
         compiled_invariants=compiled_invariants,
         warnings=warnings,
     )

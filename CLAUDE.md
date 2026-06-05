@@ -38,7 +38,8 @@ YAML blueprint
                                 LLM resolution via _resolve_llm)
   → generators/langgraph.py    (Jinja2 PackageLoader over templates/langgraph/*.j2)
   → generated project          (graph.py, nodes.py, state.py, _abp_runner.py,
-                                _abp_harness.py, _abp_trace.py)
+                                _abp_harness.py, _abp_trace.py, and _abp_otel.py
+                                when observability.tracing is enabled)
 ```
 
 `ir/expression.py` is a safe ast-based condition parser used both for code generation (`to_dict_access()` renders `state["key"]` access) and static analysis (route overlap detection, disjunct normalization) consumed by `linting.py`.
@@ -53,6 +54,7 @@ Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/
 - `trace_store.py` — `.abp/traces/` persistence with origin tagging (harness|eval); `abp traces list/export` turns failed/golden traces into eval cases (merge-dedup idempotent; default `--origin harness` prevents export-eval-export loops).
 - `runners/local.py` — `abp run`: generates into a temp dir and executes via subprocess. `runners/sandbox.py` (`--sandbox` / blueprint `run.sandbox`) builds a container image instead and runs `--rm` with an allowlist-only env; engine `auto` probes podman before docker.
 - `deployers/` — Docker/Podman/AWS App Runner complete; Azure ACI + GCP Cloud Run partial.
+- Observability: top-level `observability.tracing` exports the JSON trace events as OTel spans via an observer registry inside generated `_abp_trace.py` — the JSON manifest stays byte-identical (goldens/harness/gate unaffected). Only hashes are exported, never content. Standard `OTEL_*` env vars win over blueprint values; `ABP_OTEL=off` is the kill switch.
 
 ### Declared vs. enforced (the recurring theme)
 

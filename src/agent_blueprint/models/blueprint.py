@@ -13,6 +13,7 @@ from agent_blueprint.models.graph import GraphDef
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
+from agent_blueprint.models.observability import ObservabilityConfig
 from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
@@ -74,6 +75,7 @@ class BlueprintSpec(BaseModel):
     harness: HarnessDef | None = None
     evals: EvalsDef | None = None
     run: RunConfig | None = None
+    observability: ObservabilityConfig | None = None
     deploy: DeployConfig | None = None
 
     @model_validator(mode="after")

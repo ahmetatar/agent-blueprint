@@ -754,19 +754,19 @@ def _deliver_handoff_console(payload: dict[str, Any]) -> None:
 
 
 def _deliver_handoff_webhook(payload: dict[str, Any]) -> None:
+    url = _handoff_env("ABP_HANDOFF_WEBHOOK_URL")
     import httpx
 
-    response = httpx.post(
-        _handoff_env("ABP_HANDOFF_WEBHOOK_URL"), json=payload, timeout=10.0
-    )
+    response = httpx.post(url, json=payload, timeout=10.0)
     response.raise_for_status()
 
 
 def _deliver_handoff_slack(payload: dict[str, Any]) -> None:
+    url = _handoff_env("ABP_HANDOFF_SLACK_WEBHOOK_URL")
     import httpx
 
     response = httpx.post(
-        _handoff_env("ABP_HANDOFF_SLACK_WEBHOOK_URL"),
+        url,
         json={"text": f"[{payload['blueprint']}] {payload['message']}"},
         timeout=10.0,
     )

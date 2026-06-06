@@ -224,12 +224,18 @@ abp generate my-agent.agents.yaml --target langgraph
 # the short way — generates to a temp dir and executes:
 abp run my-agent.agents.yaml "Hello, how are you?"
 
+# isolated from the host — builds a container image (docker or podman)
+# and runs with an allowlist-only environment:
+abp run my-agent.agents.yaml "Hello, how are you?" --sandbox
+
 # or work with the generated project directly:
 cd my-agent-langgraph
 pip install -r requirements.txt
 cp .env.example .env   # add your OPENAI_API_KEY
 python main.py "Hello, how are you?"
 ```
+
+Sandboxing can also be declared in the blueprint (`run.sandbox`) so every `abp run` is isolated by default — see [Sandboxed Runs](docs/sandbox.md).
 
 ---
 

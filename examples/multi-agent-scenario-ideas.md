@@ -1,236 +1,374 @@
-# Multi-Agent Scenario Ideas
+# Examples Portfolio — Scenario Ideas
 
-This document collects real-world multi-agent blueprint ideas for future `examples/` files. These are not implemented blueprints yet. Use this list to choose which scenario to turn into YAML next.
+This document plans the rebuild of `examples/`. The goal is not "more demos" —
+it is a small, curated portfolio where **every ABP capability is showcased by
+exactly the example that makes it shine**, arranged as a complexity ladder from
+hello-world to a fully gated, observable production workflow — with domain
+stories taken from real life, not enterprise slideware.
 
-## 1. Customer Support Triage And Resolution
+Status: ideas for evaluation. Nothing here is implemented yet.
 
-A support assistant classifies a customer request, routes it to the right specialist, drafts a response, and escalates to a human when confidence is low or the issue is sensitive.
+## Design principles
 
-Agents:
+1. **Feature-driven, not domain-driven.** Each example exists to demonstrate a
+   named cluster of ABP features. The domain story is the vehicle — but the
+   vehicle should be fun to drive.
+2. **A ladder, not a pile.** Examples escalate: each one introduces new
+   concepts on top of the previous level, so the portfolio doubles as a tutorial path.
+3. **Everything runs offline.** Every example ships harness scenarios with
+   `llm_mode: mock` / `tool_mode: stub`, so `abp test examples/<x>.yml` passes
+   with **no API key**. The examples are living tests, not just documentation.
+4. **CI validates all of them.** The rebuild must extend the CI smoke step from
+   `abp validate examples/basic-chatbot.yml` to validating (and `abp lint`-ing,
+   ideally `abp test`-ing) every example. A broken example can never ship again.
+5. **Each file opens with a feature manifest.** A YAML comment block listing
+   exactly which features the example demonstrates, so a reader scanning the
+   directory can pick by capability.
 
-- `triage_agent`: detects intent, urgency, department, and confidence.
-- `billing_agent`: handles invoice, subscription, refund, and payment issues.
-- `technical_agent`: handles bug reports and troubleshooting.
-- `retention_agent`: handles cancellation, churn risk, and angry customers.
-- `quality_agent`: reviews the final response for correctness and tone.
+---
 
-Possible graph:
+## The proposed ladder
 
-```text
-triage -> billing | technical | retention -> quality -> END
-quality -> human_handoff when confidence is low
-```
+| Level | File | Domain story | Feature cluster |
+|---|---|---|---|
+| L1 | `01-rubber-duck.yml` | Rubber-duck debugging companion | The smallest valid blueprint |
+| L2 | `02-smart-home-butler.yml` | Home assistant that won't unlock the door on its own | Conditional routing · contracts · escalation · approvals · handoff |
+| L3 | `03-meal-prep-chef.yml` | Weekly meal plan from your own recipe collection | Sequential pipeline · RAG retriever · artifacts · rubric evals |
+| L4 | `04-wedding-planner.yml` | Wedding-planning war room (with a literal budget) | Parallel fan-out/join · nested subgraphs · supervisor · multi-channel handoff · budgets |
+| L5 | `05-cafe-review-desk.yml` | Café owner's review-reply desk, under CI control | Harness scenarios · eval suites · gate baseline · traces flywheel · OTel · sandbox |
+| L6 | `06-gym-buddy.yml` | A workout coach that remembers last week | `abp package` · sqlite memory · function `impl` tools · reasoning config |
+| L7 | `07-morning-briefing.yml` | One command, your whole morning | API tools with auth (bearer/api_key) · function `impl` tools · tool-usage policies · retry/backoff |
+| L8 | `08-downloads-janitor.yml` | Tames your Downloads folder via MCP | `mcp_servers` (stdio) · `mcp` tools · approval-gated file moves — **staged: lands with MCP generation** |
 
-Why it is a good ABP example:
+Eight files, ~full feature coverage, each one independently runnable and testable
+(L8 ships together with MCP tool generation — see its section).
 
-- Clear conditional routing.
-- Realistic human handoff.
-- Good fit for `output_schema` fields such as `department`, `urgency`, and `confidence`.
-- Native reasoning can improve triage and response quality without replacing the graph routing.
+---
 
-## 2. Incident Response War Room
+## L1 — `01-rubber-duck.yml` · Rubber Duck
 
-An operations assistant handles a production incident report, classifies severity, analyzes signals, proposes mitigation, drafts status updates, and prepares a postmortem summary.
+The classic debugging companion: you explain your problem, the duck asks the
+one question that makes you realize the answer. One agent, one edge, ~20 lines.
+Exists so the first thing a newcomer copies is trivially understandable —
+and immediately likable.
 
-Agents:
+**Features:** `blueprint`, `settings`, `state`, single `agent`, `graph`, `memory: in_memory`.
 
-- `incident_commander`: determines severity, priority, owner, and next action.
-- `log_analyst`: summarizes logs, traces, metrics, and symptoms.
-- `runbook_agent`: maps symptoms to likely runbook steps.
-- `comms_agent`: drafts Slack, email, or status page updates.
-- `postmortem_agent`: prepares a timeline and lessons learned after resolution.
+**Demo:** `abp run examples/01-rubber-duck.yml "my tests pass locally but fail in CI"`
 
-Possible graph:
+---
 
-```text
-classify_incident -> analyze_signals -> propose_mitigation -> draft_comms -> human_approval -> END
-```
+## L2 — `02-smart-home-butler.yml` · Smart-Home Butler
 
-Why it is a good ABP example:
+A home assistant routes requests across **lighting**, **climate**, and
+**security**. Light switches flip freely — but `unlock_front_door` sits behind
+an **approval policy** (`block`), because *no, the AI does not open your house
+by itself*. The router emits `intent`, `room`, `confidence` under an **output
+contract**; when confidence drops below threshold ("make it cozy"?), the
+**escalation policy** reroutes mid-run to a console **handoff** — the butler
+asks the human instead of guessing.
 
-- Strong real-world DevOps use case.
-- Natural state fields: `severity`, `affected_services`, `mitigation_steps`, `customer_message`.
-- Good place to show tool definitions for logs, metrics, and status pages.
-- Human approval is realistic before external communication.
-- Shows how graph-level workflow control and native reasoning can work together.
-
-## 3. Sales Proposal Builder
-
-A sales assistant turns a customer brief into a structured proposal with scope, pricing assumptions, risks, and final customer-facing language.
-
-Agents:
-
-- `discovery_agent`: extracts customer goals, constraints, timeline, and stakeholders.
-- `solution_architect`: proposes solution scope and implementation phases.
-- `pricing_agent`: estimates package, effort, and pricing assumptions.
-- `risk_agent`: identifies delivery, technical, and commercial risks.
-- `proposal_writer`: writes the final proposal.
-- `reviewer`: checks completeness and consistency.
-
-Possible graph:
-
-```text
-discovery -> solution -> pricing -> risk -> proposal -> review
-review -> proposal when score is below threshold
-review -> END when score is acceptable
-```
-
-Why it is a good ABP example:
-
-- Strong business value.
-- Natural multi-agent role separation.
-- Good fit for review loops and quality gates.
-- Native reasoning can improve each specialist agent while the graph controls the proposal workflow.
-
-## 4. Contract Review Assistant
-
-A review assistant analyzes a contract, extracts important clauses, identifies risk, suggests negotiation points, and creates an executive summary.
-
-Agents:
-
-- `clause_extractor`: extracts key clauses and obligations.
-- `risk_reviewer`: flags risky or unusual terms.
-- `negotiation_agent`: suggests alternative language or negotiation points.
-- `compliance_agent`: checks against company policy.
-- `summary_agent`: writes a concise executive summary.
-
-Possible graph:
+**Agents:** `butler` (router), `lighting`, `climate`, `security`, + `ask_owner` (handoff).
 
 ```text
-extract_clauses -> review_risks -> compliance_check -> negotiation_notes -> summary -> human_review
+butler ──(intent == 'lighting')──▶ lighting ──▶ END
+       ──(intent == 'climate')───▶ climate ──▶ END
+       ──(intent == 'security')──▶ security ──▶ END   ← unlock tool needs approval
+       ──(default)───────────────▶ END
+  ⚡ escalation: confidence < 0.75 → ask_owner (handoff/console)
 ```
 
-Why it is a good ABP example:
+**Features:** condition expressions · lint-clean routing · `contracts.outputs`
++ node contracts · `policies.approvals` (block) · `policies.escalation` ·
+handoff node (console) · state `enum` fields · API tools (fake home API).
 
-- Shows high-stakes workflow boundaries.
-- Human review is mandatory and natural.
-- Good fit for structured outputs and risk scoring.
-- Demonstrates that the system assists review but does not provide legal advice.
+**Why it shines:** the approval gate has *visceral* intuition — everyone
+understands why a door lock needs a human yes. The canonical "declared vs
+enforced" demo. Replaces the broken `customer-support.yml` energy with
+something you'd actually show a friend.
 
-## 5. Travel Concierge Planner
+**Demo:** `abp test` scenario proving "unlock the door" triggers
+`approvals_triggered: true`, and "make it cozy" provably lands on `ask_owner`
+(route assertion).
 
-A travel planner collects preferences, proposes a destination, builds an itinerary, checks budget, adjusts for weather, and produces a final plan.
+---
 
-Agents:
+## L3 — `03-meal-prep-chef.yml` · Meal-Prep Chef
 
-- `preference_agent`: extracts dates, budget, interests, constraints, and travel style.
-- `destination_agent`: recommends destination options.
-- `itinerary_agent`: creates a day-by-day plan.
-- `budget_agent`: checks whether the itinerary fits the budget.
-- `weather_agent`: adjusts activities for expected weather.
-- `final_writer`: presents the final trip plan.
+Sunday evening: "plan my week, high protein, no cilantro, 30-minute dinners."
+A planner extracts constraints, a chef agent retrieves matching dishes from
+**your own recipe collection** (a RAG retriever with a local `impl` over a
+`recipes/` folder of markdown files — no external service), and a writer
+produces a **markdown artifact** (`weekly_plan.md`) bound to an output
+contract. A **rubric eval suite** keeps the plan honest: must contain a
+day-by-day section, a consolidated shopping list, and respect the no-cilantro
+rule (forbidden-term check).
 
-Possible graph:
+**Agents:** `planner`, `chef` (RAG hybrid mode), `meal_writer`.
 
 ```text
-preferences -> destination -> itinerary -> budget_check
-budget_check -> revise_itinerary when over budget
-budget_check -> weather_check when budget is ok
-weather_check -> final
+plan ──▶ pick_recipes ──▶ write_plan ──▶ END
+                                        └─ produces artifact: weekly_plan.md
 ```
 
-Why it is a good ABP example:
+**Features:** `retrievers` + `retrieval` tool + `agents.*.rag` (context
+injection) · `artifacts` with contract binding · `evals` rubric metric
+(required sections, forbidden terms, min word count) · node `retry`.
 
-- Easy to understand.
-- Good fit for optional tools such as weather, maps, and search.
-- Natural conditional branching when budget or weather constraints fail.
-- Useful for showing user-friendly final output formatting.
+**Why it shines:** "RAG over your own files" is the most-requested real-life
+agent use case, and the rubric eval turns *meal plan quality* into a
+CI-checkable number — which is both useful and quietly hilarious.
 
-## 6. Recruiting Screening Pipeline
+**Demo:** `abp eval examples/03-meal-prep-chef.yml` scoring the plan offline.
 
-A hiring assistant compares a resume to a job description, scores fit, identifies gaps, and generates interview questions.
+---
 
-Agents:
+## L4 — `04-wedding-planner.yml` · Wedding Planner War Room
 
-- `resume_parser`: extracts structured candidate profile data.
-- `job_matcher`: compares candidate profile against job requirements.
-- `risk_checker`: identifies gaps, missing evidence, and uncertainty.
-- `interview_designer`: creates targeted interview questions.
-- `hiring_summary`: writes a decision-support summary for a recruiter.
-
-Possible graph:
+T-minus 90 days. A wedding-planner **supervisor** dynamically delegates to
+scouts via generated transfer tools: `venue_scout`, `catering_scout`,
+`band_scout` (`max_iterations: 6`, because scope creep is real). Vendor
+research runs as a **parallel fan-out/join** (venues and caterers in
+parallel, merged by state reducers). Every shortlist goes through a reusable
+**nested subgraph** — `negotiate` (draft offer → critique → counter) — invoked
+twice with different `input_map`s (venue vs. catering). The final plan goes to
+the couple via a **handoff** (slack channel, console fallback). And the crown
+jewel: a **budget policy** — `max_cost_usd` on the run *and* the wedding
+budget in state, so a runaway planning loop dies loudly. Yes, the token budget
+and the wedding budget are both enforced. That's the joke, and it's also true.
 
 ```text
-parse_resume -> match_job -> risk_check -> interview_questions -> summary -> END
+brief ──▶ planner (supervisor: venue_scout | catering_scout | band_scout,
+          max_iterations: 6)
+            └─▶ scout_market (parallel: [venues, caterers] join: shortlist)
+shortlist ──▶ negotiate_venue    (subgraph: draft → critique → counter)
+          ──▶ negotiate_catering (same subgraph, different input_map)
+          ──▶ couple_signoff (handoff/slack) ──▶ END
 ```
 
-Why it is a good ABP example:
+**Features:** supervisor (`workers`, `max_iterations`, `agent_handoff` traces) ·
+parallel node + reducer-merged join · nested subgraph reuse with
+`input_map`/`output_map` · handoff channels (slack/console) ·
+`policies.budgets` · `settings.max_graph_steps` · multi-provider config
+(a thinking model for the planner, a cheap fast model for the scouts).
 
-- Strong fit for structured output.
-- Clear human decision boundary: the system assists but does not make the hiring decision.
-- Good place to document bias and fairness constraints.
-- Practical HR workflow without requiring many external tools.
+**Why it shines:** every advanced node type in one believable, high-chaos,
+universally understood story. `abp inspect` renders a Mermaid graph that makes
+people grin.
 
-## 7. Product Feedback Analyst
+**Demo:** harness scenario asserts the supervisor's delegation sequence via
+`agent_handoff` events; the budget-blown scenario asserts a `policy_violation`.
 
-A product assistant analyzes user feedback, groups it into themes, estimates impact, and turns it into roadmap suggestions.
+---
 
-Agents:
+## L5 — `05-cafe-review-desk.yml` · Café Review Desk
 
-- `feedback_classifier`: classifies theme, sentiment, product area, and urgency.
-- `trend_agent`: finds recurring patterns and clusters.
-- `impact_agent`: estimates user impact and business impact.
-- `roadmap_agent`: suggests features, fixes, and priorities.
-- `release_notes_agent`: drafts customer-facing follow-up language.
+A neighborhood café gets online reviews — glowing, furious, and weird
+("the wifi password has too many numbers"). The agent classifies each review
+and drafts an on-brand reply under strict rules: warm tone, never argue,
+and **never offer more than a 10% discount**. The graph is simple; the point
+is the **operational lifecycle around it**:
 
-Possible graph:
+- a `harness` block: golden-path replies + a hostile-review scenario (mock LLM, seeded)
+- an `evals` block over a shipped `datasets/` of real-ish reviews:
+  `exact_match` on the routing category, `policy_violations` on the discount
+  rule — the "free croissant for life" regression is a failing test, not a tweet
+- a committed gate baseline and a documented `abp gate` CI recipe
+- the documented `abp traces export` loop: a failed reply becomes tomorrow's eval case
+- `observability.tracing` (console exporter — works offline) and `run.sandbox`
+  declared in the blueprint
+
+**Features:** harness route/state/output-contract assertions · eval suites +
+datasets (`exact_match`, `policy_violations`) · gate baseline + regression demo ·
+traces flywheel · OTel console export · declarative sandbox.
+
+**Why it shines:** "my café bot is under CI regression control" is the
+funniest possible way to make ABP's deepest point: agent behavior as a
+gateable, versioned artifact. README's lifecycle diagram becomes a working
+example with espresso.
+
+**Demo:** `abp gate examples/05-cafe-review-desk.yml` — green; loosen the
+discount prompt, watch the gate go red.
+
+---
+
+## L6 — `06-gym-buddy.yml` · Gym Buddy
+
+A personal workout coach you install as a real command: `gym-buddy "leg day,
+45 minutes, my knee is acting up"`. A function `impl` tool reads/writes a
+local training log; **sqlite memory** means it *remembers last week* across
+invocations — `--thread-id` is your training journal. Reasoning config
+(`llm_kwargs` passthrough) lets the coach actually think about progressive
+overload instead of pattern-matching. Packaged end-to-end with **`abp package`**:
+
+```bash
+abp package examples/06-gym-buddy.yml
+pipx install ./gym-buddy-cli
+gym-buddy "what did we do on Monday, and what's next?"
+```
+
+**Features:** `abp package` end-to-end · `memory.backend: sqlite` (persistent
+threads across processes) · function tools with `impl` · `reasoning` config ·
+`${env.*}` interpolation · `.env` loading.
+
+**Why it shines:** answers "can I build a real local agentic tool with this?"
+with a command you genuinely might keep using. The sqlite-persistence demo has
+an obvious *why* — a coach that forgets your squat PR is no coach. Pairs with
+`docs/cli-packaging.md`.
+
+---
+
+## L7 — `07-morning-briefing.yml` · Morning Briefing
+
+One command before coffee: `abp run examples/07-morning-briefing.yml "brief me"`.
+The agent talks to the world around it:
+
+- `get_weather` — **API tool**, plain GET with an `api_key` query auth
+- `get_headlines` — **API tool** with **bearer auth** (`token_env: NEWS_API_TOKEN`)
+- `read_calendar` — **function `impl` tool** over a local `.ics`/markdown agenda file
+- `commute_check` — **API tool** with **basic auth**, because some transit APIs
+  are stuck in 2009 (which is exactly why `AuthDef` supports it)
+
+It fuses all four into a single brief: weather-aware outfit hint, top 3
+headlines, first meeting, leave-by time. The point is the **tool governance**
+around the calls: `policies.tool_usage` caps `max_calls_per_node` /
+`max_calls_per_run` (a briefing agent that calls the news API 40 times is a
+bill, not a briefing), `require_explicit_arguments: true`, `on_unknown_tool:
+fail`. Flaky external APIs make this the natural home for **node `retry`**
+with backoff — and in the harness, every tool is a deterministic stub, so the
+whole morning runs offline.
+
+**Agents:** `briefer` (tool-calling loop), `editor` (formats the final brief).
 
 ```text
-classify_feedback -> detect_trends -> score_impact -> propose_roadmap -> draft_release_notes -> END
+briefer (tools: weather, headlines, calendar, commute) ──▶ editor ──▶ END
+         caps: max_calls_per_node: 6, max_calls_per_run: 8
 ```
 
-Why it is a good ABP example:
+**Features:** API tools across all three auth types (bearer/api_key/basic) ·
+function `impl` tools · `policies.tool_usage` (caps + explicit args + unknown-tool
+fail) · `retry` with backoff · `${env.*}` interpolation · tool stubs in harness.
 
-- Strong product management use case.
-- Good fit for aggregation and prioritization state.
-- Can show how multiple agents transform raw feedback into roadmap decisions.
-- Useful for demonstrating output schemas and scoring.
+**Why it shines:** the densest "agent ↔ environment" example — four real
+integrations, every auth flavor, and the guardrails that keep tool loops from
+becoming invoices. The harness scenario asserts `tools_called` order and that
+the call caps hold.
 
-## 8. Healthcare Symptom Intake Assistant
+---
 
-A safety-focused intake assistant collects symptoms, checks for red flags, and prepares a doctor-facing summary without diagnosing the user.
+## L8 — `08-downloads-janitor.yml` · Downloads Janitor (MCP)
 
-Agents:
+> **Staged:** `mcp` tool generation is not implemented yet — `abp generate`
+> rejects it by design. This example is written as the **acceptance demo for
+> the MCP-generation roadmap item** and ships in the same PR that implements it.
 
-- `intake_agent`: gathers symptoms, duration, severity, and context.
-- `red_flag_agent`: checks for urgent warning signs.
-- `doctor_summary_agent`: creates a concise summary for a clinician.
-- `safety_agent`: writes safe next-step guidance.
+Everyone's Downloads folder is a crime scene. The janitor connects to the
+**filesystem MCP server** (`@modelcontextprotocol/server-filesystem`, stdio
+transport) — no custom tool code at all, the tools come *from the server*:
+`list_directory`, `read_file`, `move_file`. It proposes a cleanup plan
+(screenshots → `/Pictures/Screenshots`, invoices → `/Documents/Receipts`,
+the 9 copies of `setup(3).dmg` → trash list), and the destructive step is
+**approval-gated**: `move_file` sits behind `policies.approvals` with
+`mode: selective`, so the plan is free but the execution needs a human yes.
 
-Possible graph:
+**Agents:** `janitor` (mcp tools), + `confirm_plan` (handoff/console).
 
 ```text
-intake -> red_flag_check
-red_flag_check -> emergency_guidance when urgent
-red_flag_check -> doctor_summary when not urgent
-doctor_summary -> safety_guidance -> END
+janitor (mcp: list_directory, read_file, move_file*) ──▶ confirm_plan ──▶ END
+         * move_file requires approval
 ```
 
-Why it is a good ABP example:
+**Features:** `mcp_servers` (stdio transport, `command`/`args`) · `mcp` tool
+type bound to server-provided tools · approvals on MCP tools · the
+schema-validation + doctor story for MCP (cross-checked refs, clear
+diagnostics) — and, once generation lands, the runtime binding itself.
 
-- Strong safety and escalation story.
-- Human/clinician boundary is explicit.
-- Good fit for risk routing and clear disclaimers.
-- Must be framed as intake support, not diagnosis or medical advice.
+**Why it shines:** MCP is the ecosystem's connector standard; this shows ABP
+consuming third-party tool servers declaratively — and proves the approval
+policy composes with tools ABP didn't define. Also: genuinely useful.
 
-## Recommended First Picks
+**Demo (post-implementation):**
+```bash
+abp run examples/08-downloads-janitor.yml "clean up my downloads"
+# plan printed → approval prompt → moves execute
+```
 
-| Rank | Scenario | Reason |
-|---|---|---|
-| 1 | Incident Response War Room | Best technical demo for graph control, native reasoning, tools, state, and human approval |
-| 2 | Sales Proposal Builder | Strong business workflow with review loops and specialist agents |
-| 3 | Customer Support Triage And Resolution | Easy to understand, clear conditional routing, realistic handoff |
+---
 
-## Selection Criteria
+## Feature coverage matrix
 
-Choose a scenario based on what the example should demonstrate:
+| Feature | L1 | L2 | L3 | L4 | L5 | L6 | L7 | L8 |
+|---|---|---|---|---|---|---|---|---|
+| Minimal blueprint / settings / state | ● | ● | ● | ● | ● | ● | ● | ● |
+| Conditional routing + expressions | | ● | | ● | | | | |
+| Output/node/state contracts | | ● | ● | | ● | | | |
+| Approval policies | | ● | | | | | | ● |
+| Escalation (low confidence) | | ● | | | | | | |
+| Handoff node (console/slack) | | ● | | ● | | | | ● |
+| Parallel fan-out/join | | | | ● | | | | |
+| Nested subgraphs (reuse) | | | | ● | | | | |
+| Supervisor + transfer tools | | | | ● | | | | |
+| Budgets / max_graph_steps | | | | ● | ● | | | |
+| Tool-usage policies (caps, explicit args) | | | | | | | ● | |
+| Retry policies | | | ● | | | | ● | |
+| RAG retriever + context injection | | | ● | | | | | |
+| Artifacts + contract binding | | | ● | ● | | | | |
+| Rubric evals | | | ● | | | | | |
+| exact_match / policy evals + datasets | | | | | ● | | | |
+| Harness scenarios (mock/stub) | (●) | ● | ● | ● | ● | ● | ● | ● |
+| Gate baseline + CI recipe | | | | | ● | | | |
+| Traces flywheel | | | | | ● | | | |
+| Observability / OTel | | | | | ● | | | |
+| Sandbox (`run.sandbox`) | | | | | ● | | | |
+| `abp package` + sqlite memory | | | | | | ● | | |
+| Function `impl` tools | | | ● | | ● | ● | ● | |
+| API tools (bearer / api_key / basic auth) | | ● | | ● | | | ● | |
+| MCP servers + `mcp` tools | | | | | | | | ◐ |
+| Reasoning / llm_kwargs | | | | ● | ● | ● | | |
+| Model providers (multi) | | | | ● | | ● | | |
 
-| Goal | Best scenario |
+(●) = present but minimal. ◐ = staged: L8 is written against the MCP schema
+today but ships together with MCP tool generation (roadmap). With it, the
+matrix has no uncovered feature.
+
+## Alternate domains (swappable per level)
+
+Kept on the bench in case a story doesn't land during evaluation:
+
+| Level | Alternates |
 |---|---|
-| Technical operations and tool usage | Incident Response War Room |
-| Business workflow and review loop | Sales Proposal Builder |
-| Conditional routing and support automation | Customer Support Triage And Resolution |
-| Safety and human boundaries | Contract Review Assistant or Healthcare Symptom Intake Assistant |
-| Friendly consumer-facing flow | Travel Concierge Planner |
-| Structured scoring and decision support | Recruiting Screening Pipeline |
-| Product analytics workflow | Product Feedback Analyst |
+| L1 | fortune-cookie generator · compliment bot |
+| L2 | pizza-ordering agent (placing the order = approval) · plant-watering butler |
+| L3 | D&D dungeon-master's assistant (RAG over campaign lore, session-recap artifact) · trip itinerary from your own travel notes |
+| L4 | surprise-birthday-party war room · house-move coordinator |
+| L5 | horoscope generator under regression control (mystical content, rigorous CI) · fantasy-league recap writer |
+| L6 | language-learning flashcard coach · houseplant care journal |
+| L7 | garden watering advisor (weather API + soil sensor impl) · personal finance pulse (bank API, strict call caps) |
+| L8 | repo janitor (GitHub MCP server: stale branches, label triage) · notes gardener (Obsidian-vault MCP) |
+
+## Migration plan (when we build)
+
+1. Build L1–L7 one PR each (or pairs), each example validating, linting, and
+   `abp test`-passing offline.
+2. Extend CI smoke: `for f in examples/*.yml; do abp validate $f && abp lint $f; done`
+   plus `abp test` for the ones with harness blocks. **Note:** CI currently
+   smoke-tests `examples/basic-chatbot.yml` by name — the workflow must be
+   updated in the same PR that renames/deletes it.
+3. Delete the old files (`basic-chatbot`, `customer-support`, `research-team`,
+   `incident-response`, `prd-factory`) as each successor lands.
+4. Update README's Examples table to the ladder format.
+5. L8 is deferred: it lands in (or right after) the PR that implements MCP tool
+   generation, serving as its acceptance demo. Until then it exists only here.
+
+## Open questions for evaluation
+
+1. Is eight the right size? (Merge candidates: L3+L5 could fold into one
+   "documents under test" example; L1 could be just the README snippet.)
+2. Numbered filenames (`01-…`) — good for the ladder story, or too tutorial-ish
+   for an `examples/` directory?
+3. Should L5 ship its `datasets/` + committed gate baseline inside `examples/`
+   (self-contained) or in a dedicated `examples/cafe-review-desk/` directory
+   (one example = one dir, scales better)?
+4. Any story swaps from the alternates bench?
+5. Does L8's "staged until MCP generation lands" framing work — or should the
+   MCP example wait entirely until the feature exists?

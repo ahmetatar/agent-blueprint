@@ -69,6 +69,7 @@ Many blueprint features started as Pydantic models + lint checks with incomplete
 - typer ≥0.26 vendors click (`typer._click`) — do not `import click` in src or tests; use `tmp_path` + `monkeypatch.chdir` instead of `CliRunner.isolated_filesystem`.
 - Rich wraps long lines (CI tmp paths are long) — in CLI output assertions, unwrap with `" ".join(output.split())` or assert short substrings.
 - `BlueprintSettings.max_graph_steps` (default 25) maps to LangGraph `recursion_limit`.
+- Escalation's `__abp_escalation_*` keys are intentionally NOT declared state channels: LangGraph hands a node's raw updates to conditional-edge routers within the same superstep but does not persist undeclared keys (verified empirically on langgraph 0.3→1.0) — ephemeral same-superstep signal, no stale state. Anything that must survive across supersteps needs a declared channel (see `_abp_supervisor_iters`).
 
 ## Contribution contracts (from CONTRIBUTING.md)
 

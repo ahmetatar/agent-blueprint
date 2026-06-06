@@ -26,6 +26,7 @@ from agent_blueprint.cli import gate_cmd
 from agent_blueprint.cli import traces_cmd
 from agent_blueprint.cli import deploy_cmd
 from agent_blueprint.cli import github_cmd
+from agent_blueprint.cli import package_cmd
 
 _WELCOME_BANNER = """\
  █████╗ ██████╗ ██████╗      ██████╗██╗     ██╗
@@ -99,6 +100,7 @@ app.command("eval")(eval_cmd.eval_)
 app.command("gate")(gate_cmd.gate)
 app.add_typer(traces_cmd.traces_app, name="traces")
 app.command("deploy")(deploy_cmd.deploy)
+app.command("package")(package_cmd.package)
 app.command("github")(github_cmd.github)
 
 

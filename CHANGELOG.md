@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp package <blueprint>`: package the agent as a pip/pipx-installable
+  command-line tool — src-layout package, console-script entry point named
+  after the blueprint, `requirements.txt` folded into `pyproject.toml`
+  (`--output-dir`, `--dry-run`)
 - trace records carry an `origin` tag (`harness`|`eval`); `abp traces list/export`
   gain `--origin` filters and export skips eval-origin records by default to
   prevent re-exporting already-exported cases

@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor <blueprint>` (phase E0): local web server with an embedded React
+  UI placeholder — `/api/health` + `/api/blueprint`, per-session URL token,
+  random free port on 127.0.0.1; `editor` extra (`fastapi`, `uvicorn`) and a
+  hatch build hook that embeds the built frontend into published packages
 - `abp package <blueprint>`: package the agent as a pip/pipx-installable
   command-line tool — src-layout package, console-script entry point named
   after the blueprint, `requirements.txt` folded into `pyproject.toml`

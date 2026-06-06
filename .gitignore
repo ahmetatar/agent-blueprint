@@ -34,3 +34,7 @@ htmlcov/
 
 # Type checking
 .mypy_cache/
+
+# Editor frontend
+frontend/node_modules/
+src/agent_blueprint/editor/static/

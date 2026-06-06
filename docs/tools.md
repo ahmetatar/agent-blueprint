@@ -149,6 +149,11 @@ agents:
 
 References an MCP server defined in `mcp_servers`:
 
+> **Status:** `mcp` tools are validated at the schema level (server references
+> are cross-checked), but **code generation for them is not implemented yet** —
+> `abp generate` fails with a clear error and `abp doctor` reports a
+> `target-incompatible-feature` finding. See [MCP Servers](mcp-servers.md).
+
 ```yaml
 tools:
   create_project:

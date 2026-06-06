@@ -13,12 +13,20 @@
 
 `agent-blueprint` (CLI: `abp`) turns AI agent systems into versionable, testable, deployable infrastructure. You describe agents, tools, workflow graph, contracts, and policies in a single validated YAML blueprint — `abp` compiles it into a runnable [LangGraph](https://github.com/langchain-ai/langgraph) project and gives you the operational toolchain around it: linting, deterministic tests, eval suites, regression gates, sandboxed runs, OpenTelemetry export, and cloud deployment.
 
-What makes ABP different is not less boilerplate — it is that **everything you declare is enforced at runtime**:
+What makes ABP different is not less boilerplate — it is that **everything you declare is enforced at runtime**. Most agent frameworks let you *describe* guardrails; ABP *compiles them into the generated code*, so a contract in YAML and the behavior in production cannot drift apart:
 
-- Declared contracts raise on violation, with `contract_failed` trace events.
-- Declared approval policies actually gate tool calls.
-- Declared budgets, retries, and escalation routes are compiled into the generated code.
-- Declared test scenarios run deterministically — no live LLM required.
+| You declare | The generated runtime does |
+|---|---|
+| `contracts.state.invariants` | Re-checks every invariant after each agent node; violations emit a `contract_failed` trace event, then raise |
+| `contracts.nodes.*.output_contract` | Validates the node's structured output against your JSON-schema-style contract |
+| `policies.approvals` | Gates the listed tool calls behind human approval — `block` raises, `warn` continues but records a `policy_violation` event |
+| `policies.tool_usage` | Counts and caps tool calls per node and per run; unknown tools fail instead of silently passing through |
+| `policies.budgets` | Meters real token usage and provider-priced cost on every LLM call — crossing `max_tokens_per_run` / `max_cost_usd` aborts the run mid-flight; `max_latency_seconds` is verified at completion. All violations emit `policy_violation` events |
+| `policies.escalation` | Reroutes the workflow to your declared review/handoff node the moment confidence drops below the threshold — mid-run, not post-hoc |
+| `graph.nodes.*.retry` | Retries with backoff and emits retry trace events; exhausted retries fail deterministically |
+| `harness.scenarios` | Run as deterministic tests — mocked LLM, stubbed tools, seeded — no API key, no flakiness, CI-ready |
+
+And because every enforcement emits a structured trace event, the same declarations are **observable** (OpenTelemetry export), **testable** (`abp test` asserts on routes, state, and artifacts), and **gateable** (`abp gate` fails the PR when behavior regresses against the baseline).
 
 If you are building a one-off demo, handwritten code is fine. If you are building agent systems that need consistency, auditability, and repeatable delivery — in CI, across a team — ABP is the stronger foundation.
 

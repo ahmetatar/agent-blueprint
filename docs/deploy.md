@@ -13,10 +13,12 @@ abp deploy my-agent.yml --env EXTRA_KEY=value
 
 | Flag | Default | Description |
 |---|---|---|
-| `--platform` | from blueprint | `azure` \| `aws` \| `gcp` |
+| `--platform` | from blueprint | `azure` \| `aws` \| `gcp` \| `docker` \| `podman` |
 | `--image-tag` | `latest` | Docker image tag |
 | `--dry-run` | `false` | Print all commands without executing |
 | `--env KEY=VAL` | — | Extra env vars to inject as secrets (repeatable) |
+
+`docker` and `podman` run the same container image locally instead of pushing to a cloud — useful for a production-like smoke test. They need no `deploy.*` config section (defaults apply).
 
 ## Deploy Flow
 
@@ -28,25 +30,59 @@ abp deploy my-agent.yml --env EXTRA_KEY=value
 6. Builds Docker image → pushes to cloud registry → creates/updates cloud service
 7. Prints the deployed endpoint URL
 
-## HTTP API
+## How the Agent Is Exposed
+
+You do **not** implement a trigger yourself. The packaging step wraps the
+generated agent in a small FastAPI server (`server.py`) that exposes two
+endpoints and listens on port **8080** (override with the `PORT` env var):
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /invoke` | Run the agent once. Internally calls the generated `main.run(input, thread_id=...)` |
+| `GET /health` | Liveness probe — used by the platforms' health checks |
+
+### Request / response contract
 
 ```bash
 # Single invocation
 curl -X POST https://<endpoint>/invoke \
   -H "Content-Type: application/json" \
   -d '{"input": "Hello", "thread_id": "default"}'
+# → {"response": "..."}        (200)
+# → {"error": "..."}           (500 on any agent failure)
 
 # Health check
 curl https://<endpoint>/health
+# → {"status": "ok", "agent": "<blueprint name>"}
 ```
+
+`thread_id` selects the LangGraph checkpointer thread: requests sharing a
+`thread_id` continue the same conversation; a new id starts a fresh one.
+
+### What you should know before production
+
+- **Conversation persistence**: with `memory.backend: in_memory` the
+  checkpointer lives inside the process — conversation history does not
+  survive restarts, cold starts, or multiple replicas. For real conversation
+  continuity behind a scaling service, declare a shared backend
+  (`postgres` or `redis`) in the blueprint's [`memory`](memory.md) section.
+- **Authentication is the platform's job**: the `/invoke` endpoint itself is
+  unauthenticated. On GCP, `allow_unauthenticated: false` (the default)
+  keeps IAM in front of it; on Azure Container Apps and AWS App Runner,
+  restrict ingress/attach auth at the platform level.
+- **Non-HTTP triggers** (cron, queues, pub/sub) are not generated. Either
+  point the platform's scheduler/consumer at `POST /invoke`, or import the
+  generated `main.run()` directly in your own worker — the generated project
+  is a plain Python package, so both work.
 
 ## Platform-Specific Resources
 
-| Platform | Registry | Service |
-|---|---|---|
-| Azure | Azure Container Registry (ACR) | Container Apps |
-| AWS | Elastic Container Registry (ECR) | App Runner |
-| GCP | Artifact Registry | Cloud Run |
+| Platform | Registry | Service | Exposed as |
+|---|---|---|---|
+| Azure | Azure Container Registry (ACR) | Container Apps | ingress FQDN (`https://<app>.<env>.azurecontainerapps.io`), `min/max_replicas` from blueprint |
+| AWS | Elastic Container Registry (ECR) | App Runner | service URL (`https://<id>.<region>.awsapprunner.com`) |
+| GCP | Artifact Registry | Cloud Run | Cloud Run URL; IAM-protected unless `allow_unauthenticated: true` |
+| Docker / Podman | — (local image) | local container | `http://localhost:<host_port>` (default 8080) |
 
 ## Blueprint Configuration
 
@@ -73,6 +109,12 @@ deploy:
     region: "europe-west1"
     artifact_repo: "cloud-run-source-deploy"
     allow_unauthenticated: false
+
+  docker:                       # podman uses the same shape under a `podman:` key
+    host_port: 8080
+    container_name: "my-agent"  # optional, defaults to blueprint name
+    network: null               # e.g. "host" on Linux
+    platform: null              # e.g. "linux/amd64" for cross-builds
 ```
 
 ## Secret Injection

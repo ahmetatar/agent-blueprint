@@ -34,7 +34,7 @@ jobs:
         run: mypy src
 
       - name: Pytest
-        run: pytest
+        run: pytest --cov=agent_blueprint --cov-report=term --cov-fail-under=79
 
       - name: Build package
         run: python -m build

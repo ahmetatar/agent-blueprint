@@ -42,13 +42,33 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.4",
     "mypy>=1.8",
+    # editor server deps + httpx, so tests exercise the editor API (TestClient)
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
 ]
 deploy-azure = ["azure-mgmt-containerinstance", "azure-identity"]
 deploy-aws = ["boto3"]
 deploy-gcp = ["google-cloud-run"]
+editor = ["fastapi>=0.115", "uvicorn>=0.30"]
+
+[tool.hatch.build]
+# Built frontend assets are VCS-ignored but must ship in the package.
+artifacts = ["src/agent_blueprint/editor/static/"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_blueprint"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+# The sdist ships prebuilt editor assets (via artifacts) instead of the
+# frontend source, so installing from sdist never needs Node.
+exclude = ["frontend"]
+
+[tool.hatch.build.targets.sdist.hooks.custom]
+path = "hatch_build.py"
 
 [tool.ruff]
 line-length = 100

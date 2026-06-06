@@ -179,6 +179,19 @@ class LangGraphGenerator(BaseGenerator):
 
         If runner_thread_id is provided, also generates _abp_runner.py.
         """
+        # MCP tool generation is not implemented yet: tools.py.j2 has no mcp
+        # branch, but TOOLS_BY_NAME lists every tool — generating would emit
+        # code that raises NameError at import. Fail here with a clear message.
+        mcp_tools = sorted(
+            name for name, tool in ir.all_tools.items() if tool.type.value == "mcp"
+        )
+        if mcp_tools:
+            raise GeneratorError(
+                f"MCP tools are not supported by the langgraph generator yet: "
+                f"{', '.join(mcp_tools)}. Replace them with function/api tools or "
+                "remove them from agents' tool lists."
+            )
+
         files: dict[str, str] = {}
 
         for template_name, output_name in _TEMPLATES:

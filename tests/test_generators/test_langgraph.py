@@ -12,6 +12,7 @@ import types
 import pytest
 from pydantic import ValidationError
 
+from agent_blueprint.exceptions import GeneratorError
 from agent_blueprint.generators.langgraph import LangGraphGenerator
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.agents import ReasoningConfig
@@ -3514,3 +3515,44 @@ class TestTraceFinalState:
         manifest = recorder.finalize(status="failed", error="boom")
 
         assert "final_state" not in manifest
+
+
+class TestMcpToolsRejected:
+    """MCP tool generation is unimplemented — generate() must fail loudly
+    instead of emitting a tools.py that NameErrors at import."""
+
+    gen = LangGraphGenerator()
+
+    @staticmethod
+    def _spec_data() -> dict:
+        return {
+            "blueprint": {"name": "mcp-reject-test"},
+            "state": {
+                "fields": {"messages": {"type": "list[message]", "reducer": "append"}}
+            },
+            "mcp_servers": {"fs": {"transport": "stdio", "command": "npx"}},
+            "agents": {"assistant": {"model": "gpt-4o", "tools": ["read_file"]}},
+            "tools": {
+                "read_file": {"type": "mcp", "server": "fs", "tool": "read_file"},
+            },
+            "graph": {
+                "entry_point": "assistant",
+                "nodes": {"assistant": {"agent": "assistant"}},
+                "edges": [{"from": "assistant", "to": "END"}],
+            },
+        }
+
+    def test_generate_raises_with_tool_names(self):
+        spec = BlueprintSpec.model_validate(self._spec_data())
+        ir = compile_blueprint(spec)
+        with pytest.raises(GeneratorError, match="MCP tools.*read_file"):
+            self.gen.generate(ir)
+
+    def test_blueprint_without_mcp_tools_still_generates(self):
+        data = self._spec_data()
+        data["tools"] = {"lookup": {"type": "function", "impl": "mypkg.tools.lookup"}}
+        data["agents"]["assistant"]["tools"] = ["lookup"]
+        del data["mcp_servers"]
+        spec = BlueprintSpec.model_validate(data)
+        files = self.gen.generate(compile_blueprint(spec))
+        assert "tools.py" in files

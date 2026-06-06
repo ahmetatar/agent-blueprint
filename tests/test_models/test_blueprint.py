@@ -813,3 +813,18 @@ class TestInvalidBlueprints:
             "policies.escalation.on_low_confidence references undefined graph node 'reviewer'"
             in str(exc_info.value)
         )
+
+
+class TestMemoryConfig:
+    def test_checkpoint_type_accepted(self):
+        from agent_blueprint.models.memory import MemoryConfig
+
+        cfg = MemoryConfig(type="checkpoint")
+        assert cfg.type == "checkpoint"
+        assert MemoryConfig().type == "checkpoint"
+
+    def test_unknown_type_rejected(self):
+        from agent_blueprint.models.memory import MemoryConfig
+
+        with pytest.raises(ValidationError):
+            MemoryConfig(type="vector_store")

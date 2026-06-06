@@ -1,6 +1,7 @@
 """Memory / persistence configuration models."""
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -31,7 +32,9 @@ class AgentMemoryConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
-    type: str = "checkpoint"
+    # "checkpoint" (thread persistence) is the only memory kind today; Literal
+    # keeps the field forward-compatible while rejecting typos.
+    type: Literal["checkpoint"] = "checkpoint"
     backend: MemoryBackend = MemoryBackend.in_memory
     connection_string_env: str | None = None
     checkpoint_every: CheckpointStrategy = CheckpointStrategy.node

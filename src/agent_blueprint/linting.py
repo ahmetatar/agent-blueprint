@@ -72,6 +72,15 @@ def _unbounded_loops_for_graph(graph: GraphDef, *, location_prefix: str) -> list
             if node.join:
                 for branch in node.branches:
                     adjacency.setdefault(branch, set()).add(node.join)
+        if node.type.value == "supervisor":
+            adjacency[node_id].update(w for w in node.workers if w in adjacency)
+            for worker in node.workers:
+                adjacency.setdefault(worker, set()).add(node_id)
+            if node.on_finish and node.on_finish != "END":
+                if node.on_finish in adjacency:
+                    adjacency[node_id].add(node.on_finish)
+            else:
+                exits_to_end.add(node_id)  # supervisor finishes to END
     for edge in graph.edges:
         if edge.from_node not in adjacency:
             continue
@@ -200,6 +209,12 @@ def _lint_unreachable_nodes(spec: BlueprintSpec) -> list[LintFinding]:
             if node.join:
                 for branch in node.branches:
                     adjacency.setdefault(branch, set()).add(node.join)
+        if node.type.value == "supervisor":
+            adjacency.setdefault(node_id, set()).update(node.workers)
+            for worker in node.workers:
+                adjacency.setdefault(worker, set()).add(node_id)
+            if node.on_finish and node.on_finish != "END":
+                adjacency[node_id].add(node.on_finish)
     for edge in spec.graph.edges:
         for target in edge.get_targets():
             if target.target in spec.graph.nodes:

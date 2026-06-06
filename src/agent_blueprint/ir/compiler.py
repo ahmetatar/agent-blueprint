@@ -21,7 +21,7 @@ from agent_blueprint.models.observability import ObservabilityConfig
 from agent_blueprint.models.policies import PoliciesDef
 from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
-from agent_blueprint.models.state import StateDef
+from agent_blueprint.models.state import FieldDef, ReducerType, StateDef
 from agent_blueprint.models.tools import ToolDef
 
 _UNSUPPORTED_NODE_TYPES: set[str] = set()
@@ -107,6 +107,13 @@ class ExpandedGraph:
 def compile_blueprint(spec: BlueprintSpec) -> AgentGraph:
     """Compile a validated BlueprintSpec into the framework-agnostic AgentGraph IR."""
     expanded = _expand_subgraphs(spec)
+    if any(node.type == NodeType.supervisor for node in expanded.nodes.values()):
+        # Supervisor iteration budget lives in a dedicated state channel so the
+        # count survives across supersteps (supervisor -> worker -> supervisor).
+        expanded.state.fields.setdefault(
+            "_abp_supervisor_iters",
+            FieldDef(type="dict", reducer=ReducerType.MERGE, default={}),
+        )
     nodes = _compile_nodes(spec, expanded.nodes)
     edges = _compile_edges(expanded.edges)
     warnings = _collect_warnings(nodes)
@@ -282,6 +289,12 @@ def _expand_one_level(
                 ]
                 if expanded_node.join:
                     expanded_node.join = _namespace_id(node_id, expanded_node.join)
+            if expanded_node.type == NodeType.supervisor:
+                expanded_node.workers = [
+                    _namespace_id(node_id, worker) for worker in expanded_node.workers
+                ]
+                if expanded_node.on_finish and expanded_node.on_finish != "END":
+                    expanded_node.on_finish = _namespace_id(node_id, expanded_node.on_finish)
             if expanded_node.type == NodeType.subgraph:
                 # Nested subgraph: carry the cycle chain and remap the
                 # outer-facing side of its maps into this pass's namespace.

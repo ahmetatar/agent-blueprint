@@ -39,6 +39,11 @@ from _abp_trace import (
 )
 from state import AgentState
 from tools import TOOLS, TOOLS_BY_NAME, validate_tool_arguments
+{% if ir.nodes | selectattr("node_def.type.value", "equalto", "supervisor") | list %}
+from langchain_core.tools import StructuredTool
+from langgraph.graph import END
+from langgraph.types import Command
+{% endif %}
 
 UNKNOWN_TOOL_POLICY = {{ (ir.policies.tool_usage.on_unknown_tool.value if ir.policies else "ignore") | to_python }}
 ESCALATION_POLICY = {
@@ -726,6 +731,40 @@ def _apply_low_confidence_escalation(node_id: str, updates: dict[str, Any]) -> s
     updates["__abp_escalation_source"] = node_id
     return target
 
+{% set supervisors = ir.nodes | selectattr("node_def.type.value", "equalto", "supervisor") | list %}
+{% if supervisors %}
+
+def _abp_transfer_stub() -> str:
+    """Handled by the supervisor loop — never invoked."""
+    return ""
+
+
+#: transfer tool name -> worker node id, per supervisor
+SUPERVISOR_TRANSFER_TARGETS: dict[str, dict[str, str]] = {
+{% for sup in supervisors %}
+    "{{ sup.id }}": {
+{% for worker in sup.node_def.workers %}
+        "transfer_to_{{ worker | safe_id }}": "{{ worker }}",
+{% endfor %}
+    },
+{% endfor %}
+}
+
+SUPERVISOR_TRANSFER_TOOLS: dict[str, list] = {
+{% for sup in supervisors %}
+    "{{ sup.id }}": [
+{% for worker in sup.node_def.workers %}
+        StructuredTool.from_function(
+            func=_abp_transfer_stub,
+            name="transfer_to_{{ worker | safe_id }}",
+            description={{ ("Transfer the conversation to: " ~ ((ir.get_node(worker).description if ir.get_node(worker) else worker) or worker)) | to_python }},
+        ),
+{% endfor %}
+    ],
+{% endfor %}
+}
+
+{% endif %}
 {% if ir.nodes | selectattr("node_def.type.value", "equalto", "handoff") | list %}
 
 class _HandoffStateDict(dict):
@@ -795,7 +834,125 @@ def _deliver_handoff_email(payload: dict[str, Any]) -> None:
 
 {% endif %}
 {% for node in ir.nodes %}
-{% if node.agent %}
+{% if node.node_def.type.value == "supervisor" %}
+{% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
+{% set finish_target = node.node_def.on_finish if node.node_def.on_finish and node.node_def.on_finish != "END" else none %}
+{% set finish_goto = '"' ~ finish_target ~ '"' if finish_target else "END" %}
+def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
+    """Supervisor: {{ node.description }}"""
+    set_current_node("{{ node.id }}")
+{% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
+    emit_trace_event(
+        "parallel_finished",
+        node="{{ p.id }}",
+        input_state=state,
+        metadata={
+            "branches": {{ p.node_def.branches | to_python }},
+            "join": {{ p.node_def.join | to_python }},
+            "failure_policy": "{{ p.node_def.failure_policy.value }}",
+        },
+    )
+{% endfor %}
+    emit_trace_event("node_started", node="{{ node.id }}", input_state=state)
+{% if node.contract and node.contract.requires %}
+    _require_state_fields("{{ node.id }}", state, {{ node.contract.requires | to_python }})
+{% endif %}
+    iterations = dict(state.get("_abp_supervisor_iters") or {})
+    iteration = int(iterations.get("{{ node.id }}", 0)) + 1
+    iterations["{{ node.id }}"] = iteration
+    updates: dict = {"_abp_supervisor_iters": iterations}
+    if iteration > {{ node.node_def.max_iterations }}:
+        emit_trace_event(
+            "supervisor_iterations_exhausted",
+            node="{{ node.id }}",
+            route={{ finish_target | to_python }},
+            metadata={"max_iterations": {{ node.node_def.max_iterations }}, "iteration": iteration},
+        )
+        clear_current_node()
+        return Command(goto={{ finish_goto }}, update=updates)
+    {% set temperature = node.agent.temperature if node.agent.temperature is not none else ir.settings.default_temperature %}
+    {{ make_llm(node, temperature) }}
+    transfer_targets = SUPERVISOR_TRANSFER_TARGETS["{{ node.id }}"]
+    regular_tools = TOOLS.get("{{ node.id }}", [])
+    tool_map = {t.name: t for t in regular_tools}
+    llm = llm.bind_tools(regular_tools + SUPERVISOR_TRANSFER_TOOLS["{{ node.id }}"])
+    working: list = list(state.get("{{ messages_key }}", []))
+{% if node.agent.system_prompt %}
+    system_prompt = """{{ node.agent.system_prompt | escape_string }}"""
+    if not any(isinstance(m, SystemMessage) for m in working):
+        working = [SystemMessage(content=system_prompt)] + working
+{% endif %}
+    new_messages: list = []
+    while True:
+        response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
+        register_llm_budget_usage("{{ node.id }}", response)
+        record_llm_output("{{ node.id }}", _llm_trace_payload(response))
+        working.append(response)
+        new_messages.append(response)
+        tool_calls = list(getattr(response, "tool_calls", None) or [])
+        transfer_call = next(
+            (tc for tc in tool_calls if tc["name"] in transfer_targets), None
+        )
+        if transfer_call is not None:
+            target = transfer_targets[transfer_call["name"]]
+            for tc in tool_calls:
+                content = (
+                    f"Transferred to {target}."
+                    if tc["id"] == transfer_call["id"]
+                    else "Skipped: a transfer is already in progress."
+                )
+                ack = ToolMessage(content=content, tool_call_id=tc["id"])
+                working.append(ack)
+                new_messages.append(ack)
+            updates["{{ messages_key }}"] = new_messages
+            emit_trace_event(
+                "agent_handoff",
+                node="{{ node.id }}",
+                route=target,
+                tool=transfer_call["name"],
+                metadata={"iteration": iteration},
+            )
+            emit_trace_event(
+                "node_finished",
+                node="{{ node.id }}",
+                route=target,
+                input_state=state,
+                output_state=updates,
+                metadata={"handoff": True, "iteration": iteration},
+            )
+            clear_current_node()
+            return Command(goto=target, update=updates)
+        if tool_calls:
+            for tc in tool_calls:
+                fn = tool_map.get(tc["name"])
+                if fn is None:
+                    content = _handle_unknown_tool("{{ node.id }}", tc["name"], tc.get("args", {}))
+                else:
+                    try:
+                        validate_tool_arguments(tc["name"], tc.get("args", {}))
+                        content = str(fn.invoke(tc.get("args", {})))
+                    except PermissionError:
+                        raise
+                    except Exception as exc:
+                        content = f"Tool error: {exc}"
+                tool_msg = ToolMessage(content=content, tool_call_id=tc["id"])
+                working.append(tool_msg)
+                new_messages.append(tool_msg)
+            continue
+        break
+    updates["{{ messages_key }}"] = new_messages
+    emit_trace_event(
+        "node_finished",
+        node="{{ node.id }}",
+        route={{ finish_target | to_python }},
+        input_state=state,
+        output_state=updates,
+        metadata={"handoff": False, "iteration": iteration},
+    )
+    clear_current_node()
+    return Command(goto={{ finish_goto }}, update=updates)
+
+{% elif node.agent %}
 {% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """{{ node.description }}"""

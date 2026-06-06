@@ -54,6 +54,13 @@ def build_graph():
     builder.add_edge("{{ branch }}", "{{ node.node_def.join }}")
 {% endfor %}
 {% endif %}
+{% if node.node_def.type.value == "supervisor" %}
+    # Supervisor '{{ node.id }}': workers return automatically; the supervisor
+    # itself routes via Command (transfer or finish), so it has no static edges
+{% for worker in node.node_def.workers %}
+    builder.add_edge("{{ worker }}", "{{ node.id }}")
+{% endfor %}
+{% endif %}
 {% endfor %}
 
     # Add edges

@@ -12,6 +12,7 @@ class NodeType(str, Enum):
     handoff = "handoff"
     parallel = "parallel"
     subgraph = "subgraph"
+    supervisor = "supervisor"
 
 
 class ParallelFailurePolicy(str, Enum):
@@ -69,6 +70,9 @@ class NodeDef(BaseModel):
     branches: list[str] = Field(default_factory=list)
     join: str | None = None
     failure_policy: ParallelFailurePolicy = ParallelFailurePolicy.fail_fast
+    workers: list[str] = Field(default_factory=list)
+    max_iterations: int = Field(default=8, ge=1)
+    on_finish: str | None = None
     ref: str | None = None
     input_map: dict[str, str] = Field(default_factory=dict)
     output_map: dict[str, str] = Field(default_factory=dict)
@@ -101,6 +105,18 @@ class NodeDef(BaseModel):
                 raise ValueError("subgraph nodes require an 'input_map'")
             if not self.output_map:
                 raise ValueError("subgraph nodes require an 'output_map'")
+        if self.type == NodeType.supervisor:
+            if not self.agent:
+                raise ValueError("supervisor nodes require an 'agent' reference")
+            if not self.workers:
+                raise ValueError("supervisor nodes require at least one worker")
+            if self.branches or self.join:
+                raise ValueError("supervisor nodes use 'workers', not 'branches'/'join'")
+        else:
+            if self.workers:
+                raise ValueError("'workers' is only valid on supervisor nodes")
+            if self.on_finish is not None:
+                raise ValueError("'on_finish' is only valid on supervisor nodes")
         if self.type == NodeType.handoff and not self.channel:
             self.channel = HandoffChannel.console
         return self
@@ -151,5 +167,48 @@ class GraphDef(BaseModel):
                 rendered = ", ".join(branch_edges)
                 raise ValueError(
                     f"Parallel node '{node_id}' branch node(s) cannot declare explicit outgoing edges: {rendered}"
+                )
+
+        worker_owner: dict[str, str] = {}
+        for node_id, node in self.nodes.items():
+            if node.type != NodeType.supervisor:
+                continue
+            for worker in node.workers:
+                if worker not in self.nodes:
+                    raise ValueError(
+                        f"Supervisor '{node_id}' worker '{worker}' is not defined in nodes"
+                    )
+                if self.nodes[worker].type != NodeType.agent:
+                    raise ValueError(
+                        f"Supervisor '{node_id}' worker '{worker}' must be an agent node"
+                    )
+                if worker in worker_owner:
+                    raise ValueError(
+                        f"Node '{worker}' cannot be a worker of both supervisors "
+                        f"'{worker_owner[worker]}' and '{node_id}'"
+                    )
+                worker_owner[worker] = node_id
+            if node.on_finish and node.on_finish != "END":
+                if node.on_finish not in self.nodes:
+                    raise ValueError(
+                        f"Supervisor '{node_id}' on_finish target '{node.on_finish}' is not defined in nodes"
+                    )
+                if node.on_finish in node.workers:
+                    raise ValueError(
+                        f"Supervisor '{node_id}' on_finish target cannot also be a worker"
+                    )
+            if any(edge.from_node == node_id for edge in self.edges):
+                raise ValueError(
+                    f"Supervisor '{node_id}' routes via workers/on_finish and cannot "
+                    "also declare explicit outgoing edges"
+                )
+            worker_edges = sorted(
+                edge.from_node for edge in self.edges if edge.from_node in node.workers
+            )
+            if worker_edges:
+                rendered = ", ".join(worker_edges)
+                raise ValueError(
+                    f"Supervisor '{node_id}' worker node(s) return automatically and cannot "
+                    f"declare explicit outgoing edges: {rendered}"
                 )
         return self

@@ -1,9 +1,9 @@
-# Workflow Nodes: Parallel, Subgraph, Handoff
+# Workflow Nodes: Parallel, Subgraph, Handoff, Supervisor
 
-Beyond `agent` and `function` nodes, blueprints support three workflow
-semantics. All three are fully generated for the LangGraph target. See
+Beyond `agent` and `function` nodes, blueprints support four workflow
+semantics. All are fully generated for the LangGraph target. See
 [examples/incident-response.yml](../examples/incident-response.yml) for a
-blueprint combining all of them.
+blueprint combining parallel, subgraph, and handoff.
 
 ## Parallel
 
@@ -34,6 +34,59 @@ default `replace` reducer collide at runtime. Declare branch outputs in
 `contracts.nodes.<branch>.produces` and the
 `parallel-branch-conflict` lint check flags collisions statically; use an
 `append`/`merge` reducer or distinct fields.
+
+## Supervisor
+
+```yaml
+graph:
+  entry_point: coordinator
+  nodes:
+    coordinator:
+      type: supervisor
+      agent: boss              # the LLM that decides who works next
+      workers: [research, writer]
+      max_iterations: 5        # default 8
+      on_finish: END           # default END; or a node id for a final step
+    research: { agent: researcher, description: "Research specialist" }
+    writer:   { agent: copywriter, description: "Writing specialist" }
+  edges: []                    # supervisor needs no explicit edges
+```
+
+The most common multi-agent architecture: a central supervisor receives the
+task, repeatedly **decides at runtime** which worker to delegate to, and
+finishes when satisfied. Unlike conditional edges (where the LLM writes a
+state field and a static condition routes), the supervisor delegates via
+native **tool calling**:
+
+- each worker gets a generated `transfer_to_<worker>` tool whose description
+  comes from the worker node's `description` — write meaningful ones, the
+  supervisor LLM routes by them;
+- a transfer call hands control to that worker (LangGraph `Command`); the
+  worker is a completely normal agent node and **returns to the supervisor
+  automatically** when done;
+- a plain response (no transfer call) finishes the loop and routes to
+  `on_finish` (default `END`);
+- the supervisor can also have its own regular `tools` — they execute inline
+  as usual; only transfer calls change routing.
+
+**The targets are static, only the choice is dynamic** — `workers` is
+declared in YAML, so ABP's guarantees hold:
+
+- validation: workers must exist, must be agent nodes, can belong to one
+  supervisor, and neither the supervisor nor its workers may declare explicit
+  outgoing edges;
+- lint: reachability and unbounded-loop analysis understand supervisor
+  routing (the supervisor⇄worker loop is exempt because `on_finish` is an
+  exit);
+- budget: `max_iterations` (per run) bounds the delegation loop — when
+  exceeded, a `supervisor_iterations_exhausted` trace event is emitted and
+  the run is forced to `on_finish`;
+- trace: every delegation emits `agent_handoff` with `route=<worker>` and the
+  transfer tool name, so harness `route` assertions and the eval flywheel see
+  dynamic routing exactly like static routing.
+
+Supervisors work inside subgraphs (workers and `on_finish` are namespaced
+with the rest of the subgraph).
 
 ## Loops
 

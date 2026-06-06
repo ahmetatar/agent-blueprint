@@ -718,6 +718,14 @@ def _handle_unknown_tool(node_id: str, tool_name: str, args: dict[str, Any]) -> 
 
 
 def _apply_low_confidence_escalation(node_id: str, updates: dict[str, Any]) -> str | None:
+    # The __abp_escalation_* keys are intentionally NOT declared AgentState
+    # channels: LangGraph passes a node's raw updates to conditional-edge
+    # routers within the same superstep (verified on langgraph 0.3 -> 1.0),
+    # but does not persist undeclared keys — which is exactly the contract
+    # escalation needs (ephemeral, same-superstep routing signal; nothing
+    # stale survives into later steps or turns). Signals that must survive
+    # across supersteps need a declared channel instead — see
+    # _abp_supervisor_iters.
     target = ESCALATION_POLICY["target"]
     threshold = ESCALATION_POLICY["confidence_threshold"]
     if target is None or threshold is None:

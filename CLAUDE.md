@@ -58,7 +58,7 @@ Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/
 
 ### Declared vs. enforced (the recurring theme)
 
-Many blueprint features started as Pydantic models + lint checks with incomplete runtime enforcement; most are now generated: state contracts, approval policies, retry, escalation routing, parallel fan-out/join (with `parallel-branch-conflict` lint), nested subgraphs (compile-time flattening with namespaced ids/state keys and condition remapping, cycle detection), and handoff channel delivery (console/webhook/slack/email; delivery skipped when `ABP_TOOL_MODE != live`). Before adding a new lint or validator, check `models/blueprint.py` model validators — cross-reference validation often already exists there.
+Many blueprint features started as Pydantic models + lint checks with incomplete runtime enforcement; most are now generated: state contracts, approval policies, retry, escalation routing, parallel fan-out/join (with `parallel-branch-conflict` lint), nested subgraphs (compile-time flattening with namespaced ids/state keys and condition remapping, cycle detection), handoff channel delivery (console/webhook/slack/email; delivery skipped when `ABP_TOOL_MODE != live`), and supervisor nodes (dynamic delegation via generated `transfer_to_*` tools + LangGraph `Command`; iteration budget in the injected `_abp_supervisor_iters` state channel; `agent_handoff` trace events). Before adding a new lint or validator, check `models/blueprint.py` model validators — cross-reference validation often already exists there.
 
 ## Gotchas
 

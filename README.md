@@ -43,6 +43,7 @@ ABP is no longer just a YAML-to-code scaffold. It already gives you practical wo
 - sandboxed local runs in a container (docker or podman), declared in the blueprint
 - OpenTelemetry span export to any OTLP backend, declared in the blueprint
 - parallel fan-out/join, nested subgraphs, and human handoff nodes (console/webhook/slack/email)
+- supervisor nodes: dynamic agent-to-agent delegation via generated transfer tools, with a declared worker set and iteration budget
 
 If you want the short version of what is implemented today, why it matters, and how to apply it, start here:
 

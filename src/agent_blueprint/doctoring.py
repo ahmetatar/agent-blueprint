@@ -11,6 +11,7 @@ from agent_blueprint.cli.generate import TargetFramework
 from agent_blueprint.deployers.secrets import collect_required_secrets
 from agent_blueprint.ir.compiler import AgentGraph
 from agent_blueprint.models.blueprint import BlueprintSpec
+from agent_blueprint.models.tools import ToolType
 
 
 class DoctorSeverity(str, Enum):
@@ -139,6 +140,19 @@ def _check_target_compatibility(
     target: TargetFramework,
 ) -> list[DoctorFinding]:
     findings: list[DoctorFinding] = []
+
+    if target == TargetFramework.langgraph:
+        for tool_name, tool in sorted(spec.tools.items()):
+            if tool.type == ToolType.mcp:
+                findings.append(DoctorFinding(
+                    severity=DoctorSeverity.error,
+                    code="target-incompatible-feature",
+                    location=f"tools.{tool_name}",
+                    message=(
+                        f"MCP tool '{tool_name}' is not supported by the langgraph "
+                        "generator yet; generation will fail"
+                    ),
+                ))
 
     if target == TargetFramework.crewai:
         findings.append(DoctorFinding(

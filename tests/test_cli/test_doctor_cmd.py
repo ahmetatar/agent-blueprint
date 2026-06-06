@@ -159,3 +159,45 @@ graph:
         assert result.exit_code == 1
         assert "target-incompatible-feature" in result.output
         assert "multi-node workflows" in result.output
+
+    def test_reports_mcp_tool_as_langgraph_incompatibility(self, tmp_path):
+        blueprint = _write_blueprint(
+            tmp_path,
+            """\
+blueprint:
+  name: "doctor-mcp"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+mcp_servers:
+  fs:
+    transport: stdio
+    command: "npx"
+agents:
+  assistant:
+    model: "openai/gpt-4o"
+    tools: [read_file]
+tools:
+  read_file:
+    type: mcp
+    server: fs
+    tool: read_file
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+""",
+        )
+
+        result = runner.invoke(app, ["doctor", str(blueprint)])
+        assert result.exit_code == 1
+        unwrapped = " ".join(result.output.split())
+        assert "target-incompatible-feature" in unwrapped
+        assert "tools.read_file" in unwrapped
+        assert "not supported by the langgraph" in unwrapped

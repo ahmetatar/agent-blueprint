@@ -2,6 +2,11 @@
 
 Defines MCP (Model Context Protocol) server connections. Tools of type `mcp` reference these by name.
 
+> **Status:** `mcp_servers` and `mcp` tools are validated at the schema level
+> (server references are cross-checked), but **code generation for MCP tools is
+> not implemented yet**. `abp generate` fails with a clear error and `abp doctor`
+> reports a `target-incompatible-feature` finding when a blueprint uses them.
+
 ## Configuration
 
 ```yaml

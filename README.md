@@ -88,6 +88,7 @@ Around the pipeline sits the operational surface — every command is a thin CLI
 | `abp gate` | CI merge gate: runs harness + evals, diffs against a committed baseline, exit 1 on regression |
 | `abp traces` | Persisted trace records; export failures (or goldens) as eval dataset cases — the test flywheel |
 | `abp run` | Generate to a temp dir and execute — optionally inside a docker/podman sandbox with an allowlist-only environment |
+| `abp package` | Package the agent as a pip/pipx-installable command-line tool (console-script entry point) |
 | `abp deploy` | Build a container and ship it to Azure Container Apps, AWS App Runner, GCP Cloud Run, or local Docker/Podman |
 
 Condition expressions (`state.department == 'billing'`) are parsed with a safe AST-based parser — no `eval`, no arbitrary code — and the same parser powers static analysis: route-overlap detection and loop analysis in the linter.
@@ -611,6 +612,7 @@ observability:
 | `abp inspect <file>` | Visualize the graph as a Mermaid diagram |
 | `abp generate <file>` | Generate framework code (`--target`, `--output-dir`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to a temp dir and run (single-shot or REPL; `--sandbox` for containers) |
+| `abp package <file>` | Package as a pip/pipx-installable CLI tool named after the blueprint ([details](docs/cli-packaging.md)) |
 | `abp test <file>` | Run deterministic harness scenarios (`--save-traces failed\|all\|none`) |
 | `abp eval <file>` | Run dataset-driven eval suites (`--suite`, `--output`, `--json`) |
 | `abp gate <file>` | CI merge gate: harness + evals vs. baseline; exit 1 on regression ([details](docs/gate.md)) |

@@ -53,6 +53,7 @@ Around the pipeline sit the operational surfaces, each a thin CLI wrapper (`cli/
 - `gating.py` — `abp gate`: runs harness + eval, diffs against `.abp/gate-baseline.json`, exit 1 on regression (rule: all-green AND no-regression); `--update-baseline` only writes when green.
 - `trace_store.py` — `.abp/traces/` persistence with origin tagging (harness|eval); `abp traces list/export` turns failed/golden traces into eval cases (merge-dedup idempotent; default `--origin harness` prevents export-eval-export loops).
 - `runners/local.py` — `abp run`: generates into a temp dir and executes via subprocess. `runners/sandbox.py` (`--sandbox` / blueprint `run.sandbox`) builds a container image instead and runs `--rm` with an allowlist-only env; engine `auto` probes podman before docker.
+- `packagers/cli.py` — `abp package`: restructures generator output into a src-layout, pipx-installable CLI package (console script named after the blueprint; cross-imports rewritten to relative via a known-module regex; requirements.txt folded into pyproject).
 - `deployers/` — Docker/Podman/AWS App Runner complete; Azure ACI + GCP Cloud Run partial.
 - Observability: top-level `observability.tracing` exports the JSON trace events as OTel spans via an observer registry inside generated `_abp_trace.py` — the JSON manifest stays byte-identical (goldens/harness/gate unaffected). Only hashes are exported, never content. Standard `OTEL_*` env vars win over blueprint values; `ABP_OTEL=off` is the kill switch.
 

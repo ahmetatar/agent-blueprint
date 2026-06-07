@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchBlueprint,
   fetchCurrentTask,
@@ -7,6 +7,7 @@ import {
   type LintFinding,
   type TaskMessage,
   type TaskRecord,
+  type TraceEvent,
 } from "./api";
 import { GraphCanvas } from "./graph/GraphCanvas";
 import { ActionsPane } from "./panel/ActionsPane";
@@ -17,6 +18,9 @@ import { useLiveReload } from "./useLiveReload";
 import "./App.css";
 
 type Tab = "issues" | "source" | "config" | "actions";
+
+/** Live execution state of a canvas node, derived from streamed trace events. */
+export type RunState = "running" | "ok" | "error";
 
 /**
  * Merge an incoming task snapshot over the current one. The POST response
@@ -42,8 +46,38 @@ export default function App() {
   const [sourceDirty, setSourceDirty] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [task, setTask] = useState<TaskRecord | null>(null);
+  // Canvas-id keyed run states; cleared when a task (or a new scenario
+  // within it) starts, kept after task_done so the last run stays visible.
+  const [runStates, setRunStates] = useState<Record<string, RunState>>({});
   const sourceRef = useRef<SourcePaneHandle | null>(null);
   const pendingLine = useRef<number | null>(null);
+
+  // Trace events carry runtime (flattened-graph) node ids — map to canvas ids.
+  const runtimeToCanvas = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const node of info?.graph?.nodes ?? []) {
+      if (node.runtime_id) map.set(node.runtime_id, node.id);
+    }
+    return map;
+  }, [info]);
+  const runtimeToCanvasRef = useRef(runtimeToCanvas);
+  runtimeToCanvasRef.current = runtimeToCanvas;
+
+  const onTraceEvent = useCallback((event: TraceEvent) => {
+    if (event.event === "run_started") {
+      setRunStates({}); // next scenario in the same task starts clean
+      return;
+    }
+    const node = event.node ? runtimeToCanvasRef.current.get(event.node) : undefined;
+    if (node === undefined) return;
+    setRunStates((prev) => {
+      if (prev[node] === "error") return prev; // errors stick
+      if (event.error !== undefined) return { ...prev, [node]: "error" };
+      if (event.event === "node_started") return { ...prev, [node]: "running" };
+      if (event.event === "node_finished") return { ...prev, [node]: "ok" };
+      return prev;
+    });
+  }, []);
 
   const reload = useCallback(() => {
     fetchBlueprint()
@@ -60,18 +94,21 @@ export default function App() {
 
   const onTaskMessage = useCallback(
     (message: TaskMessage) => {
-      if (message.type === "task_progress") {
+      if (message.type === "task_trace") {
+        onTraceEvent(message.event);
+      } else if (message.type === "task_progress") {
         // Append the event; the full record arrives again with task_done.
         setTask((prev) =>
           prev !== null && prev.id === message.task_id && message.event
             ? { ...prev, progress: [...prev.progress, message.event] }
             : prev,
         );
-      } else if (message.task) {
+      } else {
+        if (message.type === "task_started") setRunStates({});
         applyTask(message.task);
       }
     },
-    [applyTask],
+    [applyTask, onTraceEvent],
   );
 
   useEffect(reload, [reload]);
@@ -160,6 +197,7 @@ export default function App() {
               lint={info.lint}
               layout={info.layout}
               hash={info.hash}
+              runStates={runStates}
               onUpdated={setInfo}
               onConflict={reload}
               onSelect={onSelect}

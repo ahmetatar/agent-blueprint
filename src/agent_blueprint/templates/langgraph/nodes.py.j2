@@ -1238,6 +1238,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     clear_current_node()
     return updates
 {% else %}
+    set_current_node("{{ node.id }}")
 {% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
     emit_trace_event(
         "parallel_finished",
@@ -1250,7 +1251,10 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         },
     )
 {% endfor %}
+    emit_trace_event("node_started", node="{{ node.id }}", input_state=state)
     # TODO: Implement action: {{ node.node_def.action or node.id }}
+    emit_trace_event("node_finished", node="{{ node.id }}", input_state=state, output_state={})
+    clear_current_node()
     return {}
 {% endif %}
 

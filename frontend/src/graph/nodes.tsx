@@ -4,6 +4,7 @@ import type { LintFinding, VmNode } from "../api";
 interface NodeData {
   vm: VmNode;
   findings: LintFinding[];
+  runState?: "running" | "ok" | "error";
   [key: string]: unknown;
 }
 
@@ -31,10 +32,13 @@ function LintBadge({ findings }: { findings: LintFinding[] }) {
 
 /** Agent / supervisor / parallel / handoff / function / collapsed-subgraph card. */
 export function BlueprintNode({ data }: NodeProps) {
-  const { vm, findings } = data as NodeData;
+  const { vm, findings, runState } = data as NodeData;
   const accent = ACCENT[vm.type] ?? "#6b7280";
   return (
-    <div className="bp-node" style={{ borderTopColor: accent }}>
+    <div
+      className={`bp-node${runState ? ` bp-node-run-${runState}` : ""}`}
+      style={{ borderTopColor: accent }}
+    >
       <Handle type="target" position={Position.Top} />
       <div className="bp-node-head">
         <span className="bp-node-type" style={{ color: accent }}>

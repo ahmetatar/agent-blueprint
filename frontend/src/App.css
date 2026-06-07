@@ -922,3 +922,28 @@ body,
   font-size: 0.83rem;
   color: #1b6fd8;
 }
+
+/* ---- live execution highlight (E3b) -------------------------------------- */
+
+.bp-node-run-running {
+  box-shadow:
+    0 0 0 2px #1b6fd8,
+    0 0 12px rgba(27, 111, 216, 0.45);
+  animation: node-run-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes node-run-pulse {
+  50% {
+    box-shadow:
+      0 0 0 2px #1b6fd8,
+      0 0 4px rgba(27, 111, 216, 0.15);
+  }
+}
+
+.bp-node-run-ok {
+  box-shadow: 0 0 0 2px #1b7f3b;
+}
+
+.bp-node-run-error {
+  box-shadow: 0 0 0 2px #c0392b;
+}

@@ -13,11 +13,13 @@ the editor.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
+import tempfile
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -168,6 +170,70 @@ class TaskManager:
         self._publish({"type": "task_progress", "task_id": record.id, "event": event})
 
 
+class _TraceStreamTailer:
+    """Tails an `ABP_TRACE_STREAM_FILE` and forwards each JSON-line event.
+
+    The generated project's stream observer appends one JSON object per line
+    (flushed per event), so polling the file and draining complete lines is
+    enough — no inotify required, and it works for sandboxed runs too (the
+    stream file lives on the host).
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        emit: Callable[[dict[str, Any]], None],
+        poll_interval: float = 0.05,
+    ) -> None:
+        self._path = path
+        self._emit = emit
+        self._poll_interval = poll_interval
+        self._stop = threading.Event()
+        self._offset = 0
+        self._thread = threading.Thread(
+            target=self._run, name="abp-editor-trace-tail", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def close(self) -> None:
+        """Stop tailing; drains once more first (callers close after the
+        subprocess has exited, so everything is already on disk)."""
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+    def _run(self) -> None:
+        while True:
+            final = self._stop.is_set()
+            self._drain()
+            if final:
+                break
+            self._stop.wait(self._poll_interval)
+
+    def _drain(self) -> None:
+        try:
+            with open(self._path, "rb") as handle:
+                handle.seek(self._offset)
+                chunk = handle.read()
+        except OSError:
+            return  # not created yet (subprocess still booting)
+        if not chunk:
+            return
+        lines = chunk.split(b"\n")
+        complete, remainder = lines[:-1], lines[-1]
+        self._offset += len(chunk) - len(remainder)
+        for line in complete:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue  # torn or garbled line — never break the task
+            if isinstance(event, dict):
+                self._emit(event)
+
+
 @dataclass
 class _TaskContext:
     manager: TaskManager
@@ -190,6 +256,35 @@ class _TaskContext:
 
     def register_process(self, process: subprocess.Popen[str]) -> None:
         self.manager._register_process(process)
+
+    @contextlib.contextmanager
+    def trace_stream(self, scope: str | None = None) -> Iterator[dict[str, str]]:
+        """Env for a generated-project run whose trace events should reach
+        the UI live: yields `{ABP_TRACE_STREAM_FILE: ...}` and tails that
+        file for the duration, publishing each event as `task_trace`.
+
+        Trace events are deliberately NOT accumulated on the task record —
+        they are ephemeral UI state (node highlights), and a long run could
+        produce thousands of them.
+        """
+        with tempfile.TemporaryDirectory(prefix="abp-editor-stream-") as tmp:
+            path = Path(tmp) / "trace-stream.jsonl"
+            tailer = _TraceStreamTailer(
+                path,
+                lambda event: self.manager._publish(
+                    {
+                        "type": "task_trace",
+                        "task_id": self.record.id,
+                        "scope": scope,
+                        "event": event,
+                    }
+                ),
+            )
+            tailer.start()
+            try:
+                yield {"ABP_TRACE_STREAM_FILE": str(path)}
+            finally:
+                tailer.close()
 
 
 # ---------------------------------------------------------------------------
@@ -342,14 +437,16 @@ def _action_test(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
         if ctx.cancelled:
             break
         ctx.progress("scenario_started", scenario=scenario.id)
-        result = run_harness_scenario(
-            ir,
-            scenario,
-            install=install,
-            trace_store=_trace_store(ctx.blueprint_path),
-            save_traces="failed",
-            process_hook=ctx.register_process,
-        )
+        with ctx.trace_stream(scope=scenario.id) as stream_env:
+            result = run_harness_scenario(
+                ir,
+                scenario,
+                install=install,
+                trace_store=_trace_store(ctx.blueprint_path),
+                save_traces="failed",
+                process_hook=ctx.register_process,
+                extra_env=stream_env,
+            )
         summary = _scenario_summary(result)
         summaries.append(summary)
         ctx.progress("scenario_finished", **summary)
@@ -386,11 +483,13 @@ def _action_run(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
         thread_id=str(ctx.params.get("thread_id", "editor")),
         process_hook=ctx.register_process,
     )
-    captured = runner.run_capture(
-        user_input=user_input,
-        install=install,
-        env_file=env_file if env_file.exists() else None,
-    )
+    with ctx.trace_stream() as stream_env:
+        captured = runner.run_capture(
+            user_input=user_input,
+            install=install,
+            env_file=env_file if env_file.exists() else None,
+            extra_env=stream_env,
+        )
     events = (captured.trace_manifest or {}).get("trace", [])
     return (
         "passed" if captured.returncode == 0 else "failed",
@@ -421,14 +520,16 @@ def _action_gate(ctx: _TaskContext) -> tuple[str, dict[str, Any] | None]:
         if ctx.cancelled:
             return ("cancelled", None)
         ctx.progress("scenario_started", scenario=scenario.id)
-        result = run_harness_scenario(
-            ir,
-            scenario,
-            install=install,
-            trace_store=trace_store,
-            save_traces="failed",
-            process_hook=ctx.register_process,
-        )
+        with ctx.trace_stream(scope=scenario.id) as stream_env:
+            result = run_harness_scenario(
+                ir,
+                scenario,
+                install=install,
+                trace_store=trace_store,
+                save_traces="failed",
+                process_hook=ctx.register_process,
+                extra_env=stream_env,
+            )
         harness_results.append(result)
         ctx.progress("scenario_finished", **_scenario_summary(result))
 
@@ -440,15 +541,17 @@ def _action_gate(ctx: _TaskContext) -> tuple[str, dict[str, Any] | None]:
                 return ("cancelled", None)
             ctx.progress("suite_started", suite=suite.id)
             try:
-                suite_result = run_eval_suite(
-                    ir,
-                    suite,
-                    blueprint_dir=ctx.blueprint_path.parent,
-                    install=install,
-                    trace_store=trace_store,
-                    save_traces="failed",
-                    process_hook=ctx.register_process,
-                )
+                with ctx.trace_stream(scope=suite.id) as stream_env:
+                    suite_result = run_eval_suite(
+                        ir,
+                        suite,
+                        blueprint_dir=ctx.blueprint_path.parent,
+                        install=install,
+                        trace_store=trace_store,
+                        save_traces="failed",
+                        process_hook=ctx.register_process,
+                        extra_env=stream_env,
+                    )
             except BlueprintValidationError as e:
                 raise ActionError(str(e)) from e
             suite_results.append(suite_result)

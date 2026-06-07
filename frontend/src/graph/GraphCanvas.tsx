@@ -27,6 +27,7 @@ import {
   type NodePosition,
   type VmNode,
 } from "../api";
+import type { RunState } from "../App";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { nodeTypes } from "./nodes";
 import { toFlow } from "./toFlow";
@@ -36,6 +37,7 @@ interface Props {
   lint: LintFinding[];
   layout: Record<string, NodePosition>;
   hash: string;
+  runStates: Record<string, RunState>;
   onUpdated: (info: BlueprintInfo) => void;
   onConflict: () => void;
   onSelect: (nodeId: string | null) => void;
@@ -44,7 +46,16 @@ interface Props {
 const SAVE_DEBOUNCE_MS = 400;
 const TOAST_MS = 6000;
 
-export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict, onSelect }: Props) {
+export function GraphCanvas({
+  graph,
+  lint,
+  layout,
+  hash,
+  runStates,
+  onUpdated,
+  onConflict,
+  onSelect,
+}: Props) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -56,6 +67,8 @@ export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict, 
   const saveTimer = useRef<number | undefined>(undefined);
   const hashRef = useRef(hash);
   hashRef.current = hash;
+  const runStatesRef = useRef(runStates);
+  runStatesRef.current = runStates;
 
   const nodeById = useMemo(() => {
     const map = new Map<string, VmNode>();
@@ -67,13 +80,32 @@ export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict, 
     let cancelled = false;
     toFlow(graph, lint, { ...layout, ...localDrags.current }).then((flow) => {
       if (cancelled) return;
-      setNodes(flow.nodes);
+      // Re-apply live run states — a rebuild (live reload, applied op) must
+      // not wipe the highlights of a run in progress.
+      setNodes(
+        flow.nodes.map((node) => ({
+          ...node,
+          data: { ...node.data, runState: runStatesRef.current[node.id] },
+        })),
+      );
       setEdges(flow.edges);
     });
     return () => {
       cancelled = true;
     };
   }, [graph, lint, layout]);
+
+  useEffect(() => {
+    // Live highlight updates: patch only the nodes whose state changed.
+    setNodes((current) =>
+      current.map((node) => {
+        const next = runStates[node.id];
+        return node.data.runState === next
+          ? node
+          : { ...node, data: { ...node.data, runState: next } };
+      }),
+    );
+  }, [runStates]);
 
   useEffect(() => () => window.clearTimeout(saveTimer.current), []);
 

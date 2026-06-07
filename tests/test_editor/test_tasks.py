@@ -418,3 +418,90 @@ def test_local_runner_process_hook_receives_child(
     assert result.stdout.strip() == "hi"
     assert len(captured) == 1
     assert captured[0].poll() == 0
+
+
+# ---------------------------------------------------------------------------
+# Trace streaming (E3b)
+# ---------------------------------------------------------------------------
+
+
+def test_trace_stream_tailer_handles_partial_lines(tmp_path: Path) -> None:
+    path = tmp_path / "stream.jsonl"
+    events: list[dict[str, Any]] = []
+    tailer = tasks_module._TraceStreamTailer(path, events.append, poll_interval=0.01)
+    tailer.start()
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write('{"event": "a"}\n')
+            handle.flush()
+            handle.write('{"event": "b"}\n{"event"')  # torn write: incomplete tail
+            handle.flush()
+        time.sleep(0.1)
+        assert [event["event"] for event in events] == ["a", "b"]
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(': "c"}\n')
+            handle.write("not-json\n")  # garbage must be skipped, not fatal
+            handle.write('{"event": "d"}\n')
+    finally:
+        tailer.close()
+    assert [event["event"] for event in events] == ["a", "b", "c", "d"]
+
+
+def _streaming_run_capture(trace_events: list[dict[str, Any]]):
+    """A fake run_capture that plays the generated stream observer's part:
+    appends JSON lines to the ABP_TRACE_STREAM_FILE handed in via extra_env."""
+
+    def fake(
+        self: LocalRunner,
+        user_input: str | None = None,
+        extra_env: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> LocalRunResult:
+        stream = (extra_env or {}).get("ABP_TRACE_STREAM_FILE")
+        assert stream, "the editor must pass ABP_TRACE_STREAM_FILE to the runner"
+        with open(stream, "a", encoding="utf-8") as handle:
+            for event in trace_events:
+                handle.write(json.dumps(event) + "\n")
+        return LocalRunResult(
+            returncode=0, stdout="ok", stderr="", trace_file=None, trace_manifest={"trace": []}
+        )
+
+    return fake
+
+
+def test_test_action_streams_trace_events(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        LocalRunner,
+        "run_capture",
+        _streaming_run_capture(
+            [
+                {"event": "node_started", "node": "assistant"},
+                {"event": "node_finished", "node": "assistant"},
+            ]
+        ),
+    )
+    record, events = _run_to_completion(harness_blueprint_file, "test", {"scenarios": ["s1"]})
+    assert record.status == "passed"
+    traces = [event for event in events if event["type"] == "task_trace"]
+    assert [trace["event"]["event"] for trace in traces] == ["node_started", "node_finished"]
+    assert all(trace["scope"] == "s1" for trace in traces)
+    assert all(trace["task_id"] == record.id for trace in traces)
+    # Trace events are ephemeral UI state — they must not bloat the record.
+    assert all(item["kind"] != "node_started" for item in record.progress)
+
+
+def test_run_action_streams_trace_events(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        LocalRunner,
+        "run_capture",
+        _streaming_run_capture([{"event": "node_started", "node": "assistant"}]),
+    )
+    record, events = _run_to_completion(blueprint_file, "run", {"input": "hi", "install": False})
+    assert record.status == "passed"
+    traces = [event for event in events if event["type"] == "task_trace"]
+    assert len(traces) == 1
+    assert traces[0]["scope"] is None

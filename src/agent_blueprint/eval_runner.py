@@ -83,6 +83,7 @@ def run_eval_suites(
     trace_store: Path | None = None,
     save_traces: str = "all",
     process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> EvalRunResult:
     results = [
         run_eval_suite(
@@ -93,6 +94,7 @@ def run_eval_suites(
             trace_store=trace_store,
             save_traces=save_traces,
             process_hook=process_hook,
+            extra_env=extra_env,
         )
         for suite in suites
     ]
@@ -113,6 +115,7 @@ def run_eval_suite(
     trace_store: Path | None = None,
     save_traces: str = "all",
     process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> EvalSuiteResult:
     cases = load_eval_dataset(suite.dataset, blueprint_dir=blueprint_dir)
     effective_ir = replace(ir, harness=ir.harness or HarnessDef())
@@ -127,6 +130,7 @@ def run_eval_suite(
             save_traces=save_traces,
             origin="eval",
             process_hook=process_hook,
+            extra_env=extra_env,
         )
         case_results.append(_evaluate_case_result(suite, case, scenario_result))
 

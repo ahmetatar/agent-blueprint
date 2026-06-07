@@ -2,10 +2,11 @@
 
 Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), all of
 E2 (E2a: editable source pane + layout sidecar; E2b: canvas ops;
-E2c: schema-driven config forms), and E3a (action buttons: background task
-runner with cancel, scenario picker, per-scenario progress over WS) shipped;
-E3b (live trace stream + node highlight) and E3c (deploy behind confirm,
-docker/podman only) remain. User-facing docs: [editor.md](editor.md).
+E2c: schema-driven config forms), E3a (action buttons: background task
+runner with cancel, scenario picker, per-scenario progress over WS), and
+E3b (live trace stream + canvas node highlight) shipped; E3c (deploy behind
+confirm, docker/podman only) remains. User-facing docs:
+[editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).
@@ -199,14 +200,22 @@ Split into a 3-PR series (June 2026, user-approved), mirroring E2:
   gate/update-baseline (confirm-gated), live progress, per-action results,
   Cancel. One-shot run only (REPL stays CLI-only); blueprints with
   `run.sandbox.enabled` are refused rather than silently run unsandboxed.
-- **E3b — live trace stream + node highlight.** The observer registry lives
-  in the *generated* process, and the runner executes it as a subprocess —
-  so node-level events need a bridge: an env-activated stream observer in
-  `_abp_trace.py.j2` (`ABP_TRACE_STREAM_FILE` → one JSON line per event,
-  flushed) that the editor tails and forwards over WS as `task_trace`.
-  The JSON manifest stays byte-identical (PR #16 guarantee); works under
-  the sandbox too (the tempdir is mounted). Canvas nodes highlight on
-  `node_started`/`node_finished`; failed assertions pin to nodes.
+- **E3b — live trace stream + node highlight (SHIPPED).** The observer
+  registry lives in the *generated* process, and the runner executes it as
+  a subprocess — so node-level events need a bridge: an env-activated
+  stream observer in `_abp_trace.py.j2` (`ABP_TRACE_STREAM_FILE` → one JSON
+  line per event, flushed) that the editor tails (`_TraceStreamTailer`,
+  polling with torn-line handling) and forwards over WS as `task_trace`.
+  The JSON manifest stays byte-identical (PR #16 guarantee), hashes only.
+  Canvas nodes highlight on `node_started`/`node_finished` (blue pulse →
+  green ring; error events → red, sticky); the view-model exposes
+  `runtime_id` (the compiler's `__` namespacing chain) so flattened-graph
+  event ids map back to canvas nodes incl. subgraph children. Found &
+  fixed along the way: plain function nodes emitted NO node_started/
+  node_finished at all — a pre-existing trace-coverage gap that also
+  affected `expected.route` assertions on function nodes. Scope cut:
+  pinning failed *assertions* (route/state mismatches) to specific nodes
+  needs a failure→node mapping model — deferred to E3c as a candidate.
 - **E3c — deploy (docker/podman only) behind an explicit confirm.** Cloud
   deployers stay CLI-only for now (credential/region forms are too heavy
   for editor v1).

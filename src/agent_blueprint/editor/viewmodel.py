@@ -154,6 +154,10 @@ class _Builder:
             "description": node_def.description,
             # Ops scope: which YAML graph this node lives in.
             "graph_ref": graph_ref,
+            # The node's id in the *flattened* runtime graph — trace events
+            # carry this. Canvas vids join the nesting chain with ":"; the
+            # compiler's _namespace_id joins the same chain with "__".
+            "runtime_id": vid.replace(":", "__"),
             # Effective field values (defaults filled in) for the config form.
             "config": node_def.model_dump(mode="json"),
         }

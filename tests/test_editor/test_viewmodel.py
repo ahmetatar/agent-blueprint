@@ -319,3 +319,11 @@ def test_nodes_carry_config_payloads_for_forms(vm_builder) -> None:
     assert vm["tools"] == ["lookup"]
     # Terminals are synthetic and carry no config.
     assert "config" not in _node(vm, START_ID)
+
+
+def test_nodes_carry_runtime_ids_for_trace_mapping(vm_builder) -> None:
+    # Trace events carry flattened-graph ids; the canvas maps them back via
+    # runtime_id, which mirrors the compiler's "__" namespacing chain.
+    vm = vm_builder(_PARALLEL_SUBGRAPH)
+    assert _node(vm, "fan")["runtime_id"] == "fan"
+    assert _node(vm, "finish:polish")["runtime_id"] == "finish__polish"

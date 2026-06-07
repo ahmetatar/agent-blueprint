@@ -422,6 +422,7 @@ def test_blueprint_endpoint_actions_surface(blueprint_file: Path, tmp_path: Path
         "eval_suites": [],
         "has_gate_baseline": False,
         "sandbox": False,
+        "deploy_platform": None,
     }
 
 

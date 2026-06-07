@@ -947,3 +947,25 @@ body,
 .bp-node-run-error {
   box-shadow: 0 0 0 2px #c0392b;
 }
+
+/* ---- deploy form (E3c) ---------------------------------------------------- */
+
+.engine-picker {
+  display: flex;
+  gap: 1rem;
+}
+
+.deploy-note {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.deploy-url {
+  margin: 0;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.progress-warn {
+  color: #c77700;
+}

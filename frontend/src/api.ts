@@ -69,6 +69,7 @@ export interface ActionSurface {
   eval_suites: string[];
   has_gate_baseline: boolean;
   sandbox: boolean;
+  deploy_platform: string | null; // blueprint deploy.platform — cloud values stay CLI-only
 }
 
 export interface BlueprintInfo {
@@ -196,7 +197,7 @@ export async function saveLayout(positions: Record<string, NodePosition>): Promi
 
 // Background action tasks (POST /api/actions/{action}) — mirror editor/tasks.py.
 
-export type TaskAction = "test" | "run" | "gate" | "generate" | "doctor";
+export type TaskAction = "test" | "run" | "gate" | "generate" | "doctor" | "deploy";
 export type TaskStatus = "running" | "passed" | "failed" | "error" | "cancelled";
 
 export interface TaskProgressEvent {

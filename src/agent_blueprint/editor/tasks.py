@@ -48,7 +48,11 @@ from agent_blueprint.models.run import SandboxConfig
 from agent_blueprint.runners.local import LocalRunner
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
-ACTIONS = ("test", "run", "gate", "generate", "doctor")
+ACTIONS = ("test", "run", "gate", "generate", "doctor", "deploy")
+
+# The editor only deploys to local container runtimes; cloud deployers need
+# credential/region forms and stay CLI-only.
+_DEPLOY_ENGINES = ("docker", "podman")
 
 
 class TaskBusyError(Exception):
@@ -334,6 +338,9 @@ def action_surface(spec: BlueprintSpec, blueprint_path: Path) -> dict[str, Any]:
             blueprint_path.parent / ".abp" / "gate-baseline.json"
         ).exists(),
         "sandbox": bool(spec.run and spec.run.sandbox and spec.run.sandbox.enabled),
+        # Pre-select the deploy engine when the blueprint names a local one;
+        # a cloud platform here stays CLI-only (the UI says so).
+        "deploy_platform": spec.deploy.platform if spec.deploy else None,
     }
     try:
         ir = compile_blueprint(spec)
@@ -632,10 +639,89 @@ def _action_gate(ctx: _TaskContext) -> tuple[str, dict[str, Any] | None]:
     )
 
 
+def _action_deploy(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
+    spec, ir = _load_compiled(ctx.blueprint_path)
+    engine = ctx.params.get("engine")
+    if engine not in _DEPLOY_ENGINES:
+        raise ActionError(
+            f"deploy engine must be one of: {', '.join(_DEPLOY_ENGINES)} — "
+            "cloud platforms (azure/aws/gcp) deploy via `abp deploy`"
+        )
+    image_tag = str(ctx.params.get("image_tag", "latest"))
+
+    from agent_blueprint.deployers.docker import DockerDeployer, PodmanDeployer
+    from agent_blueprint.deployers.packager import DeployPackager
+    from agent_blueprint.deployers.secrets import collect_required_secrets, resolve_secrets
+    from agent_blueprint.models.deploy import DockerDeployConfig
+
+    config = getattr(spec.deploy, engine, None) if spec.deploy else None
+    if config is None:
+        config = DockerDeployConfig()  # same fallback the CLI applies
+    deployer = (DockerDeployer if engine == "docker" else PodmanDeployer)(
+        config, spec.blueprint.name
+    )
+
+    issues = deployer.check_prerequisites()
+    if issues:
+        raise ActionError("prerequisites not met: " + "; ".join(issues))
+
+    required = collect_required_secrets(spec)
+    secrets, missing = resolve_secrets(required)
+    if missing:
+        # Names only — secret values never reach the task record or the UI.
+        ctx.progress("secrets_missing", names=sorted(missing))
+
+    def hook(process: subprocess.Popen[str]) -> None:
+        ctx.register_process(process)
+        args = process.args
+        rendered = " ".join(str(part) for part in args) if isinstance(args, list) else str(args)
+        ctx.progress("deploy_cmd", cmd=rendered)
+
+    deployer.process_hook = hook
+
+    from agent_blueprint.generators.langgraph import LangGraphGenerator
+
+    try:
+        files = LangGraphGenerator().generate(ir)
+    except GeneratorError as e:
+        raise ActionError(str(e)) from e
+    with tempfile.TemporaryDirectory(prefix="abp-editor-deploy-") as tmp:
+        code_dir = Path(tmp)
+        for filename, content in files.items():
+            dest = code_dir / filename
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+        DeployPackager().package(code_dir, ir)
+        try:
+            result = deployer.deploy(code_dir, secrets, image_tag=image_tag)
+        except subprocess.CalledProcessError as e:
+            command = " ".join(str(part) for part in e.cmd)
+            return (
+                "failed",
+                {
+                    "engine": engine,
+                    "message": f"command failed (exit {e.returncode}): {command}",
+                    "missing_secrets": sorted(missing),
+                },
+            )
+
+    return (
+        "passed" if result.success else "failed",
+        {
+            "engine": engine,
+            "url": result.url,
+            "message": result.message,
+            "image_tag": image_tag,
+            "missing_secrets": sorted(missing),
+        },
+    )
+
+
 _HANDLERS: dict[str, Callable[[_TaskContext], tuple[str, dict[str, Any] | None]]] = {
     "doctor": _action_doctor,
     "generate": _action_generate,
     "test": _action_test,
     "run": _action_run,
     "gate": _action_gate,
+    "deploy": _action_deploy,
 }

@@ -8,6 +8,15 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E3c): confirm-gated Deploy — build the agent image and
+  start it as a local container (docker or podman) from the Actions tab,
+  mirroring `abp deploy`'s flow (generate → deploy packager → secrets from
+  the editor's environment → container deployer). Each container command
+  streams into the progress view; Cancel terminates a running build (new
+  optional `process_hook` on `BaseDeployer`). Cloud platforms (azure/aws/gcp)
+  stay CLI-only; missing secrets are reported by name only, values never
+  reach the browser. `GET /api/blueprint`'s action surface gained
+  `deploy_platform`
 - `abp editor` (phase E3b): live execution view — while a Test / Run / Gate
   task executes, canvas nodes pulse blue as they run and keep a green
   (finished) or red (error event) ring afterwards, including nodes inside

@@ -81,11 +81,16 @@ export async function toFlow(
     target: edge.target,
     label: edge.label ?? undefined,
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    // Only edges that exist in the YAML (`ref` present) are selectable and
-    // deletable; synthetic edges (entry/supervisor/parallel) are display-only.
+    // Only edges that exist in the YAML (`ref` present) are selectable,
+    // deletable, and reconnectable; synthetic edges (entry/supervisor/
+    // parallel) are display-only.
     data: { ref: edge.ref ?? null },
     selectable: Boolean(edge.ref),
     deletable: Boolean(edge.ref),
+    reconnectable: Boolean(edge.ref),
+    // The default hit area is the 1-2px path itself — selecting an edge was
+    // nearly impossible. This widens the invisible interaction zone.
+    interactionWidth: 24,
     ...EDGE_STYLE[edge.kind],
   }));
 

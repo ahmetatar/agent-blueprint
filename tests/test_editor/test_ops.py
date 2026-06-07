@@ -407,3 +407,90 @@ def test_unset_field_missing_key_is_noop(tmp_path: Path) -> None:
 def test_unset_field_list_element_rejected(tmp_path: Path) -> None:
     with pytest.raises(OpError, match="list element"):
         _apply(_FIXTURE, [{"op": "unset_field", "path": "graph.edges[0]"}], tmp_path)
+
+
+# -- retarget_edge (E4a) -------------------------------------------------------
+
+
+def test_retarget_scalar_to(tmp_path: Path) -> None:
+    result = _apply(
+        _FIXTURE,
+        [{"op": "retarget_edge", "from_node": "worker", "target": "END", "new_target": "router"}],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace(
+        "    - from: worker\n      to: END\n",
+        "    - from: worker\n      to: router\n",
+    )
+
+
+def test_retarget_conditional_item_in_place(tmp_path: Path) -> None:
+    # The conditional entry keeps its list position, its condition, and the
+    # comments around it — only the target value changes.
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "retarget_edge",
+                "from_node": "router",
+                "target": "worker",
+                "condition": "state.route == 'worker'",
+                "new_target": "END",
+            }
+        ],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace(
+        "          target: worker\n",
+        "          target: END\n",
+    )
+
+
+def test_retarget_default_shorthand(tmp_path: Path) -> None:
+    result = _apply(
+        _FIXTURE,
+        [{"op": "retarget_edge", "from_node": "router", "target": "END", "new_target": "worker"}],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace("        - default: END\n", "        - default: worker\n")
+
+
+def test_retarget_duplicate_is_rejected(tmp_path: Path) -> None:
+    # Retargeting the default entry onto an unconditional duplicate of an
+    # existing (target, condition) pair must be refused.
+    source = _FIXTURE.replace(
+        "        - default: END\n",
+        "        - target: archive\n        - default: END\n",
+    ).replace(
+        "    worker:  # the workhorse\n",
+        "    worker:  # the workhorse\n      agent: worker\n    archive:\n",
+    )
+    with pytest.raises(OpError, match="already exists"):
+        _apply(
+            source,
+            [
+                {
+                    "op": "retarget_edge",
+                    "from_node": "router",
+                    "target": "END",
+                    "new_target": "archive",
+                }
+            ],
+            tmp_path,
+        )
+
+
+def test_retarget_missing_edge_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(OpError, match="not found"):
+        _apply(
+            _FIXTURE,
+            [
+                {
+                    "op": "retarget_edge",
+                    "from_node": "router",
+                    "target": "nope",
+                    "new_target": "worker",
+                }
+            ],
+            tmp_path,
+        )

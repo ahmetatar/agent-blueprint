@@ -232,6 +232,74 @@ Split into a 3-PR series (June 2026, user-approved), mirroring E2:
 Each phase is independently shippable and lands as its own PR (or small PR series),
 per the repo's no-mixed-PRs rule.
 
+## 6.1 Phase ladder 2 — depth (E4–E7, June 2026)
+
+User feedback after E3 (June 2026): the editor only surfaces a shallow slice
+of what ABP can do. Three concrete complaints anchored this ladder: (1) edge
+management on the canvas is undiscoverable/incomplete, (2) the trace story
+ends at node highlights — no trace browser, no Grafana path, (3) runs give
+no state/session visibility (every editor Run starts a fresh session because
+the runner is a one-shot subprocess with an in-memory checkpointer — and the
+UI never says so).
+
+Standing rule (user directive, June 2026): editor work that needs changes to
+ABP **core** (anything under `src/agent_blueprint/` outside `editor/`, incl.
+templates) requires explicit user approval *before* the change is made.
+`editor/` and `frontend/` are free.
+
+### Phase E4 — canvas/edge depth (priority 1, mostly UX repair)
+- **E4.1** Edge interaction repair: wide hit area (`interactionWidth`),
+  visible selected-edge style, a delete affordance on selection + shortcut
+  hint. Half discoverability bug-fix: deletion has existed since E2b.
+- **E4.2** Edge reconnect: drag an endpoint to a new node (React Flow
+  `onReconnect`). In-place retarget op (preserves list position — order is
+  routing semantics for overlapping conditions — and comments).
+- **E4.3** Edge config popover: edit condition / default flag on the canvas,
+  validated live by the expression parser.
+- **E4.4** Condition autocomplete from declared state fields.
+- **E4.5** Node palette: all node types (handoff/parallel/subgraph/
+  supervisor too); wire supervisor workers / parallel branches by drawing.
+- **E4.6** Undo/redo: ops are already discrete mutations — an op journal
+  with inverse ops.
+
+### Phase E5 — sessions & state (priority 2, highest impact)
+- **E5.1** Chat session: a *persistent* runner process (the generated REPL
+  kept alive via Popen, stdio bridged over WS) so the conversation actually
+  continues; message history panel, active `thread_id`, "New session".
+- **E5.2** Immediate honesty stop-gap: label one-shot runs as such ("every
+  Run starts a fresh session") until E5.1 lands.
+- **E5.3** State inspector: show `final_state` after a run (already in the
+  trace manifest); per-node last-update view.
+- **E5.4** Step-level state diffs: needs opt-in content capture
+  (`ABP_TRACE_CONTENT`-style mode; default stays hashes-only) — core/template
+  change, needs approval.
+- **E5.5** Durable checkpoints (sqlite) + thread browser: continue/reset
+  sessions across editor restarts — core change, needs approval.
+
+### Phase E6 — observability suite (priority 3; runtime is ready, editor isn't)
+- **E6.1** Traces tab: browse `.abp/traces/` (origin/status filters), open a
+  record → event timeline + replay the run onto the canvas highlights.
+- **E6.2** Run timeline: per-node duration gantt, token usage and cost
+  (`NODE_PRICING` + `on_llm_usage` already exist in generated code).
+- **E6.3** Grafana path: `observability.tracing` config form, one-click OTLP
+  endpoint test, ready-made otel-collector + Tempo + Grafana compose snippet.
+- **E6.4** Live budget meter during runs; warn near `policies.budgets` limits.
+- **E6.5** Trace → eval flywheel in the UI (`abp traces export` as a button,
+  incl. `--golden`).
+
+### Phase E7 — blueprint coverage (continuous, mechanical)
+- **E7.1** Top-level config panels via the existing schema-form resolver:
+  state fields/contracts, policies, approvals, artifacts, harness defaults,
+  evals, observability, run.sandbox, deploy.
+- **E7.2** Tool library: define/edit tools (incl. API auth), usage view, MCP
+  status.
+- **E7.3** Scenario recorder: save a finished run as a harness scenario
+  (input + route/tools expectations from its trace).
+- **E7.4** Eval/gate panel: suite results table, score trend, baseline diff.
+
+Horizon (noted, not scheduled): blueprint copilot (LLM assistant editing the
+blueprint through ops), multi-blueprint workspace, example gallery.
+
 ## 7. Risks & honest costs
 
 - **Maintenance weight.** The repo is ~6k lines of Python with one maintainer; a frontend

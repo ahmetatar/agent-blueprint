@@ -7,6 +7,7 @@ import {
   MiniMap,
   Panel,
   ReactFlow,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -173,6 +174,55 @@ export function GraphCanvas({
     [opEndpoint, submitOps],
   );
 
+  // Drag an edge endpoint to a different node. Moving the target end is an
+  // in-place retarget (keeps the entry's position in the `to` list — order
+  // is routing semantics for overlapping conditions — plus its comments);
+  // moving the source end relocates the entry to another edge's list.
+  const onReconnect = useCallback(
+    (oldEdge: Edge, connection: Connection) => {
+      const ref = (oldEdge.data?.ref ?? null) as EdgeRef | null;
+      if (!ref) return;
+      const src = opEndpoint(connection.source);
+      const tgt = opEndpoint(connection.target);
+      if (!src || !tgt) return;
+      if (src.graph !== ref.graph || tgt.graph !== ref.graph) {
+        setToast("Edges cannot cross a subgraph boundary");
+        return;
+      }
+      if (src.node === ref.from && tgt.node === ref.target) return; // dropped in place
+      if (src.node === ref.from) {
+        submitOps([
+          {
+            op: "retarget_edge",
+            graph: ref.graph,
+            from_node: ref.from,
+            target: ref.target,
+            condition: ref.condition,
+            new_target: tgt.node,
+          },
+        ]);
+      } else {
+        submitOps([
+          {
+            op: "remove_edge",
+            graph: ref.graph,
+            from_node: ref.from,
+            target: ref.target,
+            condition: ref.condition,
+          },
+          {
+            op: "add_edge",
+            graph: ref.graph,
+            from_node: src.node,
+            target: ref.target,
+            condition: ref.condition,
+          },
+        ]);
+      }
+    },
+    [opEndpoint, submitOps],
+  );
+
   const persistPositions = useCallback((current: Node[]) => {
     const positions: Record<string, NodePosition> = {};
     for (const node of current) {
@@ -210,8 +260,14 @@ export function GraphCanvas({
     setEdges((current) => applyEdgeChanges(kept, current));
   }, []);
 
+  const [selection, setSelection] = useState<{ nodes: Node[]; edges: Edge[] }>({
+    nodes: [],
+    edges: [],
+  });
+
   const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    ({ nodes: selectedNodes, edges: selectedEdges }: { nodes: Node[]; edges: Edge[] }) => {
+      setSelection({ nodes: selectedNodes, edges: selectedEdges });
       onSelect(selectedNodes.length === 1 ? selectedNodes[0].id : null);
     },
     [onSelect],
@@ -273,6 +329,7 @@ export function GraphCanvas({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onReconnect={onReconnect}
       onDelete={onDelete}
       onSelectionChange={onSelectionChange}
       isValidConnection={isValidConnection}
@@ -290,6 +347,7 @@ export function GraphCanvas({
           + Node
         </button>
       </Panel>
+      <SelectionToolbar selection={selection} />
       {toast !== null && (
         <Panel position="top-center">
           <div className="canvas-toast">
@@ -312,5 +370,43 @@ export function GraphCanvas({
         />
       )}
     </ReactFlow>
+  );
+}
+
+/** Floating delete affordance for the current selection — the keyboard
+ * shortcut existed since E2b but was undiscoverable. `deleteElements` routes
+ * through the same onDelete → ops path as Backspace. */
+function SelectionToolbar({ selection }: { selection: { nodes: Node[]; edges: Edge[] } }) {
+  const { deleteElements } = useReactFlow();
+  const nodes = selection.nodes.filter((node) => node.deletable !== false);
+  const edges = selection.edges.filter((edge) => edge.deletable !== false);
+  const count = nodes.length + edges.length;
+  if (count === 0) return null;
+
+  let label: string;
+  if (count === 1 && edges.length === 1) {
+    const ref = (edges[0].data?.ref ?? null) as EdgeRef | null;
+    label = ref
+      ? `edge ${ref.from} → ${ref.target}`
+      : `edge ${edges[0].source} → ${edges[0].target}`;
+  } else if (count === 1 && nodes.length === 1) {
+    label = `node ${nodes[0].id}`;
+  } else {
+    label = `${count} selected`;
+  }
+  return (
+    <Panel position="top-center">
+      <div className="selection-toolbar">
+        <span className="selection-label">{label}</span>
+        <button
+          type="button"
+          className="selection-delete"
+          title="Delete selection (Backspace)"
+          onClick={() => void deleteElements({ nodes, edges })}
+        >
+          Delete ⌫
+        </button>
+      </div>
+    </Panel>
   );
 }

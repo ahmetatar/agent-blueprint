@@ -8,6 +8,15 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E4a): edge interaction repair — edges now have a
+  generous click target and a clearly visible selected state, selecting one
+  shows a floating toolbar (`edge router → worker` + Delete button, so the
+  Backspace shortcut that existed since E2b is finally discoverable), and
+  edge endpoints can be dragged onto another node to reconnect. Moving the
+  target end retargets the entry in place via a new `retarget_edge` op —
+  keeping its position in the `to:` list (evaluation order is routing
+  semantics for overlapping conditions), its condition, and its comments;
+  moving the source end relocates the entry to the new source's edge
 - `abp editor` (phase E3c): confirm-gated Deploy — build the agent image and
   start it as a local container (docker or podman) from the Actions tab,
   mirroring `abp deploy`'s flow (generate → deploy packager → secrets from

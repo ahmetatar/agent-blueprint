@@ -1,13 +1,14 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E3b — editing, action buttons, live execution view.**
+> **Status: phase E3 complete — editing, actions, live execution, deploy.**
 > The editor renders the blueprint as a live graph with validation/lint
 > diagnostics; the YAML source is editable in place, nodes/edges can be
 > added and removed on the canvas, node config (and the linked agent) is
 > editable through schema-driven forms, and node positions persist across
 > sessions. The Actions tab runs `abp test` / `run` / `gate` / `generate` /
-> `doctor` in the background with live progress, and canvas nodes light up
-> as the run executes them. Deploy from the editor (E3c) comes next. See
+> `doctor` in the background with live progress, canvas nodes light up as
+> the run executes them, and a confirm-gated Deploy builds and starts the
+> agent as a local container (docker/podman). See
 > [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
@@ -109,6 +110,17 @@ instead of the terminal:
 - **Generate** — writes the generated project next to the blueprint
   (`<name>-langgraph/`) and lists the files.
 - **Doctor** — pre-generation diagnostics, rendered like the Issues panel.
+- **Deploy…** — builds the agent image and starts it as a **local container**
+  (docker or podman; the blueprint's `deploy.platform` pre-selects the
+  engine when it names a local one). Deploy is outward-facing, so it always
+  sits behind an explicit confirmation; each container command shows up in
+  the progress view as it runs, and the result links the
+  `http://localhost:<port>` endpoint. Cloud platforms (azure/aws/gcp) stay
+  CLI-only — `abp deploy` — because credential/region forms are out of the
+  editor's scope; if the blueprint targets one, the editor says so and
+  offers the local-container deploy instead. Secrets are injected from the
+  editor process's environment; missing ones are reported **by name only**
+  (values never reach the browser).
 
 One task runs at a time; starting a second is refused (`409`). A running
 task shows a **Cancel** button — cancelling terminates the underlying
@@ -149,8 +161,8 @@ back to canvas nodes).
   ruamel mutations; `409` when `base_hash` is stale, `422` when an op cannot
   apply or the result fails validation (nothing written)
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
-- `POST /api/actions/{test,run,gate,generate,doctor}` — start a background
-  action task; `409` when one is already running
+- `POST /api/actions/{test,run,gate,generate,doctor,deploy}` — start a
+  background action task; `409` when one is already running
 - `GET /api/tasks/current` — the running (or last finished) task, including
   accumulated progress — lets a reloaded tab resync
 - `POST /api/tasks/current/cancel` — cancel the running task (terminates the

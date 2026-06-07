@@ -3,6 +3,7 @@
 import shlex
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,10 @@ class DeployResult:
 
 class BaseDeployer(ABC):
     """Abstract base class for all cloud deployers."""
+
+    #: Called with each child process right after spawn — lets a caller
+    #: (e.g. the editor's task runner) terminate a long build on cancel.
+    process_hook: Callable[[subprocess.Popen[str]], None] | None = None
 
     @abstractmethod
     def check_prerequisites(self) -> list[str]:
@@ -54,13 +59,29 @@ class BaseDeployer(ABC):
         print(f"  $ {shlex.join(cmd)}")
         if dry_run:
             return None
-        return subprocess.run(
+        if self.process_hook is None:
+            return subprocess.run(
+                cmd,
+                check=True,
+                capture_output=capture,
+                text=True,
+                input=input,
+            )
+        # Popen (rather than subprocess.run) so the process handle can be
+        # exposed via process_hook before we block — same check=True
+        # semantics as above.
+        proc = subprocess.Popen(
             cmd,
-            check=True,
-            capture_output=capture,
+            stdin=subprocess.PIPE if input is not None else None,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
             text=True,
-            input=input,
         )
+        self.process_hook(proc)
+        stdout, stderr = proc.communicate(input=input)
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, cmd, stdout, stderr)
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
     def _probe(self, cmd: list[str]) -> bool:
         """Return True if command exits with code 0."""

@@ -1,12 +1,12 @@
 # `abp editor` — Visual Blueprint Editor (Plan)
 
-Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), all of
-E2 (E2a: editable source pane + layout sidecar; E2b: canvas ops;
-E2c: schema-driven config forms), E3a (action buttons: background task
-runner with cancel, scenario picker, per-scenario progress over WS), and
-E3b (live trace stream + canvas node highlight) shipped; E3c (deploy behind
-confirm, docker/podman only) remains. User-facing docs:
-[editor.md](editor.md).
+Status: **ALL PLANNED PHASES SHIPPED** — E0 (skeleton), E1 (read-only
+visualizer), E2 (E2a: editable source pane + layout sidecar; E2b: canvas
+ops; E2c: schema-driven config forms), and E3 (E3a: action buttons —
+background task runner with cancel, scenario picker, per-scenario progress
+over WS; E3b: live trace stream + canvas node highlight; E3c: confirm-gated
+local-container deploy). Candidate follow-ups live in §6 under E3c.
+User-facing docs: [editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).
@@ -216,9 +216,18 @@ Split into a 3-PR series (June 2026, user-approved), mirroring E2:
   affected `expected.route` assertions on function nodes. Scope cut:
   pinning failed *assertions* (route/state mismatches) to specific nodes
   needs a failure→node mapping model — deferred to E3c as a candidate.
-- **E3c — deploy (docker/podman only) behind an explicit confirm.** Cloud
-  deployers stay CLI-only for now (credential/region forms are too heavy
-  for editor v1).
+- **E3c — deploy (docker/podman only) behind an explicit confirm (SHIPPED).**
+  `_action_deploy` mirrors the CLI's flow (generate → `DeployPackager` →
+  secrets from the editor's env → container deployer) but accepts only
+  local engines; cloud platforms stay CLI-only (credential/region forms are
+  too heavy for editor v1 — the UI says so when `deploy.platform` names
+  one). `BaseDeployer` gained an optional `process_hook` (same pattern as
+  `LocalRunner`'s) so Cancel terminates a long `docker build`, and the hook
+  doubles as per-command progress (`deploy_cmd` events). Missing secrets
+  are reported by name only — values never reach the task record or the
+  browser. Candidate follow-ups (not scheduled): pinning failed harness
+  assertions to specific nodes (needs a failure→node mapping model), an
+  "open an example" gallery once the examples ladder lands.
 
 Each phase is independently shippable and lands as its own PR (or small PR series),
 per the repo's no-mixed-PRs rule.

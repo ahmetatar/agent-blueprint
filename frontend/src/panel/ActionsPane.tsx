@@ -22,14 +22,18 @@ const ACTION_LABELS: Record<TaskAction, string> = {
   gate: "Gate",
   generate: "Generate",
   doctor: "Doctor",
+  deploy: "Deploy",
 };
+
+const LOCAL_ENGINES = ["docker", "podman"];
 
 /** Action buttons + live progress + result view for background tasks (E3a). */
 export function ActionsPane({ surface, valid, task, onTask }: Props) {
   // Which action's parameter form is open (test → scenario picker, run → input).
-  const [armed, setArmed] = useState<"test" | "run" | null>(null);
+  const [armed, setArmed] = useState<"test" | "run" | "deploy" | null>(null);
   const [pickedScenarios, setPickedScenarios] = useState<string[] | null>(null);
   const [runInput, setRunInput] = useState("");
+  const [engine, setEngine] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
   const running = task !== null && task.status === "running";
@@ -55,6 +59,12 @@ export function ActionsPane({ surface, valid, task, onTask }: Props) {
   const scenarios = surface?.scenarios ?? [];
   const canGate = scenarios.length > 0 || (surface?.eval_suites.length ?? 0) > 0;
   const picked = pickedScenarios ?? scenarios;
+  const blueprintPlatform = surface?.deploy_platform ?? null;
+  const cloudPlatform =
+    blueprintPlatform !== null && !LOCAL_ENGINES.includes(blueprintPlatform);
+  // Pre-select the blueprint's engine when it's a local one.
+  const pickedEngine =
+    engine ?? (blueprintPlatform !== null && !cloudPlatform ? blueprintPlatform : "docker");
 
   return (
     <div className="actions-pane">
@@ -127,6 +137,20 @@ export function ActionsPane({ surface, valid, task, onTask }: Props) {
         >
           Doctor
         </button>
+        <button
+          type="button"
+          className="action-button"
+          disabled={running}
+          title={
+            cloudPlatform
+              ? `Blueprint targets ${blueprintPlatform} — cloud deploys stay in the CLI; ` +
+                "this deploys to a local container instead"
+              : "Build and run the agent as a local container"
+          }
+          onClick={() => setArmed(armed === "deploy" ? null : "deploy")}
+        >
+          Deploy…
+        </button>
         {running && (
           <button
             type="button"
@@ -194,6 +218,46 @@ export function ActionsPane({ surface, valid, task, onTask }: Props) {
         </form>
       )}
 
+      {armed === "deploy" && (
+        <form
+          className="action-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            // Deploy is outward-facing — always behind an explicit confirm.
+            if (
+              window.confirm(
+                `Build the agent image and start it as a local ${pickedEngine} container?`,
+              )
+            ) {
+              start("deploy", { engine: pickedEngine });
+            }
+          }}
+        >
+          {cloudPlatform && (
+            <p className="deploy-note muted">
+              This blueprint targets <code>{blueprintPlatform}</code> — cloud deploys stay in
+              the CLI (<code>abp deploy</code>). The editor deploys a local container only.
+            </p>
+          )}
+          <div className="engine-picker">
+            {LOCAL_ENGINES.map((id) => (
+              <label key={id} className="scenario-option">
+                <input
+                  type="radio"
+                  name="deploy-engine"
+                  checked={pickedEngine === id}
+                  onChange={() => setEngine(id)}
+                />
+                {id}
+              </label>
+            ))}
+          </div>
+          <button type="submit" className="action-button">
+            Deploy with {pickedEngine}
+          </button>
+        </form>
+      )}
+
       {startError && <p className="action-start-error">{startError}</p>}
 
       {task && <TaskView task={task} />}
@@ -227,6 +291,20 @@ function TaskView({ task }: { task: TaskRecord }) {
 }
 
 function ProgressLine({ event }: { event: TaskProgressEvent }) {
+  if (event.kind === "deploy_cmd") {
+    return (
+      <li className="progress-line">
+        <code>$ {event.cmd as string}</code>
+      </li>
+    );
+  }
+  if (event.kind === "secrets_missing") {
+    return (
+      <li className="progress-line progress-warn">
+        ⚠ secrets not found in environment: {(event.names as string[]).join(", ")}
+      </li>
+    );
+  }
   const name = (event.scenario ?? event.suite ?? "") as string;
   const entity = event.kind.startsWith("suite") ? "eval suite" : "scenario";
   if (event.kind.endsWith("_started")) {
@@ -343,6 +421,31 @@ function ResultView({ task }: { task: TaskRecord }) {
               + {line}
             </p>
           ))}
+        </div>
+      );
+    }
+    case "deploy": {
+      const missing = (result.missing_secrets as string[]) ?? [];
+      return (
+        <div className="task-result">
+          <p className="task-summary">
+            {task.status === "passed"
+              ? `Container started (${result.engine as string})`
+              : (result.message as string)}
+          </p>
+          {task.status === "passed" && (result.url as string | null) && (
+            <p className="deploy-url">
+              <a href={result.url as string} target="_blank" rel="noreferrer">
+                {result.url as string}
+              </a>{" "}
+              — <code>POST {result.url as string}/invoke</code>
+            </p>
+          )}
+          {missing.length > 0 && (
+            <p className="deploy-note muted">
+              Secrets not injected (not in the editor's environment): {missing.join(", ")}
+            </p>
+          )}
         </div>
       );
     }

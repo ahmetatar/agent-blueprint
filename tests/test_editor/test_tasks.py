@@ -505,3 +505,136 @@ def test_run_action_streams_trace_events(
     traces = [event for event in events if event["type"] == "task_trace"]
     assert len(traces) == 1
     assert traces[0]["scope"] is None
+
+
+# ---------------------------------------------------------------------------
+# Deploy action (E3c) — local container engines only
+# ---------------------------------------------------------------------------
+
+
+def _patch_deployer(monkeypatch: pytest.MonkeyPatch, *, available: bool = True) -> list[list[str]]:
+    """Stub the container deployer's subprocess surface; returns the argv log."""
+    from agent_blueprint.deployers.base import BaseDeployer
+
+    calls: list[list[str]] = []
+
+    def fake_cmd(self: Any, cmd: list[str], **kwargs: Any) -> None:
+        calls.append(cmd)
+        return None
+
+    monkeypatch.setattr(BaseDeployer, "_cmd", fake_cmd)
+    monkeypatch.setattr(BaseDeployer, "_probe", lambda self, cmd: available)
+    return calls
+
+
+def test_deploy_action_builds_and_runs_container(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _patch_deployer(monkeypatch)
+    record, _ = _run_to_completion(blueprint_file, "deploy", {"engine": "docker"})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["engine"] == "docker"
+    assert record.result["url"] == "http://localhost:8080"
+    assert [c[:2] for c in calls] == [
+        ["docker", "build"],
+        ["docker", "rm"],
+        ["docker", "run"],
+    ]
+
+
+def test_deploy_action_podman_engine(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _patch_deployer(monkeypatch)
+    record, _ = _run_to_completion(blueprint_file, "deploy", {"engine": "podman"})
+    assert record.status == "passed"
+    assert calls[0][0] == "podman"
+
+
+def test_deploy_action_refuses_cloud_and_missing_engine(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_deployer(monkeypatch)
+    for params in ({}, {"engine": "aws"}, {"engine": "azure"}, {"engine": "gcp"}):
+        record, _ = _run_to_completion(blueprint_file, "deploy", dict(params))
+        assert record.status == "error"
+        assert "docker, podman" in (record.error or "")
+
+
+def test_deploy_action_prerequisites_not_met(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_deployer(monkeypatch, available=False)
+    record, _ = _run_to_completion(blueprint_file, "deploy", {"engine": "docker"})
+    assert record.status == "error"
+    assert "prerequisites not met" in (record.error or "")
+
+
+def test_deploy_action_reports_missing_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Secrets are collected from declared model_providers (api_key_env), the
+    # same surface `abp deploy` scans.
+    path = tmp_path / "bp.yml"
+    path.write_text(
+        _BLUEPRINT.replace(
+            "agents:",
+            "model_providers:\n"
+            "  openai:\n"
+            "    provider: openai\n"
+            "    api_key_env: OPENAI_API_KEY\n"
+            "\n"
+            "agents:",
+        ),
+        encoding="utf-8",
+    )
+    _patch_deployer(monkeypatch)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    record, events = _run_to_completion(path, "deploy", {"engine": "docker"})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert "OPENAI_API_KEY" in record.result["missing_secrets"]
+    warn = [e for e in events if e["type"] == "task_progress"
+            and e["event"]["kind"] == "secrets_missing"]
+    assert warn and "OPENAI_API_KEY" in warn[0]["event"]["names"]
+
+
+def test_deploy_action_failed_command_is_failed_status(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_blueprint.deployers.base import BaseDeployer
+
+    def failing_cmd(self: Any, cmd: list[str], **kwargs: Any) -> None:
+        raise subprocess.CalledProcessError(125, cmd)
+
+    monkeypatch.setattr(BaseDeployer, "_cmd", failing_cmd)
+    monkeypatch.setattr(BaseDeployer, "_probe", lambda self, cmd: True)
+    record, _ = _run_to_completion(blueprint_file, "deploy", {"engine": "docker"})
+    assert record.status == "failed"
+    assert record.result is not None
+    assert "exit 125" in record.result["message"]
+
+
+def test_action_surface_carries_deploy_platform(tmp_path: Path) -> None:
+    path = tmp_path / "bp.yml"
+    path.write_text(_BLUEPRINT + "\ndeploy:\n  platform: aws\n", encoding="utf-8")
+    spec = BlueprintSpec.model_validate(load_blueprint_yaml(path))
+    assert action_surface(spec, path)["deploy_platform"] == "aws"
+
+
+def test_base_deployer_cmd_honors_process_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_blueprint.deployers.docker import DockerDeployer
+    from agent_blueprint.models.deploy import DockerDeployConfig
+
+    deployer = DockerDeployer(DockerDeployConfig(), "hook-test")
+    captured: list[subprocess.Popen[str]] = []
+    deployer.process_hook = captured.append
+
+    ok = deployer._cmd([sys.executable, "-c", "print('hi')"], capture=True)
+    assert ok is not None and ok.stdout.strip() == "hi"
+    assert len(captured) == 1 and captured[0].poll() == 0
+
+    with pytest.raises(subprocess.CalledProcessError):
+        deployer._cmd([sys.executable, "-c", "raise SystemExit(3)"])
+    assert len(captured) == 2

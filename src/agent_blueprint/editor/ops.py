@@ -65,6 +65,23 @@ class RemoveEdgeOp(BaseModel):
     condition: str | None = None
 
 
+class RetargetEdgeOp(BaseModel):
+    """Point an existing edge target at a different node, in place.
+
+    Matching mirrors ``remove_edge`` (from + target + condition). The entry
+    keeps its position in the ``to`` list — evaluation order is routing
+    semantics when conditions overlap — and keeps its authored form
+    (``target:`` mapping or ``default:`` shorthand) and any comments.
+    """
+
+    op: Literal["retarget_edge"]
+    graph: str = MAIN_GRAPH
+    from_node: str
+    target: str
+    condition: str | None = None
+    new_target: str
+
+
 class SetFieldOp(BaseModel):
     """Set a value at a dotted path (``graph.edges[0].to[1].condition``).
 
@@ -88,7 +105,13 @@ class UnsetFieldOp(BaseModel):
 
 
 EditOp = Annotated[
-    AddNodeOp | RemoveNodeOp | AddEdgeOp | RemoveEdgeOp | SetFieldOp | UnsetFieldOp,
+    AddNodeOp
+    | RemoveNodeOp
+    | AddEdgeOp
+    | RemoveEdgeOp
+    | RetargetEdgeOp
+    | SetFieldOp
+    | UnsetFieldOp,
     Field(discriminator="op"),
 ]
 
@@ -104,6 +127,8 @@ def apply_ops(document: CommentedMap, ops: list[EditOp]) -> None:
             _add_edge(document, op)
         elif isinstance(op, RemoveEdgeOp):
             _remove_edge(document, op)
+        elif isinstance(op, RetargetEdgeOp):
+            _retarget_edge(document, op)
         elif isinstance(op, SetFieldOp):
             _set_field(document, op)
         else:
@@ -255,6 +280,42 @@ def _remove_edge(document: CommentedMap, op: RemoveEdgeOp) -> None:
                     if not to:
                         del edges[i]
                     return
+    rendered = f" (condition: {op.condition})" if op.condition else ""
+    raise OpError(f"edge {op.from_node} -> {op.target}{rendered} not found")
+
+
+def _retarget_edge(document: CommentedMap, op: RetargetEdgeOp) -> None:
+    container = _graph_container(document, op.graph)
+    edges = container.get("edges")
+    if not isinstance(edges, list):
+        raise OpError(f"no edges defined in '{op.graph}'")
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("from") != op.from_node:
+            continue
+        to = edge.get("to")
+        if isinstance(to, str):
+            if to == op.target and op.condition is None:
+                edge["to"] = op.new_target
+                return
+        elif isinstance(to, list):
+            for item in to:
+                if _target_of(item) != op.target or _condition_of(item) != op.condition:
+                    continue
+                for other in to:
+                    if other is item:
+                        continue
+                    if (
+                        _target_of(other) == op.new_target
+                        and _condition_of(other) == op.condition
+                    ):
+                        raise OpError(
+                            f"edge {op.from_node} -> {op.new_target} already exists"
+                        )
+                if isinstance(item, dict) and "target" in item:
+                    item["target"] = op.new_target
+                else:  # `- default: X` shorthand
+                    item["default"] = op.new_target
+                return
     rendered = f" (condition: {op.condition})" if op.condition else ""
     raise OpError(f"edge {op.from_node} -> {op.target}{rendered} not found")
 

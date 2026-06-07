@@ -146,6 +146,16 @@ export interface RemoveEdgeOp {
   condition?: string | null;
 }
 
+/** Point an existing edge target at a different node, in place. */
+export interface RetargetEdgeOp {
+  op: "retarget_edge";
+  graph?: string;
+  from_node: string;
+  target: string;
+  condition?: string | null;
+  new_target: string;
+}
+
 export interface SetFieldOp {
   op: "set_field";
   path: string;
@@ -162,6 +172,7 @@ export type EditOp =
   | RemoveNodeOp
   | AddEdgeOp
   | RemoveEdgeOp
+  | RetargetEdgeOp
   | SetFieldOp
   | UnsetFieldOp;
 

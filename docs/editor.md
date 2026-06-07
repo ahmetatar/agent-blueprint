@@ -67,9 +67,18 @@ it, never a separate store.
     bottom = outgoing). A second outgoing edge converts a scalar `to:` into
     the conditional list form, keeping the original target as the default
     route. Edges cannot cross a subgraph boundary.
-  - **Delete** a selected edge or node (`Backspace`). Deleting a node also
-    removes every edge that references it. Synthetic edges (START→entry,
-    supervisor delegation/return, parallel fan-out) are display-only.
+  - **Select an edge** by clicking it (the hit area is generous, not just
+    the 1-px path); the selection shows endpoint handles and a floating
+    toolbar naming it (`edge router → worker`) with a Delete button.
+  - **Reconnect an edge** by dragging an endpoint onto another node. Moving
+    the target end retargets the entry *in place* — it keeps its position in
+    the `to:` list (evaluation order is routing semantics when conditions
+    overlap), its condition, and its comments. Moving the source end
+    relocates the entry to the new source's edge.
+  - **Delete** a selected edge or node (toolbar button or `Backspace`).
+    Deleting a node also removes every edge that references it. Synthetic
+    edges (START→entry, supervisor delegation/return, parallel fan-out) are
+    display-only.
   - **Add a node** via the *+ Node* button (agent or function node;
     top-level graph).
 - **Config forms** — selecting a node opens the *Config* tab: the node's
@@ -157,9 +166,10 @@ back to canvas nodes).
 - `PUT /api/blueprint/yaml` — whole-file save from the source pane
   (parseable-YAML gate; broadcasts `file_changed` to other tabs)
 - `POST /api/blueprint/ops` — canvas/config ops (`add_node`, `remove_node`,
-  `add_edge`, `remove_edge`, `set_field`, `unset_field`) applied as targeted
-  ruamel mutations; `409` when `base_hash` is stale, `422` when an op cannot
-  apply or the result fails validation (nothing written)
+  `add_edge`, `remove_edge`, `retarget_edge`, `set_field`, `unset_field`)
+  applied as targeted ruamel mutations; `409` when `base_hash` is stale,
+  `422` when an op cannot apply or the result fails validation (nothing
+  written)
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
 - `POST /api/actions/{test,run,gate,generate,doctor,deploy}` — start a
   background action task; `409` when one is already running

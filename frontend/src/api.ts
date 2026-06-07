@@ -19,6 +19,7 @@ export interface VmNode {
   ref?: string;
   expanded?: boolean;
   graph_ref?: string; // ops scope: "graph" | "subgraphs.<name>"
+  runtime_id?: string; // the node's id in the flattened runtime graph (trace events carry this)
   config?: Record<string, unknown>; // effective NodeDef values (defaults filled)
   agent_config?: Record<string, unknown>; // effective AgentDef values, when agent-backed
 }
@@ -213,13 +214,22 @@ export interface TaskRecord {
   error: string | null;
 }
 
-/** Pushed over /ws while a task runs. */
-export interface TaskMessage {
-  type: "task_started" | "task_progress" | "task_done";
-  task?: TaskRecord;
-  task_id?: string;
-  event?: TaskProgressEvent;
+/** One generated-project trace event, streamed live while a task runs. */
+export interface TraceEvent {
+  event: string;
+  node?: string; // runtime node id — map via VmNode.runtime_id
+  tool?: string;
+  route?: string;
+  error?: string;
+  sequence?: number;
+  [key: string]: unknown;
 }
+
+/** Pushed over /ws while a task runs. */
+export type TaskMessage =
+  | { type: "task_started" | "task_done"; task: TaskRecord }
+  | { type: "task_progress"; task_id: string; event: TaskProgressEvent }
+  | { type: "task_trace"; task_id: string; scope: string | null; event: TraceEvent };
 
 /** Another task is already running — one at a time per editor session. */
 export class TaskBusyError extends Error {}

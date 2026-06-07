@@ -8,6 +8,18 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E3b): live execution view — while a Test / Run / Gate
+  task executes, canvas nodes pulse blue as they run and keep a green
+  (finished) or red (error event) ring afterwards, including nodes inside
+  subgraph groups. Powered by a new env-activated stream observer in the
+  generated `_abp_trace.py`: when `ABP_TRACE_STREAM_FILE` is set, every
+  trace event is appended to that file as one JSON line (hashes only, like
+  the manifest); the editor tails it and forwards events over the WebSocket
+  as `task_trace`. The JSON trace manifest is byte-identical with or
+  without the stream. `run_harness_scenario` / `run_eval_suite(s)` gained a
+  pass-through `extra_env` keyword; the graph view-model now exposes each
+  node's flattened `runtime_id`
+
 - `abp editor` (phase E3a): Actions tab — run `abp test` / `run` / `gate` /
   `generate` / `doctor` from the editor as background tasks (one at a time,
   `409` when busy) with per-scenario/per-suite progress streamed over the
@@ -86,6 +98,15 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 - repository editor configuration via `.editorconfig`
 - release documentation for version bumping, tag format, TestPyPI, and PyPI publishing
 - ABP vNext RFC and implementation plan documentation
+
+### Fixed
+
+- Generated plain `function` nodes now emit `node_started` / `node_finished`
+  trace events like every other node type (previously they were invisible in
+  traces, which also made harness `expected.route` assertions unable to match
+  a function node). Replay goldens recorded against earlier generated projects
+  with function nodes will report drift after regeneration — re-record with
+  `abp test --save-traces all` / `abp traces export --golden`
 
 ### Changed
 

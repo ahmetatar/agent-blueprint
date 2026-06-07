@@ -58,6 +58,34 @@ def _notify_observers(method: str, *args: Any) -> None:
         except Exception:
             pass  # observability must never break the run
 
+
+class _StreamFileObserver:
+    """Live event stream for local tooling (e.g. `abp editor`).
+
+    When ABP_TRACE_STREAM_FILE is set, every trace event is appended to that
+    file as one JSON line (flushed per event so a tailer sees it immediately).
+    The JSON manifest is untouched, and events carry hashes only — same
+    privacy posture as the manifest itself.
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+
+    def _write(self, payload: Any) -> None:
+        with open(self._path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True, default=repr) + "\n")
+
+    def on_run_started(self, run_info: Any) -> None:
+        self._write({"event": "run_started", "run": run_info})
+
+    def on_event(self, payload: Any) -> None:
+        self._write(payload)
+
+
+_STREAM_FILE = os.environ.get("ABP_TRACE_STREAM_FILE")
+if _STREAM_FILE:
+    register_trace_observer(_StreamFileObserver(_STREAM_FILE))
+
 BUDGET_POLICY = {
     "max_tokens_per_run": {{ (ir.policies.budgets.max_tokens_per_run if ir.policies else none) | to_python }},
     "max_cost_usd": {{ (ir.policies.budgets.max_cost_usd if ir.policies else none) | to_python }},

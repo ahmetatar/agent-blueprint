@@ -123,6 +123,7 @@ def run_harness_scenario(
     save_traces: str = "all",
     origin: str = "harness",
     process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
     tool_mode = (scenario.tool_mode or ir.harness.defaults.tool_mode).value  # type: ignore[union-attr]
@@ -154,6 +155,9 @@ def run_harness_scenario(
         install=install,
         keep_temp=False,
         extra_env={
+            # Caller additions (e.g. the editor's ABP_TRACE_STREAM_FILE) go
+            # first so they can never override harness semantics below.
+            **(extra_env or {}),
             "ABP_TRACE_MODE": execution_mode,
             "ABP_RUN_ID": scenario.id,
             "ABP_SCENARIO_ID": scenario.id,

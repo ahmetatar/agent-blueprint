@@ -1,14 +1,14 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E3a — editing plus action buttons.**
+> **Status: phase E3b — editing, action buttons, live execution view.**
 > The editor renders the blueprint as a live graph with validation/lint
 > diagnostics; the YAML source is editable in place, nodes/edges can be
 > added and removed on the canvas, node config (and the linked agent) is
 > editable through schema-driven forms, and node positions persist across
 > sessions. The Actions tab runs `abp test` / `run` / `gate` / `generate` /
-> `doctor` in the background with live progress. Per-node live execution
-> highlighting (E3b) comes next. See [abp-editor-plan.md](abp-editor-plan.md)
-> for the full roadmap.
+> `doctor` in the background with live progress, and canvas nodes light up
+> as the run executes them. Deploy from the editor (E3c) comes next. See
+> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -116,6 +116,23 @@ generated-project subprocess, so even a live-LLM scenario stops promptly.
 Buttons that don't apply are disabled with a hint (no harness scenarios →
 no Test; nothing to gate → no Gate).
 
+### Live execution view (E3b)
+
+While a Test / Run… / Gate task executes, the canvas shows the run live:
+nodes pulse blue while running, then keep a green (finished) or red (an
+error event — retry exhausted, policy violation, tool failure) ring. The
+highlights survive task completion so you can read the path the run took;
+they clear when the next task (or the next scenario within a task) starts.
+
+Under the hood the generated project's trace observer registry streams each
+event as one JSON line to a file named in `ABP_TRACE_STREAM_FILE`; the
+editor tails it and forwards events over `/ws` as `task_trace`. The JSON
+trace manifest is byte-identical with or without the stream — goldens,
+harness diffs, and gate baselines are unaffected — and only hashes are
+streamed, never message content. Subgraph nodes highlight inside their
+group (trace events carry flattened runtime ids; the view-model maps them
+back to canvas nodes).
+
 ### API surface
 
 - `GET /api/health` — server liveness + version
@@ -142,7 +159,8 @@ no Test; nothing to gate → no Gate).
   (`origin: disk`) or is saved through the editor (`origin: save`); the
   watcher suppresses the disk echo of the editor's own writes. Task events
   ride the same channel: `task_started`, `task_progress` (per
-  scenario/suite), `task_done`
+  scenario/suite), `task_trace` (per generated-project trace event, drives
+  the live node highlights), `task_done`
 
 ## Working on the frontend (contributors)
 

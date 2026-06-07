@@ -144,6 +144,99 @@ body,
   overflow: hidden;
 }
 
+.dirty-dot {
+  margin-left: 0.4rem;
+  color: #c77700;
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
+/* ---- source pane --------------------------------------------------------- */
+
+.source-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.source-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.source-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.source-banner span {
+  flex: 1;
+}
+
+.source-banner button {
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.source-banner-conflict {
+  background: #fff4e0;
+  color: #8a5a00;
+  border-bottom: 1px solid #e8c98a;
+}
+
+.source-banner-error {
+  background: #fdecea;
+  color: #8c1d18;
+  border-bottom: 1px solid #f0b9b3;
+}
+
+.source-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-top: 1px solid #e2e2e2;
+  background: #fafafa;
+  font-size: 0.8rem;
+}
+
+.save-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #1b7f3b;
+  border-radius: 4px;
+  background: #1b7f3b;
+  color: #fff;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+
+.save-button:disabled {
+  border-color: #cfcfcf;
+  background: #f0f0f0;
+  color: #9a9a9a;
+  cursor: default;
+}
+
+.save-button kbd {
+  font-family: inherit;
+  font-size: 0.65rem;
+  opacity: 0.75;
+}
+
 /* ---- issues ------------------------------------------------------------ */
 
 .issues-empty {

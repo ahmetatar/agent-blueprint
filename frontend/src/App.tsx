@@ -12,6 +12,7 @@ export default function App() {
   const [info, setInfo] = useState<BlueprintInfo | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("issues");
+  const [sourceDirty, setSourceDirty] = useState(false);
   const sourceRef = useRef<SourcePaneHandle | null>(null);
   const pendingLine = useRef<number | null>(null);
 
@@ -75,7 +76,7 @@ export default function App() {
       <div className="body">
         <section className="canvas">
           {info.graph ? (
-            <GraphCanvas graph={info.graph} lint={info.lint} />
+            <GraphCanvas graph={info.graph} lint={info.lint} layout={info.layout} />
           ) : (
             <div className="canvas-empty">
               <p>The blueprint does not validate, so there is no graph to draw.</p>
@@ -100,6 +101,11 @@ export default function App() {
               onClick={() => setTab("source")}
             >
               Source
+              {sourceDirty && (
+                <span className="dirty-dot" title="Unsaved changes">
+                  ●
+                </span>
+              )}
             </button>
           </nav>
           <div className="panel-body" hidden={tab !== "issues"}>
@@ -109,6 +115,8 @@ export default function App() {
             <SourcePane
               yaml={info.yaml}
               lint={info.lint}
+              onSaved={setInfo}
+              onDirtyChange={setSourceDirty}
               onReady={(handle) => {
                 sourceRef.current = handle;
                 if (pendingLine.current !== null) {

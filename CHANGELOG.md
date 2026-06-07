@@ -8,6 +8,15 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E2a): editable source pane + layout persistence — the
+  Monaco pane saves back to the YAML file (`PUT /api/blueprint/yaml`,
+  `Cmd/Ctrl+S`; unparseable YAML is rejected with the file untouched,
+  spec-invalid content is written with the error surfaced in Issues), a
+  conflict banner when the file changes on disk under unsaved edits
+  (last-writer-wins on save), and dragged node positions persisted to a
+  `.abp/editor-layout.json` sidecar (auto-layout fills in anything missing);
+  editor saves push `file_changed` to other tabs while the file watcher
+  suppresses the disk echo of the editor's own writes
 - `abp editor` (phase E1): read-only blueprint visualizer — React Flow canvas
   with ELK auto-layout (typed node cards with resolved provider/model,
   condition-labeled edges, supervisor delegation/parallel fan-out edges,

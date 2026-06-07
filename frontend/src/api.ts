@@ -43,6 +43,11 @@ export interface LintFinding {
   col: number | null;
 }
 
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
 export interface BlueprintInfo {
   path: string;
   name: string | null;
@@ -51,10 +56,37 @@ export interface BlueprintInfo {
   yaml: string;
   graph: GraphViewModel | null;
   lint: LintFinding[];
+  layout: Record<string, NodePosition>;
 }
 
 export async function fetchBlueprint(): Promise<BlueprintInfo> {
   const response = await fetch("/api/blueprint");
   if (!response.ok) throw new Error(`API responded ${response.status}`);
   return (await response.json()) as BlueprintInfo;
+}
+
+/** Thrown when a whole-file save is rejected (YAML syntax error — not written). */
+export class SaveRejectedError extends Error {}
+
+export async function saveYaml(yaml: string): Promise<BlueprintInfo> {
+  const response = await fetch("/api/blueprint/yaml", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yaml }),
+  });
+  if (response.status === 422) {
+    const body = (await response.json()) as { detail?: string };
+    throw new SaveRejectedError(body.detail ?? "YAML could not be parsed");
+  }
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return (await response.json()) as BlueprintInfo;
+}
+
+export async function saveLayout(positions: Record<string, NodePosition>): Promise<void> {
+  const response = await fetch("/api/layout", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positions }),
+  });
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
 }

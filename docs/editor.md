@@ -1,7 +1,9 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E1 — read-only visualizer.** The editor renders the
-> blueprint as a live graph with validation/lint diagnostics; editing and
+> **Status: phase E2 (in progress) — source editing + layout persistence.**
+> The editor renders the blueprint as a live graph with validation/lint
+> diagnostics, the YAML source is editable in place, and node positions
+> persist across sessions; canvas editing (add/remove nodes, draw edges) and
 > action buttons arrive in later phases. See
 > [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
@@ -23,7 +25,7 @@ it, never a separate store.
 | `--port`, `-p` | random free port | port to bind on 127.0.0.1 |
 | `--open/--no-open` | `--open` | open the browser automatically |
 
-## What the editor shows (E1)
+## What the editor shows
 
 - **Canvas** — the agent graph, auto-laid-out (ELK, top-down): one card per
   node with its type, resolved `provider/model`, and tool count. Conditional
@@ -34,20 +36,40 @@ it, never a separate store.
   are explicit terminals, and a minimap helps with larger graphs.
 - **Issues panel** — the validation error (if the file doesn't validate) and
   all lint findings, each clickable through to its source line.
-- **Source panel** — the raw YAML in a read-only Monaco pane with lint
+- **Source panel** — the raw YAML in an editable Monaco pane with lint
   findings as inline markers.
 - **Live reload** — the server watches the file; saving from any external
   editor updates the canvas, issues, and source in place (no browser refresh).
 
-The canvas is a *view*: nodes can be dragged around for inspection, but
-nothing writes back to the file yet — that is phase E2.
+## Editing (E2)
+
+- **Source editing** — the Source pane is a real editor: type, then *Save*
+  (or `Cmd/Ctrl+S`). Saves that are not parseable YAML are rejected and the
+  file is left untouched; content that parses but fails blueprint validation
+  is still written (exactly as an external editor could), with the validation
+  error surfacing in the Issues panel. While you have unsaved edits, an
+  external change to the file raises a conflict banner — load the file
+  version, or keep typing and Save overwrites (last-writer-wins).
+- **Layout persistence** — node positions you drag are saved (debounced) to
+  `.abp/editor-layout.json` next to the blueprint, keyed by file stem, and
+  restored on the next session. The sidecar is editor-private convenience
+  state: never required, never validated, safe to delete (you just fall back
+  to auto-layout). Coordinates deliberately stay out of the blueprint schema.
+
+Canvas editing — adding/removing nodes, drawing edges, schema-driven config
+forms — is the next slice of phase E2.
 
 ### API surface
 
 - `GET /api/health` — server liveness + version
 - `GET /api/blueprint` — raw YAML, validation status, the graph view-model,
-  and lint findings with source positions
+  lint findings with source positions, and the saved canvas layout
+- `PUT /api/blueprint/yaml` — whole-file save from the source pane
+  (parseable-YAML gate; broadcasts `file_changed` to other tabs)
+- `PUT /api/layout` — persist canvas node positions to the layout sidecar
 - `WS /ws` — pushes `file_changed` when the blueprint changes on disk
+  (`origin: disk`) or is saved through the editor (`origin: save`); the
+  watcher suppresses the disk echo of the editor's own writes
 
 ## Working on the frontend (contributors)
 

@@ -266,3 +266,44 @@ def test_subgraph_renders_as_group_with_namespaced_children(vm_builder) -> None:
     # Parent-graph edges connect to the group node itself.
     assert _edges(vm, "merge", "finish")
     assert _edges(vm, "finish", END_ID)
+
+
+def test_real_edges_carry_ops_ref_synthetic_do_not(vm_builder) -> None:
+    vm = vm_builder(_CONDITIONAL)
+    cond = _edges(vm, "triage", "fixer")[0]
+    assert cond["ref"] == {
+        "graph": "graph",
+        "from": "triage",
+        "target": "fixer",
+        "condition": "state.verdict == 'fix'",
+    }
+    default = _edges(vm, "triage", END_ID)[0]
+    assert default["ref"] == {
+        "graph": "graph",
+        "from": "triage",
+        "target": "END",
+        "condition": None,
+    }
+    # The synthetic START -> entry edge does not exist in graph.edges.
+    assert _edges(vm, START_ID, "triage")[0]["ref"] is None
+
+
+def test_nodes_carry_graph_ref_and_vm_lists_agents(vm_builder) -> None:
+    vm = vm_builder(_CONDITIONAL)
+    assert _node(vm, "triage")["graph_ref"] == "graph"
+    assert vm["agents"] == ["triage", "fixer"]
+
+
+def test_subgraph_scope_in_refs(vm_builder) -> None:
+    vm = vm_builder(_PARALLEL_SUBGRAPH)
+    assert _node(vm, "finish:polish")["graph_ref"] == "subgraphs.wrap_up"
+    assert _node(vm, "finish")["graph_ref"] == "graph"  # the subgraph *node* lives in the parent
+    internal = _edges(vm, "finish:polish", "finish:__end__")[0]
+    assert internal["ref"] == {
+        "graph": "subgraphs.wrap_up",
+        "from": "polish",
+        "target": "END",
+        "condition": None,
+    }
+    # Supervisor/parallel synthetic edges never carry a ref.
+    assert _edges(vm, "fan", "left")[0]["ref"] is None

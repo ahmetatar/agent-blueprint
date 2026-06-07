@@ -33,11 +33,13 @@ _MAX_DEPTH = 10
 def build_view_model(spec: BlueprintSpec) -> dict[str, Any]:
     """Nodes + edges for the canvas, pre-digested server-side."""
     builder = _Builder(spec)
-    builder.emit_graph(spec.graph, parent=None, prefix="", chain=())
+    builder.emit_graph(spec.graph, parent=None, prefix="", chain=(), graph_ref="graph")
     return {
         "entry_point": spec.graph.entry_point,
         "nodes": builder.nodes,
         "edges": builder.edges,
+        # For the add-node dialog: agent nodes must reference a defined agent.
+        "agents": list(spec.agents),
     }
 
 
@@ -56,6 +58,7 @@ class _Builder:
         parent: str | None,
         prefix: str,
         chain: tuple[str, ...],
+        graph_ref: str,
     ) -> None:
         top_level = parent is None
         end_id = END_ID if top_level else f"{prefix}{END_ID}"
@@ -63,10 +66,10 @@ class _Builder:
         for node_id, node_def in graph.nodes.items():
             vid = f"{prefix}{node_id}"
             if node_def.type == NodeType.subgraph and node_def.ref is not None:
-                self._emit_subgraph_group(vid, node_id, node_def, parent, chain)
+                self._emit_subgraph_group(vid, node_id, node_def, parent, chain, graph_ref)
             else:
                 self._add_node(
-                    self._node_payload(vid, node_id, node_def, parent),
+                    self._node_payload(vid, node_id, node_def, parent, graph_ref),
                     entry=(node_id == graph.entry_point and not top_level),
                 )
 
@@ -78,7 +81,19 @@ class _Builder:
             source = START_ID if edge.from_node == "START" else f"{prefix}{edge.from_node}"
             targets = edge.get_targets()
             for target in targets:
-                self._emit_edge(source, target, prefix, end_id, conditional_group=len(targets) > 1)
+                self._emit_edge(
+                    source,
+                    target,
+                    prefix,
+                    end_id,
+                    conditional_group=len(targets) > 1,
+                    ref={
+                        "graph": graph_ref,
+                        "from": edge.from_node,
+                        "target": target.target,
+                        "condition": target.condition,
+                    },
+                )
 
         if top_level and not any(edge.from_node == "START" for edge in graph.edges):
             self._append_edge(START_ID, graph.entry_point, kind="entry")
@@ -97,6 +112,7 @@ class _Builder:
         node_def: NodeDef,
         parent: str | None,
         chain: tuple[str, ...],
+        graph_ref: str,
     ) -> None:
         ref = node_def.ref or ""
         group: dict[str, Any] = {
@@ -106,6 +122,7 @@ class _Builder:
             "ref": ref,
             "parent": parent,
             "description": node_def.description,
+            "graph_ref": graph_ref,
         }
         # Ref cycles / runaway nesting are compile errors; render the node
         # without expanding instead of recursing forever.
@@ -116,10 +133,16 @@ class _Builder:
         subgraph = self.spec.subgraphs[ref]
         group["expanded"] = True
         self._add_node(group)
-        self.emit_graph(subgraph, parent=vid, prefix=f"{vid}:", chain=(*chain, ref))
+        self.emit_graph(
+            subgraph,
+            parent=vid,
+            prefix=f"{vid}:",
+            chain=(*chain, ref),
+            graph_ref=f"subgraphs.{ref}",
+        )
 
     def _node_payload(
-        self, vid: str, node_id: str, node_def: NodeDef, parent: str | None
+        self, vid: str, node_id: str, node_def: NodeDef, parent: str | None, graph_ref: str
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": vid,
@@ -127,6 +150,8 @@ class _Builder:
             "label": node_id,
             "parent": parent,
             "description": node_def.description,
+            # Ops scope: which YAML graph this node lives in.
+            "graph_ref": graph_ref,
         }
         if node_def.agent is not None:
             agent = self.spec.agents.get(node_def.agent)
@@ -166,14 +191,15 @@ class _Builder:
         prefix: str,
         end_id: str,
         conditional_group: bool,
+        ref: dict[str, Any],
     ) -> None:
         resolved = self._resolve_target(target.target, prefix, end_id)
         if target.condition is not None:
-            self._append_edge(source, resolved, kind="conditional", label=target.condition)
+            self._append_edge(source, resolved, kind="conditional", label=target.condition, ref=ref)
         elif target.default and conditional_group:
-            self._append_edge(source, resolved, kind="default", label="default")
+            self._append_edge(source, resolved, kind="default", label="default", ref=ref)
         else:
-            self._append_edge(source, resolved, kind="normal")
+            self._append_edge(source, resolved, kind="normal", ref=ref)
 
     def _emit_supervisor_edges(
         self, vid: str, node_def: NodeDef, prefix: str, end_id: str
@@ -200,7 +226,12 @@ class _Builder:
         return f"{prefix}{target}"
 
     def _append_edge(
-        self, source: str, target: str, kind: str, label: str | None = None
+        self,
+        source: str,
+        target: str,
+        kind: str,
+        label: str | None = None,
+        ref: dict[str, Any] | None = None,
     ) -> None:
         self.edges.append(
             {
@@ -209,5 +240,8 @@ class _Builder:
                 "target": target,
                 "kind": kind,
                 "label": label,
+                # Present only for edges that exist in the YAML (`graph.edges`);
+                # synthetic edges (entry/supervisor/parallel) are not editable.
+                "ref": ref,
             }
         )

@@ -66,6 +66,8 @@ export async function toFlow(
       width: box?.width,
       height: box?.height,
       data: { vm: node, findings: badges.get(node.id) ?? [] },
+      // Terminals are synthetic; everything else can be deleted via ops.
+      deletable: node.type !== "start" && node.type !== "end",
       ...(node.parent !== null ? { parentId: node.parent, extent: "parent" as const } : {}),
       ...(isGroup
         ? { style: { width: box?.width ?? 240, height: box?.height ?? 120 }, zIndex: -1 }
@@ -79,6 +81,11 @@ export async function toFlow(
     target: edge.target,
     label: edge.label ?? undefined,
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    // Only edges that exist in the YAML (`ref` present) are selectable and
+    // deletable; synthetic edges (entry/supervisor/parallel) are display-only.
+    data: { ref: edge.ref ?? null },
+    selectable: Boolean(edge.ref),
+    deletable: Boolean(edge.ref),
     ...EDGE_STYLE[edge.kind],
   }));
 

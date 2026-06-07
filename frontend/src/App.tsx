@@ -76,7 +76,14 @@ export default function App() {
       <div className="body">
         <section className="canvas">
           {info.graph ? (
-            <GraphCanvas graph={info.graph} lint={info.lint} layout={info.layout} />
+            <GraphCanvas
+              graph={info.graph}
+              lint={info.lint}
+              layout={info.layout}
+              hash={info.hash}
+              onUpdated={setInfo}
+              onConflict={reload}
+            />
           ) : (
             <div className="canvas-empty">
               <p>The blueprint does not validate, so there is no graph to draw.</p>

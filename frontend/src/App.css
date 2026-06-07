@@ -151,6 +151,115 @@ body,
   vertical-align: middle;
 }
 
+/* ---- canvas editing ------------------------------------------------------- */
+
+.canvas-button {
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.canvas-button:hover {
+  background: #f4f4f4;
+}
+
+.canvas-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: 520px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #e8c98a;
+  border-radius: 6px;
+  background: #fff4e0;
+  color: #8a5a00;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.canvas-toast button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(20, 20, 20, 0.35);
+}
+
+.dialog {
+  width: 320px;
+  padding: 1rem 1.2rem;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #444;
+}
+
+.dialog input,
+.dialog select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.dialog-error {
+  margin: 0;
+  color: #8c1d18;
+  font-size: 0.8rem;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dialog-actions button {
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+
+.dialog-actions .dialog-primary {
+  border-color: #1b7f3b;
+  background: #1b7f3b;
+  color: #fff;
+}
+
 /* ---- source pane --------------------------------------------------------- */
 
 .source-pane {

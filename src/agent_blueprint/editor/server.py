@@ -12,6 +12,7 @@ lazy import and prints the install hint.
 import asyncio
 import contextlib
 import hashlib
+import io
 import secrets
 import socket
 import threading
@@ -32,10 +33,15 @@ from watchfiles import awatch
 
 from agent_blueprint.editor import layout_store
 from agent_blueprint.editor.diagnostics import lint_with_positions
+from agent_blueprint.editor.ops import EditOp, OpError, apply_ops
 from agent_blueprint.editor.viewmodel import build_view_model
 from agent_blueprint.exceptions import BlueprintValidationError
 from agent_blueprint.models.blueprint import BlueprintSpec
-from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
+from agent_blueprint.utils.yaml_loader import (
+    load_blueprint_document,
+    load_blueprint_yaml,
+    resolve_blueprint_data,
+)
 from agent_blueprint.utils.yaml_loader import yaml as _ruamel_yaml
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -75,6 +81,9 @@ def blueprint_info(path: Path) -> dict[str, Any]:
         "graph": build_view_model(spec) if spec is not None else None,
         "lint": lint_with_positions(spec, raw_text) if spec is not None else [],
         "layout": layout_store.load_layout(path),
+        # Canvas ops send this back as base_hash so the server can detect
+        # "file changed underneath" instead of mutating a stale document.
+        "hash": _content_hash(raw_text),
     }
 
 
@@ -102,6 +111,11 @@ def _content_hash(text: str) -> str:
 
 class YamlSaveRequest(BaseModel):
     yaml: str
+
+
+class OpsRequest(BaseModel):
+    base_hash: str
+    ops: list[EditOp]
 
 
 class NodePosition(BaseModel):
@@ -231,6 +245,33 @@ def create_app(
         last_write["hash"] = _content_hash(body.yaml)
         # Other connected tabs sync from this push; the watcher suppresses the
         # disk echo so each save produces exactly one event.
+        await broadcaster.broadcast(
+            {"type": "file_changed", "path": str(blueprint_path), "origin": "save"}
+        )
+        return blueprint_info(blueprint_path)
+
+    @app.post("/api/blueprint/ops")
+    async def blueprint_ops(body: OpsRequest) -> Any:
+        """Canvas ops: targeted ruamel mutations, strict validate-before-write.
+
+        Unlike whole-file saves (where the user owns the text), a canvas op
+        producing an invalid blueprint is rejected and nothing is written.
+        """
+        current_text = blueprint_path.read_text(encoding="utf-8")
+        if _content_hash(current_text) != body.base_hash:
+            return JSONResponse({"detail": "file changed underneath"}, status_code=409)
+        try:
+            document = load_blueprint_document(blueprint_path)
+            apply_ops(document, body.ops)
+            resolved = resolve_blueprint_data(document, blueprint_path=blueprint_path)
+            BlueprintSpec.model_validate(resolved)
+        except (OpError, BlueprintValidationError, ValidationError) as e:
+            return JSONResponse({"detail": str(e)}, status_code=422)
+        buffer = io.StringIO()
+        _ruamel_yaml.dump(document, buffer)
+        text = buffer.getvalue()
+        blueprint_path.write_text(text, encoding="utf-8")
+        last_write["hash"] = _content_hash(text)
         await broadcaster.broadcast(
             {"type": "file_changed", "path": str(blueprint_path), "origin": "save"}
         )

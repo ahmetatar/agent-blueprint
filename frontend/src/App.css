@@ -140,6 +140,13 @@ body,
   min-height: 0;
 }
 
+/* Class display rules below (e.g. the config pane's flex) would otherwise
+   override the UA's `[hidden] { display: none }` and keep inactive tabs
+   visible, stacked under the active one. */
+.panel-body[hidden] {
+  display: none;
+}
+
 .panel-body-source {
   overflow: hidden;
 }

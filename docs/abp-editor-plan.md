@@ -1,6 +1,7 @@
 # `abp editor` — Visual Blueprint Editor (Plan)
 
-Status: **PROPOSED** (not started)
+Status: **IN PROGRESS** — E0 (skeleton) and E1 (read-only visualizer) shipped;
+E2/E3 not started. User-facing docs: [editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).
@@ -206,9 +207,11 @@ per the repo's no-mixed-PRs rule.
 1. **Sequencing vs. examples ladder.** RESOLVED (June 2026): the editor takes priority;
    the examples portfolio (L1–L8) is deprioritized for now. The "open an example"
    gallery becomes a later editor enhancement once examples land.
-2. **`inspect` reuse vs. dedicated view-model.** Decide during E1 whether
-   `inspect_cmd`'s extraction is reusable as-is or the editor needs its own
-   `viewmodel.py` (likely the latter; inspect is presentation-oriented).
+2. **`inspect` reuse vs. dedicated view-model.** RESOLVED (E1): dedicated
+   `editor/viewmodel.py`. It builds from `BlueprintSpec` (not the flattened
+   IR) so subgraphs stay groups, and reuses the compiler's `_resolve_llm` so
+   node cards show the exact provider/model the generated project would use.
+   `inspect`'s mermaid extraction stays presentation-oriented and untouched.
 3. **Frontend testing depth.** Minimum: vitest unit tests for the ops/view-model mapping.
    Playwright e2e is valuable but heavy for CI — decide at E2.
 4. **Multi-blueprint workspaces** (open a directory, switch between files) — explicitly

@@ -1,8 +1,9 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E0 — skeleton.** The command works and serves a placeholder
-> page; the visual canvas, editing, and action buttons arrive in later phases.
-> See [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
+> **Status: phase E1 — read-only visualizer.** The editor renders the
+> blueprint as a live graph with validation/lint diagnostics; editing and
+> action buttons arrive in later phases. See
+> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -22,13 +23,31 @@ it, never a separate store.
 | `--port`, `-p` | random free port | port to bind on 127.0.0.1 |
 | `--open/--no-open` | `--open` | open the browser automatically |
 
-## What E0 ships
+## What the editor shows (E1)
+
+- **Canvas** — the agent graph, auto-laid-out (ELK, top-down): one card per
+  node with its type, resolved `provider/model`, and tool count. Conditional
+  edges carry their condition as a label; the default route is dashed.
+  Supervisors show dashed delegation/return edges to their workers plus the
+  `on finish` route; parallel nodes show fan-out/fan-in edges; subgraphs
+  render as nested groups with their own entry and END markers. START/END
+  are explicit terminals, and a minimap helps with larger graphs.
+- **Issues panel** — the validation error (if the file doesn't validate) and
+  all lint findings, each clickable through to its source line.
+- **Source panel** — the raw YAML in a read-only Monaco pane with lint
+  findings as inline markers.
+- **Live reload** — the server watches the file; saving from any external
+  editor updates the canvas, issues, and source in place (no browser refresh).
+
+The canvas is a *view*: nodes can be dragged around for inspection, but
+nothing writes back to the file yet — that is phase E2.
+
+### API surface
 
 - `GET /api/health` — server liveness + version
-- `GET /api/blueprint` — raw YAML plus load/validation status
-- the embedded UI: a placeholder page showing the blueprint name, validity, and
-  source — proving the packaging spine (a React app served from inside the
-  `abp` wheel, no Node required at install time)
+- `GET /api/blueprint` — raw YAML, validation status, the graph view-model,
+  and lint findings with source positions
+- `WS /ws` — pushes `file_changed` when the blueprint changes on disk
 
 ## Working on the frontend (contributors)
 

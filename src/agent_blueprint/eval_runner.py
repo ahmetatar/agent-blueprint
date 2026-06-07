@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,7 @@ def run_eval_suites(
     install: bool,
     trace_store: Path | None = None,
     save_traces: str = "all",
+    process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
 ) -> EvalRunResult:
     results = [
         run_eval_suite(
@@ -89,6 +92,7 @@ def run_eval_suites(
             install=install,
             trace_store=trace_store,
             save_traces=save_traces,
+            process_hook=process_hook,
         )
         for suite in suites
     ]
@@ -108,6 +112,7 @@ def run_eval_suite(
     install: bool,
     trace_store: Path | None = None,
     save_traces: str = "all",
+    process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
 ) -> EvalSuiteResult:
     cases = load_eval_dataset(suite.dataset, blueprint_dir=blueprint_dir)
     effective_ir = replace(ir, harness=ir.harness or HarnessDef())
@@ -121,6 +126,7 @@ def run_eval_suite(
             trace_store=trace_store,
             save_traces=save_traces,
             origin="eval",
+            process_hook=process_hook,
         )
         case_results.append(_evaluate_case_result(suite, case, scenario_result))
 

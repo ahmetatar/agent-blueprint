@@ -62,6 +62,14 @@ export interface NodePosition {
   y: number;
 }
 
+/** What the Actions pane can offer for this blueprint. */
+export interface ActionSurface {
+  scenarios: string[];
+  eval_suites: string[];
+  has_gate_baseline: boolean;
+  sandbox: boolean;
+}
+
 export interface BlueprintInfo {
   path: string;
   name: string | null;
@@ -70,6 +78,7 @@ export interface BlueprintInfo {
   yaml: string;
   graph: GraphViewModel | null;
   lint: LintFinding[];
+  actions: ActionSurface | null;
   layout: Record<string, NodePosition>;
   hash: string;
 }
@@ -182,4 +191,64 @@ export async function saveLayout(positions: Record<string, NodePosition>): Promi
     body: JSON.stringify({ positions }),
   });
   if (!response.ok) throw new Error(`API responded ${response.status}`);
+}
+
+// Background action tasks (POST /api/actions/{action}) — mirror editor/tasks.py.
+
+export type TaskAction = "test" | "run" | "gate" | "generate" | "doctor";
+export type TaskStatus = "running" | "passed" | "failed" | "error" | "cancelled";
+
+export interface TaskProgressEvent {
+  kind: string;
+  [key: string]: unknown;
+}
+
+export interface TaskRecord {
+  id: string;
+  action: TaskAction;
+  params: Record<string, unknown>;
+  status: TaskStatus;
+  progress: TaskProgressEvent[];
+  result: Record<string, unknown> | null;
+  error: string | null;
+}
+
+/** Pushed over /ws while a task runs. */
+export interface TaskMessage {
+  type: "task_started" | "task_progress" | "task_done";
+  task?: TaskRecord;
+  task_id?: string;
+  event?: TaskProgressEvent;
+}
+
+/** Another task is already running — one at a time per editor session. */
+export class TaskBusyError extends Error {}
+
+export async function startAction(
+  action: TaskAction,
+  params: Record<string, unknown> = {},
+): Promise<TaskRecord> {
+  const response = await fetch(`/api/actions/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ params }),
+  });
+  if (response.status === 409) {
+    const body = (await response.json()) as { detail?: string };
+    throw new TaskBusyError(body.detail ?? "a task is already running");
+  }
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { task: TaskRecord }).task;
+}
+
+export async function fetchCurrentTask(): Promise<TaskRecord | null> {
+  const response = await fetch("/api/tasks/current");
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { task: TaskRecord | null }).task;
+}
+
+export async function cancelTask(): Promise<boolean> {
+  const response = await fetch("/api/tasks/current/cancel", { method: "POST" });
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { cancelled: boolean }).cancelled;
 }

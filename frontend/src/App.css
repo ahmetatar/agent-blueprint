@@ -704,3 +704,221 @@ body,
 .muted {
   color: #777;
 }
+
+/* ---- actions pane (E3a) -------------------------------------------------- */
+
+.running-dot {
+  margin-left: 0.4rem;
+  color: #1b6fd8;
+  font-size: 0.7rem;
+  vertical-align: middle;
+  animation: running-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes running-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.actions-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+}
+
+.actions-empty {
+  padding: 1rem;
+}
+
+.actions-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.action-button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.action-button:hover:not(:disabled) {
+  background: #f2f6fd;
+  border-color: #1b6fd8;
+}
+
+.action-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.action-cancel {
+  border-color: #c0392b;
+  color: #c0392b;
+}
+
+.action-cancel:hover {
+  background: #fdf2f0;
+}
+
+.action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.scenario-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.scenario-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+}
+
+.run-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.action-start-error {
+  color: #c0392b;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.task-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.task-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.task-action {
+  font-weight: 700;
+}
+
+.task-status {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.task-status-running {
+  background: #e8f0fc;
+  color: #1b6fd8;
+}
+
+.task-status-passed {
+  background: #e3f6e8;
+  color: #1b7f3b;
+}
+
+.task-status-failed,
+.task-status-error {
+  background: #fdeceb;
+  color: #c0392b;
+}
+
+.task-status-cancelled {
+  background: #f0f0f0;
+  color: #777;
+}
+
+.task-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.83rem;
+}
+
+.progress-pass {
+  color: #1b7f3b;
+}
+
+.progress-fail {
+  color: #c0392b;
+}
+
+.task-error,
+.task-output {
+  margin: 0;
+  padding: 0.6rem;
+  border-radius: 6px;
+  background: #f6f6f6;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.task-error {
+  background: #fdf2f0;
+  color: #8c2318;
+}
+
+.task-output-stderr {
+  background: #fdf8f0;
+}
+
+.task-summary {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.task-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.file-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+
+.failure-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.83rem;
+  color: #c0392b;
+}
+
+.gate-improved {
+  margin: 0;
+  font-size: 0.83rem;
+  color: #1b7f3b;
+}
+
+.gate-new {
+  margin: 0;
+  font-size: 0.83rem;
+  color: #1b6fd8;
+}

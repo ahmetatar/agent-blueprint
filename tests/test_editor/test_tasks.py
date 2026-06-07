@@ -1,0 +1,420 @@
+"""Tests for the editor's background action tasks (phase E3a)."""
+
+import json
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from agent_blueprint.editor import tasks as tasks_module
+from agent_blueprint.editor.tasks import (
+    ActionError,
+    TaskBusyError,
+    TaskManager,
+    action_surface,
+)
+from agent_blueprint.models.blueprint import BlueprintSpec
+from agent_blueprint.runners.local import LocalRunner, LocalRunResult
+from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
+
+_BLUEPRINT = """\
+blueprint:
+  name: "tasks-test"
+  version: "1.0"
+
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+
+agents:
+  assistant:
+    model: "openai/gpt-4o"
+    system_prompt: "You are a helpful assistant."
+
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+"""
+
+_HARNESS_SECTION = """\
+
+harness:
+  defaults:
+    llm_mode: live
+    tool_mode: live
+  scenarios:
+    - id: s1
+      input:
+        message: "hi"
+    - id: s2
+      input:
+        message: "yo"
+"""
+
+
+@pytest.fixture
+def blueprint_file(tmp_path: Path) -> Path:
+    path = tmp_path / "bp.yml"
+    path.write_text(_BLUEPRINT, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def harness_blueprint_file(tmp_path: Path) -> Path:
+    path = tmp_path / "bp.yml"
+    path.write_text(_BLUEPRINT + _HARNESS_SECTION, encoding="utf-8")
+    return path
+
+
+def _run_to_completion(
+    path: Path, action: str, params: dict[str, Any] | None = None
+) -> tuple[Any, list[dict[str, Any]]]:
+    events: list[dict[str, Any]] = []
+    manager = TaskManager(path, events.append)
+    record = manager.start(action, params or {})
+    manager.join(timeout=30)
+    assert record.status != "running"
+    return record, events
+
+
+def _fake_run_capture(returncode: int = 0, stdout: str = "ok"):
+    def fake(self: LocalRunner, user_input: str | None = None, **kwargs: Any) -> LocalRunResult:
+        return LocalRunResult(
+            returncode=returncode,
+            stdout=stdout,
+            stderr="",
+            trace_file=None,
+            trace_manifest={"trace": []},
+        )
+
+    return fake
+
+
+# ---------------------------------------------------------------------------
+# TaskManager mechanics
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_action_raises(blueprint_file: Path) -> None:
+    manager = TaskManager(blueprint_file, lambda message: None)
+    with pytest.raises(ActionError, match="unknown action"):
+        manager.start("bogus", {})
+
+
+def test_started_and_done_events_published(blueprint_file: Path) -> None:
+    record, events = _run_to_completion(blueprint_file, "doctor")
+    types = [event["type"] for event in events]
+    assert types[0] == "task_started"
+    assert types[-1] == "task_done"
+    assert events[-1]["task"]["id"] == record.id
+    assert events[-1]["task"]["status"] == record.status
+
+
+def test_second_start_while_running_raises_busy(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = threading.Event()
+
+    def slow_handler(ctx: Any) -> tuple[str, dict[str, Any]]:
+        release.wait(timeout=10)
+        return ("passed", {})
+
+    monkeypatch.setitem(tasks_module._HANDLERS, "doctor", slow_handler)
+    manager = TaskManager(blueprint_file, lambda message: None)
+    record = manager.start("doctor", {})
+    try:
+        with pytest.raises(TaskBusyError):
+            manager.start("doctor", {})
+    finally:
+        release.set()
+    manager.join(timeout=10)
+    assert record.status == "passed"
+    # The slot frees up once the first task finishes.
+    second = manager.start("doctor", {})
+    manager.join(timeout=30)
+    assert second.status == "passed"
+
+
+def test_invalid_blueprint_yields_error_status(tmp_path: Path) -> None:
+    path = tmp_path / "bp.yml"
+    path.write_text("blueprint:\n  version: '1.0'\n", encoding="utf-8")
+    record, _ = _run_to_completion(path, "doctor")
+    assert record.status == "error"
+    assert "does not validate" in (record.error or "")
+
+
+def test_cancel_terminates_running_subprocess(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run_capture(
+        self: LocalRunner, user_input: str | None = None, **kwargs: Any
+    ) -> LocalRunResult:
+        # Spawn a real child and hand it to the hook, like _execute does.
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if self._process_hook is not None:
+            self._process_hook(process)
+        process.communicate()
+        return LocalRunResult(
+            returncode=process.returncode, stdout="", stderr="", trace_file=None,
+            trace_manifest=None,
+        )
+
+    monkeypatch.setattr(LocalRunner, "run_capture", fake_run_capture)
+    manager = TaskManager(blueprint_file, lambda message: None)
+    started = time.monotonic()
+    record = manager.start("run", {"input": "hello", "install": False})
+    for _ in range(200):  # wait for the child to register
+        if manager._process is not None:
+            break
+        time.sleep(0.05)
+    assert manager._process is not None
+    assert manager.cancel() is True
+    manager.join(timeout=15)
+    assert record.status == "cancelled"
+    assert time.monotonic() - started < 25  # nowhere near the child's sleep(30)
+
+
+def test_cancel_returns_false_when_idle(blueprint_file: Path) -> None:
+    manager = TaskManager(blueprint_file, lambda message: None)
+    assert manager.cancel() is False
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_action_passes(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "doctor")
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["errors"] == 0
+    assert record.result["target"] == "langgraph"
+
+
+def test_generate_action_writes_next_to_blueprint(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "generate")
+    assert record.status == "passed"
+    assert record.result is not None
+    output_dir = Path(record.result["output_dir"])
+    assert output_dir == blueprint_file.parent / "tasks-test-langgraph"
+    assert (output_dir / "main.py").is_file()
+    assert "main.py" in record.result["files"]
+
+
+def test_generate_action_unknown_target(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "generate", {"target": "nope"})
+    assert record.status == "error"
+    assert "unknown target" in (record.error or "")
+
+
+def test_test_action_without_scenarios_errors(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "test")
+    assert record.status == "error"
+    assert "no harness scenarios" in (record.error or "")
+
+
+def test_test_action_runs_all_scenarios(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, events = _run_to_completion(harness_blueprint_file, "test")
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["total"] == 2
+    assert record.result["failed_count"] == 0
+    kinds = [event["event"]["kind"] for event in events if event["type"] == "task_progress"]
+    assert kinds == [
+        "scenario_started",
+        "scenario_finished",
+        "scenario_started",
+        "scenario_finished",
+    ]
+
+
+def test_test_action_scenario_filter(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(harness_blueprint_file, "test", {"scenarios": ["s2"]})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert [item["scenario"] for item in record.result["scenarios"]] == ["s2"]
+
+
+def test_test_action_unknown_scenario_errors(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(harness_blueprint_file, "test", {"scenarios": ["nope"]})
+    assert record.status == "error"
+    assert "unknown scenario" in (record.error or "")
+
+
+def test_test_action_failing_scenario(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(returncode=1))
+    record, _ = _run_to_completion(harness_blueprint_file, "test")
+    assert record.status == "failed"
+    assert record.result is not None
+    assert record.result["failed_count"] == 2
+
+
+def test_run_action_requires_input(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "run")
+    assert record.status == "error"
+    assert "input" in (record.error or "")
+
+
+def test_run_action_captures_output(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(stdout="hello back"))
+    record, _ = _run_to_completion(blueprint_file, "run", {"input": "hello", "install": False})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["returncode"] == 0
+    assert record.result["stdout"] == "hello back"
+
+
+def test_run_action_refuses_sandboxed_blueprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "bp.yml"
+    path.write_text(
+        _BLUEPRINT + "\nrun:\n  sandbox:\n    enabled: true\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(path, "run", {"input": "hello"})
+    assert record.status == "error"
+    assert "sandbox" in (record.error or "")
+
+
+def test_gate_without_anything_to_gate_errors(blueprint_file: Path) -> None:
+    record, _ = _run_to_completion(blueprint_file, "gate")
+    assert record.status == "error"
+    assert "nothing to gate" in (record.error or "")
+
+
+def test_gate_requires_baseline(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(harness_blueprint_file, "gate")
+    assert record.status == "error"
+    assert "no gate baseline" in (record.error or "")
+
+
+def test_gate_update_baseline_then_pass(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(
+        harness_blueprint_file, "gate", {"update_baseline": True}
+    )
+    assert record.status == "passed"
+    baseline_path = harness_blueprint_file.parent / ".abp" / "gate-baseline.json"
+    assert baseline_path.is_file()
+    snapshot = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert snapshot["blueprint"] == "tasks-test"
+
+    record, _ = _run_to_completion(harness_blueprint_file, "gate")
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["passed"] is True
+    assert record.result["regressions"] == []
+
+
+def test_gate_refuses_red_baseline(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(returncode=1))
+    record, _ = _run_to_completion(
+        harness_blueprint_file, "gate", {"update_baseline": True}
+    )
+    assert record.status == "failed"
+    assert not (harness_blueprint_file.parent / ".abp" / "gate-baseline.json").exists()
+
+
+def test_gate_detects_regression(
+    harness_blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    _run_to_completion(harness_blueprint_file, "gate", {"update_baseline": True})
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(returncode=1))
+    record, events = _run_to_completion(harness_blueprint_file, "gate")
+    assert record.status == "failed"
+    assert record.result is not None
+    assert record.result["passed"] is False
+    assert any("regressed" in line for line in record.result["regressions"])
+
+
+# ---------------------------------------------------------------------------
+# Action surface (drives the UI's buttons)
+# ---------------------------------------------------------------------------
+
+
+def test_action_surface_lists_scenarios(harness_blueprint_file: Path) -> None:
+    spec = BlueprintSpec.model_validate(load_blueprint_yaml(harness_blueprint_file))
+    surface = action_surface(spec, harness_blueprint_file)
+    assert surface["scenarios"] == ["s1", "s2"]
+    assert surface["eval_suites"] == []
+    assert surface["has_gate_baseline"] is False
+    assert surface["sandbox"] is False
+
+
+def test_action_surface_flags_baseline_and_sandbox(tmp_path: Path) -> None:
+    path = tmp_path / "bp.yml"
+    path.write_text(
+        _BLUEPRINT + "\nrun:\n  sandbox:\n    enabled: true\n", encoding="utf-8"
+    )
+    baseline = tmp_path / ".abp" / "gate-baseline.json"
+    baseline.parent.mkdir()
+    baseline.write_text("{}", encoding="utf-8")
+    spec = BlueprintSpec.model_validate(load_blueprint_yaml(path))
+    surface = action_surface(spec, path)
+    assert surface["has_gate_baseline"] is True
+    assert surface["sandbox"] is True
+
+
+# ---------------------------------------------------------------------------
+# LocalRunner process_hook (the editor's cancel handle)
+# ---------------------------------------------------------------------------
+
+
+def test_local_runner_process_hook_receives_child(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_blueprint.ir.compiler import compile_blueprint
+
+    ir = compile_blueprint(BlueprintSpec.model_validate(load_blueprint_yaml(blueprint_file)))
+    captured: list[subprocess.Popen[str]] = []
+    runner = LocalRunner(ir, process_hook=captured.append)
+
+    def fake_generate(self: LocalRunner) -> None:
+        assert self._tempdir is not None
+        (self._tempdir / "_abp_runner.py").write_text("print('hi')\n", encoding="utf-8")
+
+    monkeypatch.setattr(LocalRunner, "_generate", fake_generate)
+    result = runner.run_capture(user_input="x")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "hi"
+    assert len(captured) == 1
+    assert captured[0].poll() == 0

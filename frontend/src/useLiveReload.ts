@@ -1,13 +1,21 @@
 import { useEffect, useRef } from "react";
+import type { TaskMessage } from "./api";
 
 /**
- * Subscribe to the server's /ws push channel and invoke `onChange` whenever
- * the blueprint file changes on disk. Reconnects with a small backoff so a
- * server restart (or dev-server proxy hiccup) recovers without a page reload.
+ * Subscribe to the server's /ws push channel: invoke `onChange` whenever the
+ * blueprint file changes on disk, and `onTaskMessage` for background-task
+ * events (task_started / task_progress / task_done). Reconnects with a small
+ * backoff so a server restart (or dev-server proxy hiccup) recovers without
+ * a page reload.
  */
-export function useLiveReload(onChange: () => void): void {
-  const handler = useRef(onChange);
-  handler.current = onChange;
+export function useLiveReload(
+  onChange: () => void,
+  onTaskMessage?: (message: TaskMessage) => void,
+): void {
+  const changeHandler = useRef(onChange);
+  changeHandler.current = onChange;
+  const taskHandler = useRef(onTaskMessage);
+  taskHandler.current = onTaskMessage;
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -19,7 +27,9 @@ export function useLiveReload(onChange: () => void): void {
       socket = new WebSocket(`${scheme}://${window.location.host}/ws`);
       socket.onmessage = (event) => {
         const message = JSON.parse(event.data) as { type?: string };
-        if (message.type === "file_changed") handler.current();
+        if (message.type === "file_changed") changeHandler.current();
+        else if (message.type?.startsWith("task_"))
+          taskHandler.current?.(message as TaskMessage);
       };
       socket.onclose = () => {
         if (!disposed) timer = window.setTimeout(connect, 1500);

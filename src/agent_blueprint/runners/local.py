@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,18 @@ class LocalRunResult:
 class LocalRunner:
     """Generates a blueprint into a temp dir and runs it in the current Python env."""
 
-    def __init__(self, ir: AgentGraph, thread_id: str = "default") -> None:
+    def __init__(
+        self,
+        ir: AgentGraph,
+        thread_id: str = "default",
+        process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
+    ) -> None:
         self._ir = ir
         self._thread_id = thread_id
         self._tempdir: Path | None = None
+        # Called with the child process right after spawn — lets a caller
+        # (e.g. the editor's task runner) terminate a run on cancellation.
+        self._process_hook = process_hook
 
     # ------------------------------------------------------------------
     # Public API
@@ -182,14 +191,20 @@ class LocalRunner:
         if user_input is not None:
             cmd.append(user_input)
 
-        return subprocess.run(
+        # Popen (rather than subprocess.run) so the process handle can be
+        # exposed via process_hook before we block on completion.
+        proc = subprocess.Popen(
             cmd,
             cwd=str(self._tempdir),
             env=env,
-            check=False,
-            capture_output=capture_output,
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.PIPE if capture_output else None,
             text=True,
         )
+        if self._process_hook is not None:
+            self._process_hook(proc)
+        stdout, stderr = proc.communicate()
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
     def _build_env(
         self,

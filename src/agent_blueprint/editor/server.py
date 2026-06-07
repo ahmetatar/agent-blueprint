@@ -26,7 +26,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
 from watchfiles import awatch
@@ -34,6 +34,7 @@ from watchfiles import awatch
 from agent_blueprint.editor import layout_store
 from agent_blueprint.editor.diagnostics import lint_with_positions
 from agent_blueprint.editor.ops import EditOp, OpError, apply_ops
+from agent_blueprint.editor.tasks import ActionError, TaskBusyError, TaskManager, action_surface
 from agent_blueprint.editor.viewmodel import build_view_model
 from agent_blueprint.exceptions import BlueprintValidationError
 from agent_blueprint.models.blueprint import BlueprintSpec
@@ -80,6 +81,8 @@ def blueprint_info(path: Path) -> dict[str, Any]:
         "yaml": raw_text,
         "graph": build_view_model(spec) if spec is not None else None,
         "lint": lint_with_positions(spec, raw_text) if spec is not None else [],
+        # What the Actions pane can offer (scenario ids, eval suites, …).
+        "actions": action_surface(spec, path) if spec is not None else None,
         "layout": layout_store.load_layout(path),
         # Canvas ops send this back as base_hash so the server can detect
         # "file changed underneath" instead of mutating a stale document.
@@ -125,6 +128,10 @@ class NodePosition(BaseModel):
 
 class LayoutSaveRequest(BaseModel):
     positions: dict[str, NodePosition]
+
+
+class ActionRequest(BaseModel):
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class _WsBroadcaster:
@@ -188,9 +195,28 @@ def create_app(
     """Build the editor app: token guard, /api endpoints, /ws, embedded UI mount."""
     broadcaster = _WsBroadcaster()
     last_write: dict[str, str | None] = {"hash": None}
+    loop_box: dict[str, asyncio.AbstractEventLoop | None] = {"loop": None}
+
+    def publish_from_worker(message: dict[str, Any]) -> None:
+        """Thread-safe bridge: task worker threads → WS broadcast on the loop.
+
+        Without a captured loop (lifespan-less TestClient) events are dropped;
+        the task record still accumulates them for GET /api/tasks/current.
+        """
+        loop = loop_box["loop"]
+        if loop is None or loop.is_closed():
+            return
+
+        def _send() -> None:
+            asyncio.ensure_future(broadcaster.broadcast(message))
+
+        loop.call_soon_threadsafe(_send)
+
+    tasks = TaskManager(blueprint_path, publish_from_worker)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        loop_box["loop"] = asyncio.get_running_loop()
         stop_event = asyncio.Event()
         watcher = asyncio.create_task(
             watch_blueprint(
@@ -202,6 +228,7 @@ def create_app(
             )
         )
         yield
+        loop_box["loop"] = None
         stop_event.set()
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -281,6 +308,27 @@ def create_app(
             {"type": "file_changed", "path": str(blueprint_path), "origin": "save"}
         )
         return blueprint_info(blueprint_path)
+
+    @app.post("/api/actions/{action}")
+    def start_action(action: str, body: ActionRequest) -> Any:
+        """Start a background action task; progress streams over /ws."""
+        try:
+            record = tasks.start(action, body.params)
+        except TaskBusyError as e:
+            return JSONResponse({"detail": str(e)}, status_code=409)
+        except ActionError as e:  # unknown action name
+            return JSONResponse({"detail": str(e)}, status_code=404)
+        return {"task": record.to_dict()}
+
+    @app.get("/api/tasks/current")
+    def current_task() -> dict[str, Any]:
+        """The running (or most recently finished) task — lets a reloaded tab resync."""
+        record = tasks.current
+        return {"task": record.to_dict() if record is not None else None}
+
+    @app.post("/api/tasks/current/cancel")
+    def cancel_task() -> dict[str, bool]:
+        return {"cancelled": tasks.cancel()}
 
     @app.put("/api/layout")
     def save_layout(body: LayoutSaveRequest) -> dict[str, bool]:

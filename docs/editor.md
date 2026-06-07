@@ -1,12 +1,14 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E2 complete — source, canvas, and config editing.**
+> **Status: phase E3a — editing plus action buttons.**
 > The editor renders the blueprint as a live graph with validation/lint
 > diagnostics; the YAML source is editable in place, nodes/edges can be
 > added and removed on the canvas, node config (and the linked agent) is
 > editable through schema-driven forms, and node positions persist across
-> sessions. Action buttons / live execution (E3) come next. See
-> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
+> sessions. The Actions tab runs `abp test` / `run` / `gate` / `generate` /
+> `doctor` in the background with live progress. Per-node live execution
+> highlighting (E3b) comes next. See [abp-editor-plan.md](abp-editor-plan.md)
+> for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -85,12 +87,42 @@ it, never a separate store.
   was based on — if the file changed underneath (external editor, another
   tab), the edit is refused and the canvas refreshes instead.
 
+## Actions (E3a)
+
+The *Actions* tab runs the operational surfaces against the open blueprint —
+the same logic modules the CLI uses, with results shaped for the panel
+instead of the terminal:
+
+- **Test** — opens a scenario picker (all harness scenarios pre-selected) and
+  runs them like `abp test`; each scenario reports pass/fail live as it
+  finishes, with failure details underneath. Failed traces land in
+  `.abp/traces/` exactly as with the CLI.
+- **Run…** — a one-shot `abp run` with an input message you type; stdout and
+  stderr stream into the result view when the run finishes. The interactive
+  REPL stays CLI-only, and blueprints that request a sandbox
+  (`run.sandbox.enabled`) are refused with a hint to use `abp run` — the
+  editor never silently skips the sandbox.
+- **Gate** / **Update baseline** — `abp gate` against
+  `.abp/gate-baseline.json`, with regressions/improvements listed.
+  *Update baseline* asks for confirmation and refuses to write a red baseline,
+  same as `--update-baseline`.
+- **Generate** — writes the generated project next to the blueprint
+  (`<name>-langgraph/`) and lists the files.
+- **Doctor** — pre-generation diagnostics, rendered like the Issues panel.
+
+One task runs at a time; starting a second is refused (`409`). A running
+task shows a **Cancel** button — cancelling terminates the underlying
+generated-project subprocess, so even a live-LLM scenario stops promptly.
+Buttons that don't apply are disabled with a hint (no harness scenarios →
+no Test; nothing to gate → no Gate).
+
 ### API surface
 
 - `GET /api/health` — server liveness + version
 - `GET /api/blueprint` — raw YAML, validation status, the graph view-model,
-  lint findings with source positions, the saved canvas layout, and the
-  file's content hash
+  lint findings with source positions, the action surface (scenario/suite
+  ids, baseline presence), the saved canvas layout, and the file's content
+  hash
 - `GET /api/schema` — the blueprint JSON Schema (same as `abp schema`);
   drives the config forms
 - `PUT /api/blueprint/yaml` — whole-file save from the source pane
@@ -100,9 +132,17 @@ it, never a separate store.
   ruamel mutations; `409` when `base_hash` is stale, `422` when an op cannot
   apply or the result fails validation (nothing written)
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
+- `POST /api/actions/{test,run,gate,generate,doctor}` — start a background
+  action task; `409` when one is already running
+- `GET /api/tasks/current` — the running (or last finished) task, including
+  accumulated progress — lets a reloaded tab resync
+- `POST /api/tasks/current/cancel` — cancel the running task (terminates the
+  generated-project subprocess)
 - `WS /ws` — pushes `file_changed` when the blueprint changes on disk
   (`origin: disk`) or is saved through the editor (`origin: save`); the
-  watcher suppresses the disk echo of the editor's own writes
+  watcher suppresses the disk echo of the editor's own writes. Task events
+  ride the same channel: `task_started`, `task_progress` (per
+  scenario/suite), `task_done`
 
 ## Working on the frontend (contributors)
 

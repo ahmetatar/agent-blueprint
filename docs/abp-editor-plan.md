@@ -1,9 +1,11 @@
 # `abp editor` — Visual Blueprint Editor (Plan)
 
-Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), and all
-of E2 (E2a: editable source pane + layout sidecar; E2b: canvas ops;
-E2c: schema-driven config forms) shipped; E3 (actions + live execution) not
-started. User-facing docs: [editor.md](editor.md).
+Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), all of
+E2 (E2a: editable source pane + layout sidecar; E2b: canvas ops;
+E2c: schema-driven config forms), and E3a (action buttons: background task
+runner with cancel, scenario picker, per-scenario progress over WS) shipped;
+E3b (live trace stream + node highlight) and E3c (deploy behind confirm,
+docker/podman only) remain. User-facing docs: [editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).
@@ -181,10 +183,33 @@ end-to-end *before* any canvas work.
   current document and surface a "file changed underneath" prompt on mismatch.
 
 ### Phase E3 — actions + live execution view
-- Run / `abp test` / gate / generate / doctor buttons; trace events stream over WS;
-  nodes highlight as the corresponding `node_started`/`node_finished` events arrive.
-- Harness scenario picker; failed-assertion results pinned to nodes.
-- Deploy behind an explicit confirm (it is outward-facing).
+
+Split into a 3-PR series (June 2026, user-approved), mirroring E2:
+
+- **E3a — task backend + action buttons (SHIPPED).** `editor/tasks.py`: a
+  single-slot background task runner (worker thread, one task at a time,
+  `409` when busy) over the same logic modules the CLI uses; actions
+  test / run / gate / generate / doctor. Cancellation terminates the
+  generated-project subprocess via a new `process_hook` threaded through
+  `LocalRunner` → `run_harness_scenario` → `run_eval_suite(s)`. Per-scenario
+  / per-suite progress streams over the existing `/ws` channel
+  (`task_started` / `task_progress` / `task_done`) — this level of progress
+  needs no subprocess bridge because the harness loop runs in the editor
+  process. Frontend: Actions tab with scenario picker, run-input form,
+  gate/update-baseline (confirm-gated), live progress, per-action results,
+  Cancel. One-shot run only (REPL stays CLI-only); blueprints with
+  `run.sandbox.enabled` are refused rather than silently run unsandboxed.
+- **E3b — live trace stream + node highlight.** The observer registry lives
+  in the *generated* process, and the runner executes it as a subprocess —
+  so node-level events need a bridge: an env-activated stream observer in
+  `_abp_trace.py.j2` (`ABP_TRACE_STREAM_FILE` → one JSON line per event,
+  flushed) that the editor tails and forwards over WS as `task_trace`.
+  The JSON manifest stays byte-identical (PR #16 guarantee); works under
+  the sandbox too (the tempdir is mounted). Canvas nodes highlight on
+  `node_started`/`node_finished`; failed assertions pin to nodes.
+- **E3c — deploy (docker/podman only) behind an explicit confirm.** Cloud
+  deployers stay CLI-only for now (credential/region forms are too heavy
+  for editor v1).
 
 Each phase is independently shippable and lands as its own PR (or small PR series),
 per the repo's no-mixed-PRs rule.

@@ -1,13 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchBlueprint, fetchSchema, type BlueprintInfo, type LintFinding } from "./api";
+import {
+  fetchBlueprint,
+  fetchCurrentTask,
+  fetchSchema,
+  type BlueprintInfo,
+  type LintFinding,
+  type TaskMessage,
+  type TaskRecord,
+} from "./api";
 import { GraphCanvas } from "./graph/GraphCanvas";
+import { ActionsPane } from "./panel/ActionsPane";
 import { ConfigPane } from "./panel/ConfigPane";
 import { IssuesPane } from "./panel/IssuesPane";
 import { SourcePane, type SourcePaneHandle } from "./panel/SourcePane";
 import { useLiveReload } from "./useLiveReload";
 import "./App.css";
 
-type Tab = "issues" | "source" | "config";
+type Tab = "issues" | "source" | "config" | "actions";
+
+/**
+ * Merge an incoming task snapshot over the current one. The POST response
+ * (status "running") can resolve after the WS already delivered task_done —
+ * never let a stale "running" overwrite a terminal status, and keep the
+ * longer progress list while running.
+ */
+function mergeTask(prev: TaskRecord | null, next: TaskRecord): TaskRecord {
+  if (prev !== null && prev.id === next.id && next.status === "running") {
+    if (prev.status !== "running") return prev;
+    if (prev.progress.length > next.progress.length) {
+      return { ...next, progress: prev.progress };
+    }
+  }
+  return next;
+}
 
 export default function App() {
   const [info, setInfo] = useState<BlueprintInfo | null>(null);
@@ -16,6 +41,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("issues");
   const [sourceDirty, setSourceDirty] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [task, setTask] = useState<TaskRecord | null>(null);
   const sourceRef = useRef<SourcePaneHandle | null>(null);
   const pendingLine = useRef<number | null>(null);
 
@@ -28,8 +54,37 @@ export default function App() {
       .catch((e) => setFetchError(String(e)));
   }, []);
 
+  const applyTask = useCallback((next: TaskRecord) => {
+    setTask((prev) => mergeTask(prev, next));
+  }, []);
+
+  const onTaskMessage = useCallback(
+    (message: TaskMessage) => {
+      if (message.type === "task_progress") {
+        // Append the event; the full record arrives again with task_done.
+        setTask((prev) =>
+          prev !== null && prev.id === message.task_id && message.event
+            ? { ...prev, progress: [...prev.progress, message.event] }
+            : prev,
+        );
+      } else if (message.task) {
+        applyTask(message.task);
+      }
+    },
+    [applyTask],
+  );
+
   useEffect(reload, [reload]);
-  useLiveReload(reload);
+  useLiveReload(reload, onTaskMessage);
+
+  useEffect(() => {
+    // A reloaded tab resyncs with a task that is already running (or just ran).
+    fetchCurrentTask()
+      .then((current) => {
+        if (current !== null) applyTask(current);
+      })
+      .catch(() => undefined);
+  }, [applyTask]);
 
   useEffect(() => {
     // The schema only changes with the installed abp version — fetch once.
@@ -146,6 +201,18 @@ export default function App() {
                 </span>
               )}
             </button>
+            <button
+              type="button"
+              className={tab === "actions" ? "tab tab-active" : "tab"}
+              onClick={() => setTab("actions")}
+            >
+              Actions
+              {task?.status === "running" && (
+                <span className="running-dot" title="A task is running">
+                  ●
+                </span>
+              )}
+            </button>
           </nav>
           <div className="panel-body" hidden={tab !== "issues"}>
             <IssuesPane error={info.error} lint={info.lint} onFindingClick={showFindingInSource} />
@@ -165,6 +232,14 @@ export default function App() {
             ) : (
               <p className="config-empty muted">Select a node on the canvas to edit its config.</p>
             )}
+          </div>
+          <div className="panel-body" hidden={tab !== "actions"}>
+            <ActionsPane
+              surface={info.actions}
+              valid={info.valid}
+              task={task}
+              onTask={applyTask}
+            />
           </div>
           <div className="panel-body panel-body-source" hidden={tab !== "source"}>
             <SourcePane

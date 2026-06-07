@@ -398,3 +398,100 @@ def test_run_editor_dev_mode(blueprint_file: Path, monkeypatch: pytest.MonkeyPat
     # Dev mode: fixed port for the Vite proxy, no token in the URL.
     assert captured == {"port": server.DEV_PORT}
     assert urls == [f"http://127.0.0.1:{server.DEV_PORT}/"]
+
+
+# ---------------------------------------------------------------------------
+# Background action tasks (phase E3a)
+# ---------------------------------------------------------------------------
+
+
+def _poll_current_task(client: TestClient, timeout: float = 15.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        task = client.get("/api/tasks/current").json()["task"]
+        if task is not None and task["status"] != "running":
+            return task
+        time.sleep(0.05)
+    raise AssertionError("task did not finish in time")
+
+
+def test_blueprint_endpoint_actions_surface(blueprint_file: Path, tmp_path: Path) -> None:
+    body = _client(blueprint_file, tmp_path).get("/api/blueprint").json()
+    assert body["actions"] == {
+        "scenarios": [],
+        "eval_suites": [],
+        "has_gate_baseline": False,
+        "sandbox": False,
+    }
+
+
+def test_blueprint_endpoint_actions_none_when_invalid(tmp_path: Path) -> None:
+    path = tmp_path / "bp.yml"
+    path.write_text(_INVALID_BLUEPRINT, encoding="utf-8")
+    body = _client(path, tmp_path).get("/api/blueprint").json()
+    assert body["actions"] is None
+
+
+def test_action_task_lifecycle(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    assert client.get("/api/tasks/current").json()["task"] is None
+    resp = client.post("/api/actions/doctor", json={})  # params defaults to {}
+    assert resp.status_code == 200
+    started = resp.json()["task"]
+    assert started["action"] == "doctor"
+    task = _poll_current_task(client)
+    assert task["id"] == started["id"]
+    assert task["status"] == "passed"
+    assert task["result"]["errors"] == 0
+
+
+def test_action_unknown_name_404(blueprint_file: Path, tmp_path: Path) -> None:
+    resp = _client(blueprint_file, tmp_path).post("/api/actions/bogus", json={"params": {}})
+    assert resp.status_code == 404
+
+
+def test_action_busy_409(
+    blueprint_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from agent_blueprint.editor import tasks as tasks_module
+
+    release = threading.Event()
+
+    def slow_handler(ctx: object) -> tuple[str, dict]:
+        release.wait(timeout=10)
+        return ("passed", {})
+
+    monkeypatch.setitem(tasks_module._HANDLERS, "doctor", slow_handler)
+    client = _client(blueprint_file, tmp_path)
+    assert client.post("/api/actions/doctor", json={"params": {}}).status_code == 200
+    try:
+        resp = client.post("/api/actions/doctor", json={"params": {}})
+        assert resp.status_code == 409
+        assert "running" in resp.json()["detail"]
+    finally:
+        release.set()
+    _poll_current_task(client)
+
+
+def test_cancel_endpoint_idle_returns_false(blueprint_file: Path, tmp_path: Path) -> None:
+    resp = _client(blueprint_file, tmp_path).post("/api/tasks/current/cancel")
+    assert resp.status_code == 200
+    assert resp.json() == {"cancelled": False}
+
+
+def test_ws_pushes_task_events(blueprint_file: Path, tmp_path: Path) -> None:
+    # Lifespan client: the loop is captured, so worker-thread events reach /ws.
+    app = server.create_app(blueprint_file, static_dir=tmp_path / "no-static")
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            assert client.post("/api/actions/doctor", json={"params": {}}).status_code == 200
+            first = ws.receive_json()
+            assert first["type"] == "task_started"
+            assert first["task"]["action"] == "doctor"
+            message = ws.receive_json()
+            while message["type"] == "task_progress":
+                message = ws.receive_json()
+            assert message["type"] == "task_done"
+            assert message["task"]["status"] == "passed"

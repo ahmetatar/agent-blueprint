@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -120,6 +122,7 @@ def run_harness_scenario(
     trace_store: Path | None = None,
     save_traces: str = "all",
     origin: str = "harness",
+    process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
     tool_mode = (scenario.tool_mode or ir.harness.defaults.tool_mode).value  # type: ignore[union-attr]
@@ -144,7 +147,7 @@ def run_harness_scenario(
             },
         }
 
-    runner = LocalRunner(ir, thread_id=scenario.id)
+    runner = LocalRunner(ir, thread_id=scenario.id, process_hook=process_hook)
     execution_mode = resolve_harness_trace_mode(llm_mode, tool_mode)
     captured = runner.run_capture(
         user_input=scenario_user_input(ir, scenario),

@@ -8,6 +8,19 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E3a): Actions tab — run `abp test` / `run` / `gate` /
+  `generate` / `doctor` from the editor as background tasks (one at a time,
+  `409` when busy) with per-scenario/per-suite progress streamed over the
+  existing WebSocket (`task_started` / `task_progress` / `task_done`), a
+  harness scenario picker, a one-shot run input (REPL stays CLI-only;
+  sandboxed blueprints are refused with a hint rather than run unsandboxed),
+  gate with confirm-gated baseline update, and a Cancel button that
+  terminates the generated-project subprocess (new `process_hook` on
+  `LocalRunner`, threaded through `run_harness_scenario` and
+  `run_eval_suite(s)`). New endpoints: `POST /api/actions/{action}`,
+  `GET /api/tasks/current`, `POST /api/tasks/current/cancel`;
+  `GET /api/blueprint` now includes the action surface (scenario/suite ids,
+  baseline presence, sandbox flag)
 - `abp editor` (phase E2c): schema-driven config forms — selecting a node
   opens a Config panel with the node's fields (per node type, plus retry
   policy) and, for agent-backed nodes, the linked agent definition (model,

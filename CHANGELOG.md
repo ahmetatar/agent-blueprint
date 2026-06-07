@@ -8,6 +8,18 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E2b): canvas editing — draw edges between node handles
+  (a second outgoing edge converts a scalar `to:` into the conditional list
+  form, keeping the original target as the default route), delete nodes/edges
+  (node deletion cascades edge cleanup; synthetic edges are display-only),
+  and add agent/function nodes via a minimal dialog. Edits are applied as
+  targeted ruamel mutations (`POST /api/blueprint/ops`) so comments, key
+  order, and quoting on untouched lines survive byte-for-byte; the mutated
+  document is validated before anything is written, and a stale base hash
+  (file changed underneath) refuses the edit with a canvas refresh. The
+  shared ruamel dump settings now round-trip conventionally formatted
+  blueprints byte-identically (sequence offset 2, explicit `null`) — this
+  also improves `abp fix` output fidelity
 - `abp editor` (phase E2a): editable source pane + layout persistence — the
   Monaco pane saves back to the YAML file (`PUT /api/blueprint/yaml`,
   `Cmd/Ctrl+S`; unparseable YAML is rejected with the file untouched,

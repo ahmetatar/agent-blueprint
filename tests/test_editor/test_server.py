@@ -261,6 +261,105 @@ def test_watcher_suppresses_own_write_echo(blueprint_file: Path) -> None:
     assert server._is_own_write_echo(blueprint_file.parent / "gone.yml", lambda: own_hash) is False
 
 
+def test_blueprint_endpoint_includes_content_hash(blueprint_file: Path, tmp_path: Path) -> None:
+    body = _client(blueprint_file, tmp_path).get("/api/blueprint").json()
+    assert body["hash"] == server._content_hash(_VALID_BLUEPRINT)
+
+
+def test_ops_endpoint_applies_validates_and_writes(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={
+            "base_hash": base,
+            "ops": [
+                {
+                    "op": "add_node",
+                    "node_id": "helper",
+                    "node": {"agent": "assistant", "description": "Helps out"},
+                },
+                {
+                    "op": "add_edge",
+                    "from_node": "assistant",
+                    "target": "helper",
+                    "condition": "state.needs_help",
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["hash"] != base
+    content = blueprint_file.read_text(encoding="utf-8")
+    assert body["yaml"] == content
+    assert "helper:" in content
+    assert "condition: state.needs_help" in content
+    # The scalar `to: END` was normalized, keeping END as the default route.
+    assert "- default: END" in content
+    # Untouched regions keep their authored style.
+    assert 'name: "editor-test"' in content
+
+
+def test_ops_endpoint_stale_hash_conflict(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={"base_hash": "deadbeef", "ops": [{"op": "remove_node", "node_id": "assistant"}]},
+    )
+    assert resp.status_code == 409
+    assert "changed underneath" in resp.json()["detail"]
+    assert blueprint_file.read_text(encoding="utf-8") == _VALID_BLUEPRINT
+
+
+def test_ops_endpoint_op_error_rejected(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={"base_hash": base, "ops": [{"op": "remove_node", "node_id": "ghost"}]},
+    )
+    assert resp.status_code == 422
+    assert "does not exist" in resp.json()["detail"]
+    assert blueprint_file.read_text(encoding="utf-8") == _VALID_BLUEPRINT
+
+
+def test_ops_endpoint_validation_failure_writes_nothing(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    # Removing the entry-point node leaves a spec-invalid blueprint: canvas
+    # ops are strict (unlike whole-file saves), so nothing is written.
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={"base_hash": base, "ops": [{"op": "remove_node", "node_id": "assistant"}]},
+    )
+    assert resp.status_code == 422
+    assert "entry_point" in resp.json()["detail"]
+    assert blueprint_file.read_text(encoding="utf-8") == _VALID_BLUEPRINT
+
+
+def test_ops_endpoint_pushes_file_changed(blueprint_file: Path, tmp_path: Path) -> None:
+    # No lifespan → no watcher: the only WS event is the ops handler's push.
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    with client.websocket_connect("/ws") as ws:
+        resp = client.post(
+            "/api/blueprint/ops",
+            json={
+                "base_hash": base,
+                "ops": [
+                    {"op": "set_field", "path": "graph.nodes.assistant.description", "value": "x"}
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        message = ws.receive_json()
+    assert message["origin"] == "save"
+
+
 def test_layout_roundtrip_via_api(blueprint_file: Path, tmp_path: Path) -> None:
     client = _client(blueprint_file, tmp_path)
     assert client.get("/api/blueprint").json()["layout"] == {}

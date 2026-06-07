@@ -1,11 +1,11 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E2 (in progress) — source editing + layout persistence.**
+> **Status: phase E2 (in progress) — source + canvas editing.**
 > The editor renders the blueprint as a live graph with validation/lint
-> diagnostics, the YAML source is editable in place, and node positions
-> persist across sessions; canvas editing (add/remove nodes, draw edges) and
-> action buttons arrive in later phases. See
-> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
+> diagnostics; the YAML source is editable in place, nodes/edges can be
+> added and removed on the canvas, and node positions persist across
+> sessions. Schema-driven config forms (E2c) and action buttons (E3) come
+> next. See [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -55,17 +55,38 @@ it, never a separate store.
   restored on the next session. The sidecar is editor-private convenience
   state: never required, never validated, safe to delete (you just fall back
   to auto-layout). Coordinates deliberately stay out of the blueprint schema.
+- **Canvas editing** — structural edits write back to the YAML as *targeted
+  mutations* (set this key, remove this list item) — never a wholesale
+  re-serialization — so comments, key order, and quoting on untouched lines
+  survive byte-for-byte:
+  - **Draw an edge** by dragging between node handles (top = incoming,
+    bottom = outgoing). A second outgoing edge converts a scalar `to:` into
+    the conditional list form, keeping the original target as the default
+    route. Edges cannot cross a subgraph boundary.
+  - **Delete** a selected edge or node (`Backspace`). Deleting a node also
+    removes every edge that references it. Synthetic edges (START→entry,
+    supervisor delegation/return, parallel fan-out) are display-only.
+  - **Add a node** via the *+ Node* button (agent or function node;
+    top-level graph). Richer config forms are phase E2c.
 
-Canvas editing — adding/removing nodes, drawing edges, schema-driven config
-forms — is the next slice of phase E2.
+  Canvas ops are strict: the mutated document is validated *before* the file
+  is written, and an edit that would produce an invalid blueprint is rejected
+  with the error shown on the canvas. Each op batch carries the file hash it
+  was based on — if the file changed underneath (external editor, another
+  tab), the edit is refused and the canvas refreshes instead.
 
 ### API surface
 
 - `GET /api/health` — server liveness + version
 - `GET /api/blueprint` — raw YAML, validation status, the graph view-model,
-  lint findings with source positions, and the saved canvas layout
+  lint findings with source positions, the saved canvas layout, and the
+  file's content hash
 - `PUT /api/blueprint/yaml` — whole-file save from the source pane
   (parseable-YAML gate; broadcasts `file_changed` to other tabs)
+- `POST /api/blueprint/ops` — canvas ops (`add_node`, `remove_node`,
+  `add_edge`, `remove_edge`, `set_field`) applied as targeted ruamel
+  mutations; `409` when `base_hash` is stale, `422` when an op cannot apply
+  or the result fails validation (nothing written)
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
 - `WS /ws` — pushes `file_changed` when the blueprint changes on disk
   (`origin: disk`) or is saved through the editor (`origin: save`); the

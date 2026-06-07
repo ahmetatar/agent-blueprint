@@ -7,13 +7,26 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.representer import RoundTripRepresenter
 
 from agent_blueprint.exceptions import BlueprintValidationError
 
 _VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
+
+def _represent_explicit_null(representer: RoundTripRepresenter, data: None) -> Any:
+    """Dump None as explicit `null` (ruamel's default is an empty scalar)."""
+    return representer.represent_scalar("tag:yaml.org,2002:null", "null")
+
+
 yaml = YAML()
 yaml.preserve_quotes = True
+# Dump settings tuned so a load→dump round-trip of a conventionally formatted
+# blueprint (see examples/) is byte-identical — the editor's targeted-mutation
+# write path and `abp fix` both depend on untouched regions staying untouched.
+yaml.indent(mapping=2, sequence=4, offset=2)
+yaml.width = 4096  # never re-wrap long scalars
+yaml.representer.add_representer(type(None), _represent_explicit_null)
 
 
 def _merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -249,6 +262,24 @@ def _load_dotenv(blueprint_path: Path) -> None:
             break  # stop at first found
 
 
+def resolve_blueprint_data(data: Any, *, blueprint_path: Path) -> dict[str, Any]:
+    """Resolve a loaded blueprint mapping into plain, validated-ready data.
+
+    Accepts either a plain dict or a ruamel document (e.g. a mutated
+    ``CommentedMap`` from the editor's targeted-ops path), resolves harness
+    file references and ``${...}`` interpolation, and returns a plain dict
+    ready for ``BlueprintSpec.model_validate``.
+    """
+    plain = _to_plain(data)
+    if not isinstance(plain, dict):
+        raise BlueprintValidationError(
+            f"Expected a YAML mapping at top level: {blueprint_path}"
+        )
+    plain = _resolve_harness_refs(plain, blueprint_path=blueprint_path)
+    # Interpolate variables using the full document as context
+    return cast(dict[str, Any], _interpolate_value(plain, plain))
+
+
 def load_blueprint_yaml(path: Path) -> dict[str, Any]:
     """Load a blueprint YAML file, resolve variables, and return a plain dict.
 
@@ -265,8 +296,4 @@ def load_blueprint_yaml(path: Path) -> dict[str, Any]:
 
     _load_dotenv(path)
 
-    plain = _load_yaml_plain(path)
-    plain = _resolve_harness_refs(plain, blueprint_path=path)
-    # Interpolate variables using the full document as context
-    interpolated = cast(dict[str, Any], _interpolate_value(plain, plain))
-    return interpolated
+    return resolve_blueprint_data(_load_yaml_plain(path), blueprint_path=path)

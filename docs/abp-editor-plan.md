@@ -1,7 +1,9 @@
 # `abp editor` — Visual Blueprint Editor (Plan)
 
-Status: **IN PROGRESS** — E0 (skeleton) and E1 (read-only visualizer) shipped;
-E2/E3 not started. User-facing docs: [editor.md](editor.md).
+Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), and the
+E2 write path (E2a: editable source pane + layout sidecar; E2b: canvas ops)
+shipped; E2c (schema-driven config forms) and E3 not started. User-facing
+docs: [editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).

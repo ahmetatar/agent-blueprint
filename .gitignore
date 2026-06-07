@@ -28,6 +28,9 @@ htmlcov/
 *-crewai/
 *-plain/
 
+# ABP runtime state next to blueprints (traces, gate baseline, editor layout)
+.abp/
+
 # Secrets
 .env
 *.env

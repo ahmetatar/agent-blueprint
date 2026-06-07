@@ -198,7 +198,82 @@ def test_ws_pushes_file_changed_on_external_edit(blueprint_file: Path, tmp_path:
                 blueprint_file.read_text(encoding="utf-8") + "\n# touched\n", encoding="utf-8"
             )
             message = ws.receive_json()
-    assert message == {"type": "file_changed", "path": str(blueprint_file)}
+    assert message == {"type": "file_changed", "path": str(blueprint_file), "origin": "disk"}
+
+
+def test_save_yaml_valid_writes_file(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    updated = _VALID_BLUEPRINT.replace("editor-test", "renamed")
+    resp = client.put("/api/blueprint/yaml", json={"yaml": updated})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["name"] == "renamed"
+    assert blueprint_file.read_text(encoding="utf-8") == updated
+
+
+def test_save_yaml_spec_invalid_still_writes(blueprint_file: Path, tmp_path: Path) -> None:
+    # The file is the source of truth: spec-invalid (but parseable) content is
+    # written, exactly as an external editor could; the error rides back in
+    # the response instead of blocking the save.
+    client = _client(blueprint_file, tmp_path)
+    resp = client.put("/api/blueprint/yaml", json={"yaml": _INVALID_BLUEPRINT})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert body["error"]
+    assert blueprint_file.read_text(encoding="utf-8") == _INVALID_BLUEPRINT
+
+
+def test_save_yaml_syntax_error_rejected_file_untouched(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    client = _client(blueprint_file, tmp_path)
+    for bad in ("foo: [unclosed", "", "- just\n- a list\n"):
+        resp = client.put("/api/blueprint/yaml", json={"yaml": bad})
+        assert resp.status_code == 422
+        assert resp.json()["detail"]
+    assert blueprint_file.read_text(encoding="utf-8") == _VALID_BLUEPRINT
+
+
+def test_save_yaml_pushes_file_changed_to_other_tabs(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    # No `with` block → no lifespan → no file watcher: the only possible WS
+    # event is the save handler's own push, making this deterministic.
+    client = _client(blueprint_file, tmp_path)
+    with client.websocket_connect("/ws") as ws:
+        updated = _VALID_BLUEPRINT + "# saved\n"
+        assert client.put("/api/blueprint/yaml", json={"yaml": updated}).status_code == 200
+        message = ws.receive_json()
+    assert message == {"type": "file_changed", "path": str(blueprint_file), "origin": "save"}
+
+
+def test_watcher_suppresses_own_write_echo(blueprint_file: Path) -> None:
+    # The watcher drops change events whose content hash matches the last API
+    # write (that save already pushed its own event); anything else — other
+    # content, no recorded write, unreadable file — must broadcast.
+    own = blueprint_file.read_text(encoding="utf-8")
+    own_hash = server._content_hash(own)
+    assert server._is_own_write_echo(blueprint_file, lambda: own_hash) is True
+    assert server._is_own_write_echo(blueprint_file, lambda: "different") is False
+    assert server._is_own_write_echo(blueprint_file, lambda: None) is False
+    assert server._is_own_write_echo(blueprint_file.parent / "gone.yml", lambda: own_hash) is False
+
+
+def test_layout_roundtrip_via_api(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    assert client.get("/api/blueprint").json()["layout"] == {}
+    resp = client.put("/api/layout", json={"positions": {"assistant": {"x": 10.5, "y": -3}}})
+    assert resp.status_code == 200
+    assert client.get("/api/blueprint").json()["layout"] == {"assistant": {"x": 10.5, "y": -3.0}}
+    assert (blueprint_file.parent / ".abp" / "editor-layout.json").is_file()
+
+
+def test_layout_rejects_malformed_positions(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    resp = client.put("/api/layout", json={"positions": {"assistant": {"x": "left"}}})
+    assert resp.status_code == 422
 
 
 def test_run_editor_dev_mode(blueprint_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:

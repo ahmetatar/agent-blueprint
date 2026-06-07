@@ -1,6 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 import { MarkerType } from "@xyflow/react";
-import type { GraphViewModel, LintFinding, VmNode } from "../api";
+import type { GraphViewModel, LintFinding, NodePosition, VmNode } from "../api";
 import { layoutGraph } from "./layout";
 
 export interface FlowGraph {
@@ -30,8 +30,18 @@ const EDGE_STYLE: Record<string, Partial<Edge>> = {
   normal: { style: { stroke: "#6b7280" } },
 };
 
-/** View-model + lint findings → laid-out React Flow nodes/edges. */
-export async function toFlow(graph: GraphViewModel, lint: LintFinding[]): Promise<FlowGraph> {
+/**
+ * View-model + lint findings → laid-out React Flow nodes/edges.
+ *
+ * `saved` positions (the layout sidecar, parent-relative like React Flow's
+ * own coordinates) win over the ELK pass per node; ELK still provides sizes
+ * and the positions of any node the sidecar doesn't know yet.
+ */
+export async function toFlow(
+  graph: GraphViewModel,
+  lint: LintFinding[],
+  saved: Record<string, NodePosition> = {},
+): Promise<FlowGraph> {
   const boxes = await layoutGraph(graph);
 
   const badges = new Map<string, LintFinding[]>();
@@ -46,10 +56,11 @@ export async function toFlow(graph: GraphViewModel, lint: LintFinding[]): Promis
   const nodes: Node[] = graph.nodes.map((node) => {
     const box = boxes.get(node.id);
     const isGroup = rfNodeType(node) === "group";
+    const position = saved[node.id] ?? { x: box?.x ?? 0, y: box?.y ?? 0 };
     return {
       id: node.id,
       type: rfNodeType(node),
-      position: { x: box?.x ?? 0, y: box?.y ?? 0 },
+      position,
       // Explicit dimensions (from the layout pass) keep edge anchors and the
       // minimap correct before the DOM has measured the custom nodes.
       width: box?.width,

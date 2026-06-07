@@ -11,6 +11,7 @@ lazy import and prints the install hint.
 
 import asyncio
 import contextlib
+import hashlib
 import secrets
 import socket
 import threading
@@ -24,14 +25,18 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import YAMLError
 from watchfiles import awatch
 
+from agent_blueprint.editor import layout_store
 from agent_blueprint.editor.diagnostics import lint_with_positions
 from agent_blueprint.editor.viewmodel import build_view_model
 from agent_blueprint.exceptions import BlueprintValidationError
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
+from agent_blueprint.utils.yaml_loader import yaml as _ruamel_yaml
 
 STATIC_DIR = Path(__file__).parent / "static"
 TOKEN_COOKIE = "abp_editor_token"
@@ -51,7 +56,7 @@ def _abp_version() -> str:
 
 
 def blueprint_info(path: Path) -> dict[str, Any]:
-    """Raw YAML, validation status, graph view-model, and lint findings."""
+    """Raw YAML, validation status, graph view-model, lint findings, layout."""
     raw_text = path.read_text(encoding="utf-8")
     name: str | None = None
     error: str | None = None
@@ -69,7 +74,43 @@ def blueprint_info(path: Path) -> dict[str, Any]:
         "yaml": raw_text,
         "graph": build_view_model(spec) if spec is not None else None,
         "lint": lint_with_positions(spec, raw_text) if spec is not None else [],
+        "layout": layout_store.load_layout(path),
     }
+
+
+def yaml_syntax_error(text: str) -> str | None:
+    """None if `text` parses as a top-level YAML mapping, else the error to show.
+
+    This is the only gate on whole-file saves: spec-invalid content is still
+    written (the file is the source of truth, and external editors can save
+    invalid specs too) — the validation error just comes back in the response.
+    """
+    try:
+        raw = _ruamel_yaml.load(text)
+    except YAMLError as e:
+        return str(e)
+    if raw is None:
+        return "Blueprint must not be empty"
+    if not isinstance(raw, CommentedMap):
+        return "Expected a YAML mapping at the top level"
+    return None
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+class YamlSaveRequest(BaseModel):
+    yaml: str
+
+
+class NodePosition(BaseModel):
+    x: float
+    y: float
+
+
+class LayoutSaveRequest(BaseModel):
+    positions: dict[str, NodePosition]
 
 
 class _WsBroadcaster:
@@ -91,16 +132,37 @@ async def watch_blueprint(
     broadcaster: _WsBroadcaster,
     stop_event: asyncio.Event,
     debounce_ms: int = 400,
+    own_write_hash: Callable[[], str | None] = lambda: None,
 ) -> None:
     """Push a `file_changed` event whenever the blueprint changes on disk.
 
     Watches the parent directory (editors save via atomic rename, which would
     drop a watch on the file itself) and filters to the blueprint path.
+
+    Saves made through the editor API broadcast their own event, so the disk
+    echo of those writes is suppressed: when the changed file's content hash
+    matches the last API write, the event is dropped. Suppressing by content
+    (rather than consuming a one-shot flag) also absorbs duplicate filesystem
+    events for a single write.
     """
     resolved = path.resolve()
     async for changes in awatch(path.parent, stop_event=stop_event, debounce=debounce_ms):
-        if any(Path(changed).resolve() == resolved for _, changed in changes):
-            await broadcaster.broadcast({"type": "file_changed", "path": str(path)})
+        if not any(Path(changed).resolve() == resolved for _, changed in changes):
+            continue
+        if _is_own_write_echo(path, own_write_hash):
+            continue
+        await broadcaster.broadcast(
+            {"type": "file_changed", "path": str(path), "origin": "disk"}
+        )
+
+
+def _is_own_write_echo(path: Path, own_write_hash: Callable[[], str | None]) -> bool:
+    """True when a change event is just the disk echo of our own API write."""
+    try:
+        current = _content_hash(path.read_text(encoding="utf-8"))
+    except OSError:
+        return False  # deleted/unreadable — let the UI refetch and surface it
+    return current == own_write_hash()
 
 
 def create_app(
@@ -111,12 +173,19 @@ def create_app(
 ) -> FastAPI:
     """Build the editor app: token guard, /api endpoints, /ws, embedded UI mount."""
     broadcaster = _WsBroadcaster()
+    last_write: dict[str, str | None] = {"hash": None}
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stop_event = asyncio.Event()
         watcher = asyncio.create_task(
-            watch_blueprint(blueprint_path, broadcaster, stop_event, watch_debounce_ms)
+            watch_blueprint(
+                blueprint_path,
+                broadcaster,
+                stop_event,
+                watch_debounce_ms,
+                own_write_hash=lambda: last_write["hash"],
+            )
         )
         yield
         stop_event.set()
@@ -151,6 +220,29 @@ def create_app(
     @app.get("/api/blueprint")
     def blueprint() -> dict[str, Any]:
         return blueprint_info(blueprint_path)
+
+    @app.put("/api/blueprint/yaml")
+    async def save_yaml(body: YamlSaveRequest) -> Any:
+        """Whole-file save from the source pane (last-writer-wins)."""
+        syntax_error = yaml_syntax_error(body.yaml)
+        if syntax_error is not None:
+            return JSONResponse({"detail": syntax_error}, status_code=422)
+        blueprint_path.write_text(body.yaml, encoding="utf-8")
+        last_write["hash"] = _content_hash(body.yaml)
+        # Other connected tabs sync from this push; the watcher suppresses the
+        # disk echo so each save produces exactly one event.
+        await broadcaster.broadcast(
+            {"type": "file_changed", "path": str(blueprint_path), "origin": "save"}
+        )
+        return blueprint_info(blueprint_path)
+
+    @app.put("/api/layout")
+    def save_layout(body: LayoutSaveRequest) -> dict[str, bool]:
+        layout_store.save_layout(
+            blueprint_path,
+            {node_id: {"x": pos.x, "y": pos.y} for node_id, pos in body.positions.items()},
+        )
+        return {"ok": True}
 
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket) -> None:

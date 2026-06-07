@@ -8,6 +8,14 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E1): read-only blueprint visualizer — React Flow canvas
+  with ELK auto-layout (typed node cards with resolved provider/model,
+  condition-labeled edges, supervisor delegation/parallel fan-out edges,
+  subgraph groups, START/END terminals, minimap), an Issues panel
+  (validation + lint findings, click-through to source), a read-only Monaco
+  source pane with lint markers, and live reload over WebSocket when the
+  YAML changes on disk (`watchfiles`); `/api/blueprint` now returns the graph
+  view-model and position-mapped lint findings
 - `abp editor <blueprint>` (phase E0): local web server with an embedded React
   UI placeholder — `/api/health` + `/api/blueprint`, per-session URL token,
   random free port on 127.0.0.1; `editor` extra (`fastapi`, `uvicorn`) and a

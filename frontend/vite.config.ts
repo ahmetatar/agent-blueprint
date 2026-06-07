@@ -5,6 +5,11 @@ import react from "@vitejs/plugin-react";
 // (and editable-install contributors) only need to run `npm run build`.
 export default defineConfig({
   plugins: [react()],
+  worker: {
+    // Monaco's editor worker is bundled as an ES module (the default iife
+    // worker output chokes on code-split imports).
+    format: "es",
+  },
   build: {
     outDir: "../src/agent_blueprint/editor/static",
     emptyOutDir: true,

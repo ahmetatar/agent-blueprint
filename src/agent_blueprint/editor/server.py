@@ -9,21 +9,26 @@ imported when the `editor` extra is installed. `cli/editor_cmd.py` does the
 lazy import and prints the install hint.
 """
 
+import asyncio
+import contextlib
 import secrets
 import socket
 import threading
 import webbrowser
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from watchfiles import awatch
 
+from agent_blueprint.editor.diagnostics import lint_with_positions
+from agent_blueprint.editor.viewmodel import build_view_model
 from agent_blueprint.exceptions import BlueprintValidationError
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
@@ -46,10 +51,11 @@ def _abp_version() -> str:
 
 
 def blueprint_info(path: Path) -> dict[str, Any]:
-    """Raw YAML text plus load/validation status for the UI header."""
+    """Raw YAML, validation status, graph view-model, and lint findings."""
     raw_text = path.read_text(encoding="utf-8")
     name: str | None = None
     error: str | None = None
+    spec: BlueprintSpec | None = None
     try:
         spec = BlueprintSpec.model_validate(load_blueprint_yaml(path))
         name = spec.blueprint.name
@@ -61,16 +67,64 @@ def blueprint_info(path: Path) -> dict[str, Any]:
         "valid": error is None,
         "error": error,
         "yaml": raw_text,
+        "graph": build_view_model(spec) if spec is not None else None,
+        "lint": lint_with_positions(spec, raw_text) if spec is not None else [],
     }
+
+
+class _WsBroadcaster:
+    """Tracks connected editor tabs and fans events out to all of them."""
+
+    def __init__(self) -> None:
+        self.connections: set[WebSocket] = set()
+
+    async def broadcast(self, message: dict[str, Any]) -> None:
+        for ws in list(self.connections):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                self.connections.discard(ws)
+
+
+async def watch_blueprint(
+    path: Path,
+    broadcaster: _WsBroadcaster,
+    stop_event: asyncio.Event,
+    debounce_ms: int = 400,
+) -> None:
+    """Push a `file_changed` event whenever the blueprint changes on disk.
+
+    Watches the parent directory (editors save via atomic rename, which would
+    drop a watch on the file itself) and filters to the blueprint path.
+    """
+    resolved = path.resolve()
+    async for changes in awatch(path.parent, stop_event=stop_event, debounce=debounce_ms):
+        if any(Path(changed).resolve() == resolved for _, changed in changes):
+            await broadcaster.broadcast({"type": "file_changed", "path": str(path)})
 
 
 def create_app(
     blueprint_path: Path,
     token: str | None = None,
     static_dir: Path | None = None,
+    watch_debounce_ms: int = 400,
 ) -> FastAPI:
-    """Build the editor app: token guard, /api endpoints, embedded UI mount."""
-    app = FastAPI(title="ABP Editor", docs_url=None, redoc_url=None)
+    """Build the editor app: token guard, /api endpoints, /ws, embedded UI mount."""
+    broadcaster = _WsBroadcaster()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        stop_event = asyncio.Event()
+        watcher = asyncio.create_task(
+            watch_blueprint(blueprint_path, broadcaster, stop_event, watch_debounce_ms)
+        )
+        yield
+        stop_event.set()
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+
+    app = FastAPI(title="ABP Editor", docs_url=None, redoc_url=None, lifespan=lifespan)
     static = STATIC_DIR if static_dir is None else static_dir
 
     if token is not None:
@@ -97,6 +151,25 @@ def create_app(
     @app.get("/api/blueprint")
     def blueprint() -> dict[str, Any]:
         return blueprint_info(blueprint_path)
+
+    @app.websocket("/ws")
+    async def ws_endpoint(websocket: WebSocket) -> None:
+        # The token middleware only covers HTTP scopes — re-check here. The
+        # browser carries the cookie set by the first page load.
+        if token is not None:
+            supplied = websocket.query_params.get("token") or websocket.cookies.get(TOKEN_COOKIE)
+            if supplied is None or not secrets.compare_digest(supplied, token):
+                await websocket.close(code=1008)
+                return
+        await websocket.accept()
+        broadcaster.connections.add(websocket)
+        try:
+            while True:
+                await websocket.receive_text()  # ignore client messages; push-only
+        except WebSocketDisconnect:
+            pass
+        finally:
+            broadcaster.connections.discard(websocket)
 
     if (static / "index.html").is_file():
         app.mount("/", StaticFiles(directory=static, html=True), name="ui")

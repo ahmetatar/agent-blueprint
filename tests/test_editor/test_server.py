@@ -1,9 +1,11 @@
-"""Tests for the abp editor server (phase E0): API, token guard, UI mount."""
+"""Tests for the abp editor server: API, token guard, UI mount, live reload."""
 
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from agent_blueprint.editor import server
 
@@ -78,6 +80,36 @@ def test_blueprint_endpoint_valid(blueprint_file: Path, tmp_path: Path) -> None:
     assert 'name: "editor-test"' in body["yaml"]
 
 
+def test_blueprint_endpoint_graph_view_model(blueprint_file: Path, tmp_path: Path) -> None:
+    body = _client(blueprint_file, tmp_path).get("/api/blueprint").json()
+    graph = body["graph"]
+    assert graph["entry_point"] == "assistant"
+    node_ids = {n["id"] for n in graph["nodes"]}
+    assert {"assistant", "__start__", "__end__"} <= node_ids
+    kinds = {(e["source"], e["target"]): e["kind"] for e in graph["edges"]}
+    assert kinds[("__start__", "assistant")] == "entry"
+    assert kinds[("assistant", "__end__")] == "normal"
+    assert body["lint"] == []  # this blueprint is lint-clean
+
+
+def test_blueprint_endpoint_lint_findings_with_positions(tmp_path: Path) -> None:
+    # `verdict` is declared but never referenced → dead-state-field warning.
+    linty = _VALID_BLUEPRINT.replace(
+        "      reducer: append\n",
+        "      reducer: append\n    verdict:\n      type: string\n      default: null\n",
+    )
+    path = tmp_path / "linty.yml"
+    path.write_text(linty, encoding="utf-8")
+    body = _client(path, tmp_path).get("/api/blueprint").json()
+    assert body["valid"] is True
+    finding = next(f for f in body["lint"] if f["code"] == "dead-state-field")
+    assert finding["severity"] == "warning"
+    assert finding["location"] == "state.fields.verdict"
+    # Mapped onto the appended line (1-based) in the raw source.
+    lines = body["yaml"].splitlines()
+    assert lines[finding["line"] - 1].strip() == "verdict:"
+
+
 def test_blueprint_endpoint_invalid(tmp_path: Path) -> None:
     path = tmp_path / "broken.yml"
     path.write_text(_INVALID_BLUEPRINT, encoding="utf-8")
@@ -88,6 +120,8 @@ def test_blueprint_endpoint_invalid(tmp_path: Path) -> None:
     assert body["name"] is None
     assert body["error"]
     assert body["yaml"]  # raw source is returned even when invalid
+    assert body["graph"] is None
+    assert body["lint"] == []
 
 
 def test_token_guard_blocks_anonymous(blueprint_file: Path, tmp_path: Path) -> None:
@@ -141,6 +175,30 @@ def test_run_editor_invokes_uvicorn(
     server.run_editor(blueprint_file, port=4242, open_browser=False, url_callback=urls.append)
     assert captured == {"host": "127.0.0.1", "port": 4242}
     assert urls and urls[0].startswith("http://127.0.0.1:4242/?token=")
+
+
+def test_ws_rejects_missing_or_bad_token(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path, token="s3cret")
+    for path in ("/ws", "/ws?token=wrong"):
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(path):
+                pass  # pragma: no cover - connection must be refused
+        assert exc_info.value.code == 1008
+
+
+def test_ws_pushes_file_changed_on_external_edit(blueprint_file: Path, tmp_path: Path) -> None:
+    app = server.create_app(
+        blueprint_file, token="s3cret", static_dir=tmp_path / "no-static", watch_debounce_ms=50
+    )
+    # The context manager runs the lifespan, which starts the file watcher.
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws?token=s3cret") as ws:
+            time.sleep(0.5)  # let the watcher finish initializing
+            blueprint_file.write_text(
+                blueprint_file.read_text(encoding="utf-8") + "\n# touched\n", encoding="utf-8"
+            )
+            message = ws.receive_json()
+    assert message == {"type": "file_changed", "path": str(blueprint_file)}
 
 
 def test_run_editor_dev_mode(blueprint_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:

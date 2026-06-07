@@ -1,11 +1,12 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E2 (in progress) — source + canvas editing.**
+> **Status: phase E2 complete — source, canvas, and config editing.**
 > The editor renders the blueprint as a live graph with validation/lint
 > diagnostics; the YAML source is editable in place, nodes/edges can be
-> added and removed on the canvas, and node positions persist across
-> sessions. Schema-driven config forms (E2c) and action buttons (E3) come
-> next. See [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
+> added and removed on the canvas, node config (and the linked agent) is
+> editable through schema-driven forms, and node positions persist across
+> sessions. Action buttons / live execution (E3) come next. See
+> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -67,7 +68,16 @@ it, never a separate store.
     removes every edge that references it. Synthetic edges (START→entry,
     supervisor delegation/return, parallel fan-out) are display-only.
   - **Add a node** via the *+ Node* button (agent or function node;
-    top-level graph). Richer config forms are phase E2c.
+    top-level graph).
+- **Config forms** — selecting a node opens the *Config* tab: the node's
+  fields (per node type, plus its retry policy) and — for agent-backed
+  nodes — the linked agent definition (model, system prompt, tools,
+  temperature, …). Forms are driven by the blueprint JSON Schema
+  (`GET /api/schema`), so new model fields appear without editor changes;
+  anything too complex for a simple input says "edit in Source" instead of
+  rendering a broken control. Clearing a field reverts it to its default
+  (the key is removed from the YAML). *Apply* writes only the fields you
+  changed, as targeted mutations.
 
   Canvas ops are strict: the mutated document is validated *before* the file
   is written, and an edit that would produce an invalid blueprint is rejected
@@ -81,12 +91,14 @@ it, never a separate store.
 - `GET /api/blueprint` — raw YAML, validation status, the graph view-model,
   lint findings with source positions, the saved canvas layout, and the
   file's content hash
+- `GET /api/schema` — the blueprint JSON Schema (same as `abp schema`);
+  drives the config forms
 - `PUT /api/blueprint/yaml` — whole-file save from the source pane
   (parseable-YAML gate; broadcasts `file_changed` to other tabs)
-- `POST /api/blueprint/ops` — canvas ops (`add_node`, `remove_node`,
-  `add_edge`, `remove_edge`, `set_field`) applied as targeted ruamel
-  mutations; `409` when `base_hash` is stale, `422` when an op cannot apply
-  or the result fails validation (nothing written)
+- `POST /api/blueprint/ops` — canvas/config ops (`add_node`, `remove_node`,
+  `add_edge`, `remove_edge`, `set_field`, `unset_field`) applied as targeted
+  ruamel mutations; `409` when `base_hash` is stale, `422` when an op cannot
+  apply or the result fails validation (nothing written)
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
 - `WS /ws` — pushes `file_changed` when the blueprint changes on disk
   (`origin: disk`) or is saved through the editor (`origin: save`); the

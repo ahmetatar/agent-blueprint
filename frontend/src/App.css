@@ -260,6 +260,132 @@ body,
   color: #fff;
 }
 
+/* ---- config pane ---------------------------------------------------------- */
+
+.panel-body-config {
+  display: flex;
+  flex-direction: column;
+}
+
+.config-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.config-empty {
+  padding: 1rem;
+}
+
+.config-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem 0.4rem;
+}
+
+.config-kind {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+}
+
+.config-sections {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 0.9rem 0.6rem;
+}
+
+.config-sections h3 {
+  margin: 0.8rem 0 0.4rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  border-bottom: 1px solid #ececec;
+  padding-bottom: 0.25rem;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.8rem;
+  color: #444;
+}
+
+.config-field-name {
+  font-weight: 500;
+}
+
+.config-required {
+  color: #b00020;
+  margin-left: 0.15rem;
+}
+
+.config-field input[type="text"],
+.config-field input[type="number"],
+.config-field input:not([type]),
+.config-field select,
+.config-field textarea {
+  padding: 0.32rem 0.5rem;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-family: inherit;
+}
+
+.config-field textarea {
+  resize: vertical;
+}
+
+.config-field-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #444;
+  margin-bottom: 0.3rem;
+}
+
+.config-tools {
+  border: 1px solid #ececec;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0 0.55rem;
+}
+
+.config-tools legend {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0 0.25rem;
+}
+
+.config-error {
+  margin: 0;
+  padding: 0.4rem 0.9rem;
+  color: #8c1d18;
+  background: #fdecea;
+  border-top: 1px solid #f0b9b3;
+  font-size: 0.8rem;
+}
+
+.config-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  border-top: 1px solid #e2e2e2;
+  background: #fafafa;
+  font-size: 0.8rem;
+}
+
 /* ---- source pane --------------------------------------------------------- */
 
 .source-pane {

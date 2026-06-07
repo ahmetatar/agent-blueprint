@@ -19,6 +19,8 @@ export interface VmNode {
   ref?: string;
   expanded?: boolean;
   graph_ref?: string; // ops scope: "graph" | "subgraphs.<name>"
+  config?: Record<string, unknown>; // effective NodeDef values (defaults filled)
+  agent_config?: Record<string, unknown>; // effective AgentDef values, when agent-backed
 }
 
 /** YAML address of a real edge target — absent on synthetic edges. */
@@ -43,6 +45,7 @@ export interface GraphViewModel {
   nodes: VmNode[];
   edges: VmEdge[];
   agents: string[];
+  tools: string[];
 }
 
 export interface LintFinding {
@@ -75,6 +78,13 @@ export async function fetchBlueprint(): Promise<BlueprintInfo> {
   const response = await fetch("/api/blueprint");
   if (!response.ok) throw new Error(`API responded ${response.status}`);
   return (await response.json()) as BlueprintInfo;
+}
+
+/** The blueprint JSON Schema (BlueprintSpec.model_json_schema) — drives config forms. */
+export async function fetchSchema(): Promise<Record<string, unknown>> {
+  const response = await fetch("/api/schema");
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return (await response.json()) as Record<string, unknown>;
 }
 
 /** Thrown when a whole-file save is rejected (YAML syntax error — not written). */
@@ -131,7 +141,18 @@ export interface SetFieldOp {
   value: unknown;
 }
 
-export type EditOp = AddNodeOp | RemoveNodeOp | AddEdgeOp | RemoveEdgeOp | SetFieldOp;
+export interface UnsetFieldOp {
+  op: "unset_field";
+  path: string;
+}
+
+export type EditOp =
+  | AddNodeOp
+  | RemoveNodeOp
+  | AddEdgeOp
+  | RemoveEdgeOp
+  | SetFieldOp
+  | UnsetFieldOp;
 
 /** The file changed underneath the canvas — refetch and retry. */
 export class ConflictError extends Error {}

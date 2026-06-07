@@ -307,3 +307,15 @@ def test_subgraph_scope_in_refs(vm_builder) -> None:
     }
     # Supervisor/parallel synthetic edges never carry a ref.
     assert _edges(vm, "fan", "left")[0]["ref"] is None
+
+
+def test_nodes_carry_config_payloads_for_forms(vm_builder) -> None:
+    vm = vm_builder(_BASIC)
+    assistant = _node(vm, "assistant")
+    assert assistant["config"]["type"] == "agent"
+    assert assistant["config"]["retry"]["max_attempts"] == 1  # defaults filled in
+    assert assistant["agent_config"]["model"] == "anthropic/claude-sonnet-4-6"
+    assert assistant["agent_config"]["tools"] == ["lookup"]
+    assert vm["tools"] == ["lookup"]
+    # Terminals are synthetic and carry no config.
+    assert "config" not in _node(vm, START_ID)

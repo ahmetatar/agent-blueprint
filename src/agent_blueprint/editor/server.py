@@ -235,6 +235,11 @@ def create_app(
     def blueprint() -> dict[str, Any]:
         return blueprint_info(blueprint_path)
 
+    @app.get("/api/schema")
+    def schema() -> dict[str, Any]:
+        """The blueprint JSON Schema (same as `abp schema`) — drives config forms."""
+        return BlueprintSpec.model_json_schema()
+
     @app.put("/api/blueprint/yaml")
     async def save_yaml(body: YamlSaveRequest) -> Any:
         """Whole-file save from the source pane (last-writer-wins)."""

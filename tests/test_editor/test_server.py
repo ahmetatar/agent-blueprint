@@ -360,6 +360,17 @@ def test_ops_endpoint_pushes_file_changed(blueprint_file: Path, tmp_path: Path) 
     assert message["origin"] == "save"
 
 
+def test_schema_endpoint_serves_blueprint_json_schema(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    resp = _client(blueprint_file, tmp_path).get("/api/schema")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "NodeDef" in body["$defs"]
+    assert "AgentDef" in body["$defs"]
+    assert "graph" in body["properties"]
+
+
 def test_layout_roundtrip_via_api(blueprint_file: Path, tmp_path: Path) -> None:
     client = _client(blueprint_file, tmp_path)
     assert client.get("/api/blueprint").json()["layout"] == {}

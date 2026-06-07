@@ -38,12 +38,13 @@ interface Props {
   hash: string;
   onUpdated: (info: BlueprintInfo) => void;
   onConflict: () => void;
+  onSelect: (nodeId: string | null) => void;
 }
 
 const SAVE_DEBOUNCE_MS = 400;
 const TOAST_MS = 6000;
 
-export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict }: Props) {
+export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict, onSelect }: Props) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -177,6 +178,13 @@ export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict }
     setEdges((current) => applyEdgeChanges(kept, current));
   }, []);
 
+  const onSelectionChange = useCallback(
+    ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+      onSelect(selectedNodes.length === 1 ? selectedNodes[0].id : null);
+    },
+    [onSelect],
+  );
+
   const onDelete = useCallback(
     ({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }) => {
       const removedIds = new Set(deletedNodes.map((node) => node.id));
@@ -234,6 +242,7 @@ export function GraphCanvas({ graph, lint, layout, hash, onUpdated, onConflict }
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onDelete={onDelete}
+      onSelectionChange={onSelectionChange}
       isValidConnection={isValidConnection}
       fitView
       minZoom={0.2}

@@ -376,3 +376,34 @@ def test_ops_scope_into_subgraph(tmp_path: Path) -> None:
         to: a
 """,
     )
+
+
+def test_unset_field_removes_key(tmp_path: Path) -> None:
+    # The trailing blank line is comment data attached to the deleted key in
+    # ruamel, so it goes with it (same semantics as deleted seq items).
+    result = _apply(
+        _FIXTURE,
+        [{"op": "unset_field", "path": "blueprint.version"}],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace(
+        """\
+  version: "1.0"
+
+""",
+        "",
+    )
+
+
+def test_unset_field_missing_key_is_noop(tmp_path: Path) -> None:
+    for path in (
+        "blueprint.description",  # parent exists, key doesn't
+        "graph.nodes.ghost.description",  # parent doesn't exist
+        "graph.edges[9].to",  # index out of range mid-path
+    ):
+        assert _apply(_FIXTURE, [{"op": "unset_field", "path": path}], tmp_path) == _FIXTURE
+
+
+def test_unset_field_list_element_rejected(tmp_path: Path) -> None:
+    with pytest.raises(OpError, match="list element"):
+        _apply(_FIXTURE, [{"op": "unset_field", "path": "graph.edges[0]"}], tmp_path)

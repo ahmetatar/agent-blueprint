@@ -38,8 +38,10 @@ def build_view_model(spec: BlueprintSpec) -> dict[str, Any]:
         "entry_point": spec.graph.entry_point,
         "nodes": builder.nodes,
         "edges": builder.edges,
-        # For the add-node dialog: agent nodes must reference a defined agent.
+        # For the add-node dialog and config forms: agent nodes must
+        # reference a defined agent; tool pickers list the defined tools.
         "agents": list(spec.agents),
+        "tools": list(spec.tools),
     }
 
 
@@ -152,6 +154,8 @@ class _Builder:
             "description": node_def.description,
             # Ops scope: which YAML graph this node lives in.
             "graph_ref": graph_ref,
+            # Effective field values (defaults filled in) for the config form.
+            "config": node_def.model_dump(mode="json"),
         }
         if node_def.agent is not None:
             agent = self.spec.agents.get(node_def.agent)
@@ -161,6 +165,7 @@ class _Builder:
                 payload["provider"] = provider
                 payload["model"] = model
                 payload["tools"] = list(agent.tools)
+                payload["agent_config"] = agent.model_dump(mode="json")
         if node_def.type == NodeType.function:
             payload["action"] = node_def.action
         if node_def.type == NodeType.handoff and node_def.channel is not None:

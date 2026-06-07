@@ -1,9 +1,9 @@
 # `abp editor` — Visual Blueprint Editor (Plan)
 
-Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), and the
-E2 write path (E2a: editable source pane + layout sidecar; E2b: canvas ops)
-shipped; E2c (schema-driven config forms) and E3 not started. User-facing
-docs: [editor.md](editor.md).
+Status: **IN PROGRESS** — E0 (skeleton), E1 (read-only visualizer), and all
+of E2 (E2a: editable source pane + layout sidecar; E2b: canvas ops;
+E2c: schema-driven config forms) shipped; E3 (actions + live execution) not
+started. User-facing docs: [editor.md](editor.md).
 Scope: a local, browser-based visual editor for blueprints — n8n-style canvas, two-way
 YAML sync, and one-click access to the existing operational surfaces (validate, lint,
 test, run, gate, deploy).
@@ -126,7 +126,7 @@ React Flow ecosystem is significantly deeper.)
 | Auto-layout | ELK.js | hierarchical layout handles subgraph nesting; dagre as fallback option |
 | State | Zustand | React Flow's own recommendation; minimal |
 | Source pane | Monaco | YAML editing + lint findings as inline diagnostics |
-| UI kit | shadcn/ui + Tailwind | config panels, dialogs; react-hook-form + zod for schema-driven forms |
+| UI kit | hand-rolled CSS + a small schema-driven form resolver | REVISED at E2c (June 2026): shadcn/ui + Tailwind + react-hook-form + zod was judged too heavy for a single-maintainer repo — the schema → field-spec resolver (`panel/schemaForm.ts`) plus plain inputs covers the config forms; anything it can't render degrades to a read-only "edit in Source" view |
 | Build | Vite | outputs `dist/` → embedded as `agent_blueprint/editor/static/` |
 
 Mapping ABP concepts to canvas:

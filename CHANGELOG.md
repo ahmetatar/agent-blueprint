@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E2c): schema-driven config forms — selecting a node
+  opens a Config panel with the node's fields (per node type, plus retry
+  policy) and, for agent-backed nodes, the linked agent definition (model,
+  system prompt, tools, temperature, …). Forms are generated from the
+  blueprint JSON Schema (new `GET /api/schema`), so new model fields appear
+  without editor changes; Apply writes only changed fields as targeted
+  mutations, and clearing a field removes the key (new `unset_field` op)
 - `abp editor` (phase E2b): canvas editing — draw edges between node handles
   (a second outgoing edge converts a scalar `to:` into the conditional list
   form, keeping the original target as the default route), delete nodes/edges

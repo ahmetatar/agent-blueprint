@@ -76,8 +76,19 @@ class SetFieldOp(BaseModel):
     value: Any = None
 
 
+class UnsetFieldOp(BaseModel):
+    """Remove the key at a dotted path (revert a field to its default).
+
+    Idempotent: a missing key (or missing parent) is a no-op, so clearing a
+    field that was never authored does not fail the batch.
+    """
+
+    op: Literal["unset_field"]
+    path: str
+
+
 EditOp = Annotated[
-    AddNodeOp | RemoveNodeOp | AddEdgeOp | RemoveEdgeOp | SetFieldOp,
+    AddNodeOp | RemoveNodeOp | AddEdgeOp | RemoveEdgeOp | SetFieldOp | UnsetFieldOp,
     Field(discriminator="op"),
 ]
 
@@ -93,8 +104,10 @@ def apply_ops(document: CommentedMap, ops: list[EditOp]) -> None:
             _add_edge(document, op)
         elif isinstance(op, RemoveEdgeOp):
             _remove_edge(document, op)
-        else:
+        elif isinstance(op, SetFieldOp):
             _set_field(document, op)
+        else:
+            _unset_field(document, op)
 
 
 # -- graph scope --------------------------------------------------------------
@@ -290,3 +303,29 @@ def _set_field(document: CommentedMap, op: SetFieldOp) -> None:
     if not isinstance(target_list, list) or index >= len(target_list):
         raise OpError(f"index [{index}] in '{op.path}' is out of range")
     target_list[index] = op.value
+
+
+def _unset_field(document: CommentedMap, op: UnsetFieldOp) -> None:
+    segments = op.path.split(".")
+    parsed: list[tuple[str, list[str]]] = []
+    for raw in segments:
+        match = _SEGMENT.match(raw)
+        if match is None:
+            raise OpError(f"invalid path segment '{raw}' in '{op.path}'")
+        parsed.append((match.group(1), _INDEX.findall(match.group(2))))
+    last_key, last_indexes = parsed[-1]
+    if last_indexes:
+        raise OpError("unset_field cannot target a list element (use remove_edge/remove_node)")
+
+    current: Any = document
+    for key, indexes in parsed[:-1]:
+        if not isinstance(current, dict) or key not in current:
+            return  # nothing to unset
+        current = current[key]
+        for index_str in indexes:
+            index = int(index_str)
+            if not isinstance(current, list) or index >= len(current):
+                return
+            current = current[index]
+    if isinstance(current, dict) and last_key in current:
+        del current[last_key]

@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E5.3 + E5.2): state inspector — after a **Run…**
+  finishes, the result view shows the run's *final state* (the same snapshot
+  the trace manifest records for harness `state_assertions`): scalar fields
+  verbatim, message lists as a count, structured values as compact JSON.
+  Per-node values are deliberately not shown — the trace carries only hashes
+  per node, so a per-node value view needs opt-in content capture (a later
+  phase). The Run… form is now honest that every Run starts a *fresh* session
+  (in-memory checkpointer, no history); a persistent chat session is the next
+  phase. Editor-only — `_action_run` now surfaces `final_state` from the
+  captured manifest
 - `abp editor` (phase E4.5): the *+ Node* dialog now covers every node type —
   agent, function, handoff (channel + optional message template), parallel
   (branch checkboxes + a join picker), subgraph (subgraph-ref picker +

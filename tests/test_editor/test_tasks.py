@@ -88,14 +88,18 @@ def _run_to_completion(
     return record, events
 
 
-def _fake_run_capture(returncode: int = 0, stdout: str = "ok"):
+def _fake_run_capture(
+    returncode: int = 0,
+    stdout: str = "ok",
+    manifest: dict[str, Any] | None = None,
+):
     def fake(self: LocalRunner, user_input: str | None = None, **kwargs: Any) -> LocalRunResult:
         return LocalRunResult(
             returncode=returncode,
             stdout=stdout,
             stderr="",
             trace_file=None,
-            trace_manifest={"trace": []},
+            trace_manifest=manifest if manifest is not None else {"trace": []},
         )
 
     return fake
@@ -292,6 +296,35 @@ def test_run_action_captures_output(
     assert record.result is not None
     assert record.result["returncode"] == 0
     assert record.result["stdout"] == "hello back"
+
+
+def test_run_action_surfaces_final_state(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = {
+        "trace": [],
+        "final_state": {"intent": "refund", "messages": {"__messages__": 4}},
+    }
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(manifest=manifest))
+    record, _ = _run_to_completion(blueprint_file, "run", {"input": "hi", "install": False})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["final_state"] == {
+        "intent": "refund",
+        "messages": {"__messages__": 4},
+    }
+
+
+def test_run_action_final_state_absent_is_none(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A manifest with no final_state (e.g. a run that errored before finishing)
+    # must not crash and surfaces None rather than a bogus value.
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture())
+    record, _ = _run_to_completion(blueprint_file, "run", {"input": "hi", "install": False})
+    assert record.status == "passed"
+    assert record.result is not None
+    assert record.result["final_state"] is None
 
 
 def test_run_action_refuses_sandboxed_blueprint(

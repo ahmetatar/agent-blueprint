@@ -130,10 +130,13 @@ instead of the terminal:
   finishes, with failure details underneath. Failed traces land in
   `.abp/traces/` exactly as with the CLI.
 - **Run…** — a one-shot `abp run` with an input message you type; stdout and
-  stderr stream into the result view when the run finishes. The interactive
-  REPL stays CLI-only, and blueprints that request a sandbox
-  (`run.sandbox.enabled`) are refused with a hint to use `abp run` — the
-  editor never silently skips the sandbox.
+  stderr stream into the result view when the run finishes, followed by the
+  run's **final state** (see below). Every Run starts a *fresh* session — the
+  one-shot runner uses an in-memory checkpointer, so there is no conversation
+  history between runs; the form says so (a persistent chat session is a later
+  phase). The interactive REPL stays CLI-only, and blueprints that request a
+  sandbox (`run.sandbox.enabled`) are refused with a hint to use `abp run` —
+  the editor never silently skips the sandbox.
 - **Gate** / **Update baseline** — `abp gate` against
   `.abp/gate-baseline.json`, with regressions/improvements listed.
   *Update baseline* asks for confirmation and refuses to write a red baseline,
@@ -158,6 +161,16 @@ task shows a **Cancel** button — cancelling terminates the underlying
 generated-project subprocess, so even a live-LLM scenario stops promptly.
 Buttons that don't apply are disabled with a hint (no harness scenarios →
 no Test; nothing to gate → no Gate).
+
+### State inspector (E5.3)
+
+After a **Run…** finishes, the result view shows the run's *final state* —
+the same state snapshot the trace manifest records for harness
+`state_assertions`. Scalar fields are shown verbatim; message lists collapse
+to a count (e.g. `messages: 4 messages`); structured values render as compact
+JSON. This is privacy-preserving: per-node state values are **not** shown,
+because the trace carries only hashes per node — a per-node value view needs
+opt-in content capture, a later phase.
 
 ### Live execution view (E3b)
 

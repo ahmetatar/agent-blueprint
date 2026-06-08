@@ -497,7 +497,13 @@ def _action_run(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
             env_file=env_file if env_file.exists() else None,
             extra_env=stream_env,
         )
-    events = (captured.trace_manifest or {}).get("trace", [])
+    manifest = captured.trace_manifest or {}
+    events = manifest.get("trace", [])
+    # final_state is the post-run state snapshot the trace recorder already
+    # captures (scalars normalized; message lists collapsed to a count) — the
+    # editor's state inspector (E5.3) renders it. Hashes-only privacy is
+    # unaffected: this is the same dict harness state_assertions read.
+    final_state = manifest.get("final_state")
     return (
         "passed" if captured.returncode == 0 else "failed",
         {
@@ -505,6 +511,7 @@ def _action_run(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
             "stdout": captured.stdout,
             "stderr": captured.stderr,
             "trace_events": len(events) if isinstance(events, list) else 0,
+            "final_state": final_state if isinstance(final_state, dict) else None,
         },
     )
 

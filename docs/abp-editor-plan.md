@@ -266,10 +266,16 @@ templates) requires explicit user approval *before* the change is made.
 - **E5.1** Chat session: a *persistent* runner process (the generated REPL
   kept alive via Popen, stdio bridged over WS) so the conversation actually
   continues; message history panel, active `thread_id`, "New session".
-- **E5.2** Immediate honesty stop-gap: label one-shot runs as such ("every
-  Run starts a fresh session") until E5.1 lands.
-- **E5.3** State inspector: show `final_state` after a run (already in the
-  trace manifest); per-node last-update view.
+- **E5.2** Immediate honesty stop-gap (SHIPPED, with E5.3): the Run… form
+  states that every Run starts a fresh session (in-memory checkpointer, no
+  history) until E5.1 lands.
+- **E5.3** State inspector (SHIPPED): the Run… result view shows the run's
+  `final_state` (already in the trace manifest — scalars verbatim, message
+  lists as a count, structured values as compact JSON). Editor-only:
+  `_action_run` surfaces `final_state` from the captured manifest. The
+  planned **per-node last-update view was cut** — trace events carry only
+  state *hashes* per node, so a per-node *value* view requires opt-in content
+  capture, which is E5.4 (a core/template change, needs approval).
 - **E5.4** Step-level state diffs: needs opt-in content capture
   (`ABP_TRACE_CONTENT`-style mode; default stays hashes-only) — core/template
   change, needs approval.

@@ -1063,6 +1063,11 @@ body,
 
 /* ---- edge interaction (E4a) ----------------------------------------------- */
 
+/* Connection lines: a touch heavier than the 1px default for legibility. */
+.react-flow__edge-path {
+  stroke-width: 1.5;
+}
+
 /* Selected edge: clearly visible regardless of the kind's inline stroke. */
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: #1b6fd8 !important;
@@ -1073,11 +1078,21 @@ body,
   stroke-width: 2.25;
 }
 
-/* Endpoint handles shown on a selected reconnectable edge. */
+/* Reconnect endpoint handles: hidden by default (they were showing on every
+   edge as large blue dots), revealed only when the edge is hovered or
+   selected — which is when you'd grab an endpoint to reconnect it. */
 .react-flow__edgeupdater {
   fill: #1b6fd8;
   stroke: #fff;
-  r: 6;
+  stroke-width: 1.5;
+  r: 5 !important;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.react-flow__edge.selectable:hover .react-flow__edgeupdater,
+.react-flow__edge.selected .react-flow__edgeupdater {
+  opacity: 1;
 }
 
 .selection-toolbar {

@@ -662,6 +662,9 @@ body,
 /* ---- canvas nodes ------------------------------------------------------ */
 
 .bp-node {
+  position: relative; /* anchor the source/target handles to the card, not the
+                         (taller, layout-estimated) React Flow node container —
+                         otherwise the bottom handle floats below the card */
   width: 220px;
   box-sizing: border-box;
   background: #fff;
@@ -737,6 +740,7 @@ body,
 }
 
 .terminal-node {
+  position: relative; /* anchor handles to the pill, not the taller container */
   width: 90px;
   box-sizing: border-box;
   text-align: center;
@@ -760,6 +764,7 @@ body,
 }
 
 .group-node {
+  position: relative; /* anchor handles to the group box */
   width: 100%;
   height: 100%;
   box-sizing: border-box;
@@ -1062,6 +1067,20 @@ body,
 }
 
 /* ---- edge interaction (E4a) ----------------------------------------------- */
+
+/* Connection handles: the stock dot rendered larger (~15px) than the offset
+   React Flow positions it with (an ~8px translate), so it sat off-centre and
+   protruded unevenly — some flush with the node, some floating off the edge.
+   Size it to match that offset so every handle hugs the border, and tone the
+   stark black down to a soft slate. */
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  min-height: 8px;
+  background: #9aa3b2;
+  border: 1px solid #fff;
+}
 
 /* Connection lines: a touch heavier than the 1px default for legibility. */
 .react-flow__edge-path {

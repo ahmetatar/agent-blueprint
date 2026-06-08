@@ -3,6 +3,7 @@ import {
   fetchBlueprint,
   fetchCurrentTask,
   fetchSchema,
+  saveYaml,
   type BlueprintInfo,
   type LintFinding,
   type TaskMessage,
@@ -49,6 +50,15 @@ export default function App() {
   // Canvas-id keyed run states; cleared when a task (or a new scenario
   // within it) starts, kept after task_done so the last run stays visible.
   const [runStates, setRunStates] = useState<Record<string, RunState>>({});
+  // Undo/redo as a stack of whole-file YAML snapshots: every editor mutation
+  // (canvas op, config form, source save) pushes the prior YAML; undo writes
+  // a popped snapshot back via the whole-file save. Snapshots restore comments
+  // and quoting byte-for-byte, and the model is uniform across all edit kinds.
+  // Disk/live-reload updates use plain setInfo and deliberately leave the
+  // stacks untouched (undo history is this session's local edits).
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  const [redoStack, setRedoStack] = useState<string[]>([]);
+  const restoring = useRef(false);
   const sourceRef = useRef<SourcePaneHandle | null>(null);
   const pendingLine = useRef<number | null>(null);
 
@@ -79,6 +89,9 @@ export default function App() {
     });
   }, []);
 
+  const infoRef = useRef<BlueprintInfo | null>(null);
+  infoRef.current = info;
+
   const reload = useCallback(() => {
     fetchBlueprint()
       .then((next) => {
@@ -87,6 +100,49 @@ export default function App() {
       })
       .catch((e) => setFetchError(String(e)));
   }, []);
+
+  // An editor mutation: remember the prior YAML for undo and drop the redo
+  // future. Wired into every write-back callback (canvas / config / source).
+  const handleEdit = useCallback((next: BlueprintInfo) => {
+    const prev = infoRef.current;
+    if (prev !== null && prev.yaml !== next.yaml) {
+      setUndoStack((stack) => [...stack, prev.yaml]);
+      setRedoStack([]);
+    }
+    setInfo(next);
+  }, []);
+
+  const restore = useCallback((yaml: string, direction: "undo" | "redo") => {
+    const current = infoRef.current;
+    if (current === null || restoring.current) return;
+    restoring.current = true;
+    saveYaml(yaml)
+      .then((next) => {
+        if (direction === "undo") {
+          setRedoStack((stack) => [...stack, current.yaml]);
+          setUndoStack((stack) => stack.slice(0, -1));
+        } else {
+          setUndoStack((stack) => [...stack, current.yaml]);
+          setRedoStack((stack) => stack.slice(0, -1));
+        }
+        setInfo(next);
+        setFetchError(null);
+      })
+      .catch((e) => setFetchError(String(e)))
+      .finally(() => {
+        restoring.current = false;
+      });
+  }, []);
+
+  const undo = useCallback(() => {
+    const yaml = undoStack[undoStack.length - 1];
+    if (yaml !== undefined) restore(yaml, "undo");
+  }, [undoStack, restore]);
+
+  const redo = useCallback(() => {
+    const yaml = redoStack[redoStack.length - 1];
+    if (yaml !== undefined) restore(yaml, "redo");
+  }, [redoStack, restore]);
 
   const applyTask = useCallback((next: TaskRecord) => {
     setTask((prev) => mergeTask(prev, next));
@@ -113,6 +169,34 @@ export default function App() {
 
   useEffect(reload, [reload]);
   useLiveReload(reload, onTaskMessage);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      // The Source pane (Monaco) and any form input own their native undo;
+      // only the canvas/global scope uses the snapshot history.
+      if (sourceDirty) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.closest(".monaco-editor") !== null ||
+          target.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      } else if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo, sourceDirty]);
 
   useEffect(() => {
     // A reloaded tab resyncs with a task that is already running (or just ran).
@@ -188,6 +272,26 @@ export default function App() {
         <span className="header-live" title="Live-reloads when the file changes on disk">
           ● live
         </span>
+        <div className="header-history">
+          <button
+            type="button"
+            className="history-btn"
+            onClick={undo}
+            disabled={undoStack.length === 0 || sourceDirty}
+            title="Undo (⌘/Ctrl+Z)"
+          >
+            ↶ Undo
+          </button>
+          <button
+            type="button"
+            className="history-btn"
+            onClick={redo}
+            disabled={redoStack.length === 0 || sourceDirty}
+            title="Redo (⌘/Ctrl+Shift+Z)"
+          >
+            ↷ Redo
+          </button>
+        </div>
       </header>
       <div className="body">
         <section className="canvas">
@@ -198,7 +302,7 @@ export default function App() {
               layout={info.layout}
               hash={info.hash}
               runStates={runStates}
-              onUpdated={setInfo}
+              onUpdated={handleEdit}
               onConflict={reload}
               onSelect={onSelect}
             />
@@ -264,7 +368,7 @@ export default function App() {
                 agents={info.graph.agents}
                 tools={info.graph.tools}
                 hash={info.hash}
-                onUpdated={setInfo}
+                onUpdated={handleEdit}
                 onConflict={reload}
               />
             ) : (
@@ -283,7 +387,7 @@ export default function App() {
             <SourcePane
               yaml={info.yaml}
               lint={info.lint}
-              onSaved={setInfo}
+              onSaved={handleEdit}
               onDirtyChange={setSourceDirty}
               onReady={(handle) => {
                 sourceRef.current = handle;

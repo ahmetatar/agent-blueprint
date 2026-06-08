@@ -8,6 +8,14 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E4.6): undo / redo — *↶ Undo* / *↷ Redo* buttons in the
+  header and `⌘/Ctrl+Z` / `⌘/Ctrl+Shift+Z` (or `⌘/Ctrl+Y`) step through this
+  session's edits. The history is a stack of whole-file YAML snapshots, so one
+  uniform model covers every edit kind (canvas op, config form, source save)
+  and restoring a snapshot brings back comments and quoting byte-for-byte
+  (implemented over the existing whole-file save — no new endpoint). The
+  shortcuts defer to Monaco's own undo while the Source pane has unsaved
+  changes; live/disk reloads leave the history untouched
 - `abp editor` (phase E4b): edge condition editor — selecting a route edge
   now shows an inline editor in the selection toolbar to change its
   `condition` or mark it the `default` (unconditional) route. The condition

@@ -46,6 +46,30 @@ body,
   font-size: 0.75rem;
 }
 
+.header-history {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.history-btn {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #fff;
+  color: #444;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.history-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.history-btn:disabled {
+  color: #bbb;
+  cursor: default;
+}
+
 .badge {
   padding: 0.1rem 0.55rem;
   border-radius: 999px;

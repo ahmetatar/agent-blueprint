@@ -156,6 +156,10 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Changed
 
+- `abp editor`: canvas polish — connection lines are slightly heavier (1.5px)
+  for legibility, and the blue edge reconnect handles no longer sit on every
+  edge; they appear only when an edge is hovered or selected (which is when
+  you'd grab an endpoint to reconnect it)
 - `abp test` and `abp gate` now persist failing harness traces to `.abp/traces/`
   by default (`--save-traces none` to disable)
 - development workflow documentation now points contributors to explicit local checks

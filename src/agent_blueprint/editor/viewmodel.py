@@ -42,6 +42,9 @@ def build_view_model(spec: BlueprintSpec) -> dict[str, Any]:
         # reference a defined agent; tool pickers list the defined tools.
         "agents": list(spec.agents),
         "tools": list(spec.tools),
+        # Declared state fields — the edge-condition editor offers these as
+        # `state.<field>` autocomplete chips.
+        "state_fields": list(spec.state.fields),
     }
 
 

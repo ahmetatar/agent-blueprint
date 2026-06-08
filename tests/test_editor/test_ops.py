@@ -494,3 +494,147 @@ def test_retarget_missing_edge_is_rejected(tmp_path: Path) -> None:
             ],
             tmp_path,
         )
+
+
+def test_set_edge_condition_edits_value_in_place(tmp_path: Path) -> None:
+    # Editing the condition of an already-conditional entry changes only the
+    # condition value — target, list position, and surrounding comments stay.
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "set_edge_condition",
+                "from_node": "router",
+                "target": "worker",
+                "condition": "state.route == 'worker'",
+                "new_condition": "state.route == 'busy'",
+            }
+        ],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace(
+        "        - condition: \"state.route == 'worker'\"\n",
+        "        - condition: \"state.route == 'busy'\"\n",
+    )
+
+
+def test_set_edge_condition_to_default_drops_condition(tmp_path: Path) -> None:
+    # Clearing the condition (new_condition null, new_default) rewrites the
+    # conditional entry as the `- default:` shorthand, in place.
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "set_edge_condition",
+                "from_node": "router",
+                "target": "worker",
+                "condition": "state.route == 'worker'",
+                "new_condition": None,
+                "new_default": True,
+            }
+        ],
+        tmp_path,
+    )
+    assert result == _FIXTURE.replace(
+        "        - condition: \"state.route == 'worker'\"\n          target: worker\n",
+        "        - default: worker\n",
+    )
+
+
+def test_set_edge_condition_adds_condition_to_default(tmp_path: Path) -> None:
+    # The reverse: a `- default:` entry gains a condition and becomes the
+    # `{condition, target}` form.
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "set_edge_condition",
+                "from_node": "router",
+                "target": "END",
+                "condition": None,
+                "new_condition": "state.done == true",
+            }
+        ],
+        tmp_path,
+    )
+    assert "condition: state.done == true" in result
+    assert "target: END" in result
+    assert "- default: END" not in result
+
+
+def test_set_edge_condition_on_scalar_normalizes_to_list(tmp_path: Path) -> None:
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "set_edge_condition",
+                "from_node": "worker",
+                "target": "END",
+                "condition": None,
+                "new_condition": "state.retry == false",
+            }
+        ],
+        tmp_path,
+    )
+    assert "condition: state.retry == false" in result
+    assert "    - from: worker\n      to: END\n" not in result
+
+
+def test_set_edge_condition_scalar_to_default_is_noop(tmp_path: Path) -> None:
+    # A scalar `to: X` already means an unconditional default; asking for that
+    # exact form leaves the document byte-identical.
+    result = _apply(
+        _FIXTURE,
+        [
+            {
+                "op": "set_edge_condition",
+                "from_node": "worker",
+                "target": "END",
+                "condition": None,
+                "new_condition": None,
+                "new_default": True,
+            }
+        ],
+        tmp_path,
+    )
+    assert result == _FIXTURE
+
+
+def test_set_edge_condition_duplicate_is_rejected(tmp_path: Path) -> None:
+    # Re-conditioning an entry onto a (target, condition) pair that already
+    # exists in the same list must be refused.
+    source = _FIXTURE.replace(
+        "        - default: END\n",
+        "        - condition: \"state.route == 'busy'\"\n          target: worker\n"
+        "        - default: END\n",
+    )
+    with pytest.raises(OpError, match="already exists"):
+        _apply(
+            source,
+            [
+                {
+                    "op": "set_edge_condition",
+                    "from_node": "router",
+                    "target": "worker",
+                    "condition": "state.route == 'worker'",
+                    "new_condition": "state.route == 'busy'",
+                }
+            ],
+            tmp_path,
+        )
+
+
+def test_set_edge_condition_missing_edge_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(OpError, match="not found"):
+        _apply(
+            _FIXTURE,
+            [
+                {
+                    "op": "set_edge_condition",
+                    "from_node": "router",
+                    "target": "nope",
+                    "new_condition": "state.x == 1",
+                }
+            ],
+            tmp_path,
+        )

@@ -84,7 +84,7 @@ export async function toFlow(
     // Only edges that exist in the YAML (`ref` present) are selectable,
     // deletable, and reconnectable; synthetic edges (entry/supervisor/
     // parallel) are display-only.
-    data: { ref: edge.ref ?? null },
+    data: { ref: edge.ref ?? null, kind: edge.kind },
     selectable: Boolean(edge.ref),
     deletable: Boolean(edge.ref),
     reconnectable: Boolean(edge.ref),

@@ -89,6 +89,7 @@ def test_blueprint_endpoint_graph_view_model(blueprint_file: Path, tmp_path: Pat
     kinds = {(e["source"], e["target"]): e["kind"] for e in graph["edges"]}
     assert kinds[("__start__", "assistant")] == "entry"
     assert kinds[("assistant", "__end__")] == "normal"
+    assert graph["state_fields"] == ["messages"]  # drives edge-condition chips
     assert body["lint"] == []  # this blueprint is lint-clean
 
 
@@ -358,6 +359,59 @@ def test_ops_endpoint_pushes_file_changed(blueprint_file: Path, tmp_path: Path) 
         assert resp.status_code == 200
         message = ws.receive_json()
     assert message["origin"] == "save"
+
+
+def test_set_edge_condition_op_via_api(blueprint_file: Path, tmp_path: Path) -> None:
+    # Adding a condition to the assistant→END default route, end to end.
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={
+            "base_hash": base,
+            "ops": [
+                {
+                    "op": "set_edge_condition",
+                    "from_node": "assistant",
+                    "target": "END",
+                    "condition": None,
+                    "new_condition": "state.messages",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    content = blueprint_file.read_text(encoding="utf-8")
+    assert "condition: state.messages" in content
+    assert "      to: END\n" not in content  # scalar normalized to the list form
+
+
+def test_validate_expression_accepts_valid_condition(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    resp = _client(blueprint_file, tmp_path).post(
+        "/api/expression/validate",
+        json={"expression": "state.priority == 'high' and state.count > 2"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["error"] is None
+    assert set(body["referenced_fields"]) == {"priority", "count"}
+
+
+def test_validate_expression_reports_invalid_condition(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    resp = _client(blueprint_file, tmp_path).post(
+        "/api/expression/validate",
+        json={"expression": "state.priority =="},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is False
+    assert body["error"]  # a non-empty message to show inline
+    assert body["referenced_fields"] == []
 
 
 def test_schema_endpoint_serves_blueprint_json_schema(

@@ -82,6 +82,27 @@ class RetargetEdgeOp(BaseModel):
     new_target: str
 
 
+class SetEdgeConditionOp(BaseModel):
+    """Change an existing edge target's condition / default flag, in place.
+
+    Matching mirrors ``remove_edge`` (from + target + current ``condition``).
+    The entry keeps its position in the ``to`` list (evaluation order is
+    routing semantics when conditions overlap). ``new_condition`` is the
+    desired condition (``None`` = unconditional); ``new_default`` chooses the
+    unconditional form when ``new_condition`` is ``None`` (``default: X``
+    shorthand vs a plain ``target: X``). Re-pointing the *node* is
+    ``retarget_edge``; this op never changes ``target``.
+    """
+
+    op: Literal["set_edge_condition"]
+    graph: str = MAIN_GRAPH
+    from_node: str
+    target: str
+    condition: str | None = None
+    new_condition: str | None = None
+    new_default: bool = False
+
+
 class SetFieldOp(BaseModel):
     """Set a value at a dotted path (``graph.edges[0].to[1].condition``).
 
@@ -110,6 +131,7 @@ EditOp = Annotated[
     | AddEdgeOp
     | RemoveEdgeOp
     | RetargetEdgeOp
+    | SetEdgeConditionOp
     | SetFieldOp
     | UnsetFieldOp,
     Field(discriminator="op"),
@@ -129,6 +151,8 @@ def apply_ops(document: CommentedMap, ops: list[EditOp]) -> None:
             _remove_edge(document, op)
         elif isinstance(op, RetargetEdgeOp):
             _retarget_edge(document, op)
+        elif isinstance(op, SetEdgeConditionOp):
+            _set_edge_condition(document, op)
         elif isinstance(op, SetFieldOp):
             _set_field(document, op)
         else:
@@ -315,6 +339,78 @@ def _retarget_edge(document: CommentedMap, op: RetargetEdgeOp) -> None:
                     item["target"] = op.new_target
                 else:  # `- default: X` shorthand
                     item["default"] = op.new_target
+                return
+    rendered = f" (condition: {op.condition})" if op.condition else ""
+    raise OpError(f"edge {op.from_node} -> {op.target}{rendered} not found")
+
+
+def _make_target_item(target: str, condition: str | None, default: bool) -> CommentedMap:
+    """Build a fresh ``to`` item in the requested form (condition / default / plain)."""
+    item = CommentedMap()
+    if condition is not None:
+        item["condition"] = condition
+        item["target"] = target
+    elif default:
+        item["default"] = target  # `- default: X` shorthand
+    else:
+        item["target"] = target
+    return item
+
+
+def _rewrite_target_item(
+    item: Any, target: str, new_condition: str | None, new_default: bool
+) -> None:
+    """Rewrite a matched ``to`` item's form in place (keeps its list position)."""
+    # Fast path: a conditional item staying conditional only changes the
+    # condition value — preserves target quoting and any inline comments.
+    if new_condition is not None and _condition_of(item) is not None:
+        item["condition"] = new_condition
+        return
+    for key in ("condition", "target", "default"):
+        if key in item:
+            del item[key]
+    if new_condition is not None:
+        item["condition"] = new_condition
+        item["target"] = target
+    elif new_default:
+        item["default"] = target
+    else:
+        item["target"] = target
+
+
+def _set_edge_condition(document: CommentedMap, op: SetEdgeConditionOp) -> None:
+    container = _graph_container(document, op.graph)
+    edges = container.get("edges")
+    if not isinstance(edges, list):
+        raise OpError(f"no edges defined in '{op.graph}'")
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("from") != op.from_node:
+            continue
+        to = edge.get("to")
+        if isinstance(to, str):
+            if to == op.target and op.condition is None:
+                if op.new_condition is None and op.new_default:
+                    return  # scalar `to: X` already means an unconditional default
+                seq = CommentedSeq()
+                seq.append(_make_target_item(op.target, op.new_condition, op.new_default))
+                edge["to"] = seq
+                return
+        elif isinstance(to, list):
+            for item in to:
+                if _target_of(item) != op.target or _condition_of(item) != op.condition:
+                    continue
+                if not isinstance(item, dict):  # pragma: no cover - list items are maps
+                    raise OpError(f"edge from '{op.from_node}' has a malformed 'to'")
+                for other in to:
+                    if other is item:
+                        continue
+                    if (
+                        _target_of(other) == op.target
+                        and _condition_of(other) == op.new_condition
+                    ):
+                        cond = f" (condition: {op.new_condition})" if op.new_condition else ""
+                        raise OpError(f"edge {op.from_node} -> {op.target}{cond} already exists")
+                _rewrite_target_item(item, op.target, op.new_condition, op.new_default)
                 return
     rendered = f" (condition: {op.condition})" if op.condition else ""
     raise OpError(f"edge {op.from_node} -> {op.target}{rendered} not found")

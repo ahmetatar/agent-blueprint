@@ -20,6 +20,7 @@ import {
   ConflictError,
   OpRejectedError,
   saveLayout,
+  validateExpression,
   type BlueprintInfo,
   type EditOp,
   type EdgeRef,
@@ -347,7 +348,11 @@ export function GraphCanvas({
           + Node
         </button>
       </Panel>
-      <SelectionToolbar selection={selection} />
+      <SelectionToolbar
+        selection={selection}
+        stateFields={graph.state_fields}
+        submitOps={submitOps}
+      />
       {toast !== null && (
         <Panel position="top-center">
           <div className="canvas-toast">
@@ -373,21 +378,34 @@ export function GraphCanvas({
   );
 }
 
-/** Floating delete affordance for the current selection — the keyboard
- * shortcut existed since E2b but was undiscoverable. `deleteElements` routes
- * through the same onDelete → ops path as Backspace. */
-function SelectionToolbar({ selection }: { selection: { nodes: Node[]; edges: Edge[] } }) {
+/** Floating affordances for the current selection: a delete button (the
+ * keyboard shortcut existed since E2b but was undiscoverable) and, for a
+ * single real edge, an inline condition / default editor (E4b). `deleteElements`
+ * routes through the same onDelete → ops path as Backspace. */
+function SelectionToolbar({
+  selection,
+  stateFields,
+  submitOps,
+}: {
+  selection: { nodes: Node[]; edges: Edge[] };
+  stateFields: string[];
+  submitOps: (ops: EditOp[]) => void;
+}) {
   const { deleteElements } = useReactFlow();
   const nodes = selection.nodes.filter((node) => node.deletable !== false);
   const edges = selection.edges.filter((edge) => edge.deletable !== false);
   const count = nodes.length + edges.length;
   if (count === 0) return null;
 
+  const soleEdgeRef =
+    count === 1 && edges.length === 1
+      ? ((edges[0].data?.ref ?? null) as EdgeRef | null)
+      : null;
+
   let label: string;
   if (count === 1 && edges.length === 1) {
-    const ref = (edges[0].data?.ref ?? null) as EdgeRef | null;
-    label = ref
-      ? `edge ${ref.from} → ${ref.target}`
+    label = soleEdgeRef
+      ? `edge ${soleEdgeRef.from} → ${soleEdgeRef.target}`
       : `edge ${edges[0].source} → ${edges[0].target}`;
   } else if (count === 1 && nodes.length === 1) {
     label = `node ${nodes[0].id}`;
@@ -396,7 +414,7 @@ function SelectionToolbar({ selection }: { selection: { nodes: Node[]; edges: Ed
   }
   return (
     <Panel position="top-center">
-      <div className="selection-toolbar">
+      <div className="selection-toolbar nodrag nopan">
         <span className="selection-label">{label}</span>
         <button
           type="button"
@@ -407,6 +425,165 @@ function SelectionToolbar({ selection }: { selection: { nodes: Node[]; edges: Ed
           Delete ⌫
         </button>
       </div>
+      {soleEdgeRef && (
+        <EdgeConditionEditor
+          key={edges[0].id}
+          edgeRef={soleEdgeRef}
+          kind={(edges[0].data?.kind ?? "normal") as string}
+          stateFields={stateFields}
+          submitOps={submitOps}
+        />
+      )}
     </Panel>
+  );
+}
+
+/** Inline editor for a route edge's `condition` / `default` flag (E4b). Lives
+ * under the selection toolbar; applies as a single `set_edge_condition` op
+ * after a live check by the expression parser (POST /api/expression/validate). */
+function EdgeConditionEditor({
+  edgeRef,
+  kind,
+  stateFields,
+  submitOps,
+}: {
+  edgeRef: EdgeRef;
+  kind: string;
+  stateFields: string[];
+  submitOps: (ops: EditOp[]) => void;
+}) {
+  const initialCondition = edgeRef.condition ?? "";
+  const initialDefault = kind === "default";
+  const [condition, setCondition] = useState(initialCondition);
+  const [isDefault, setIsDefault] = useState(initialDefault);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const trimmed = condition.trim();
+  const conditionActive = !isDefault && trimmed !== "";
+
+  // Live-validate the typed condition (debounced); empty/default need no check.
+  useEffect(() => {
+    if (!conditionActive) {
+      setError(null);
+      setChecking(false);
+      return;
+    }
+    setChecking(true);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      validateExpression(trimmed)
+        .then((result) => {
+          if (cancelled) return;
+          setError(result.valid ? null : (result.error ?? "invalid condition"));
+        })
+        .catch(() => {
+          if (!cancelled) setError(null); // network hiccup — let the server gate the write
+        })
+        .finally(() => {
+          if (!cancelled) setChecking(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [trimmed, conditionActive]);
+
+  const insertField = (field: string) => {
+    const token = `state.${field}`;
+    const el = inputRef.current;
+    setIsDefault(false);
+    if (!el) {
+      setCondition((current) => current + token);
+      return;
+    }
+    const start = el.selectionStart ?? condition.length;
+    const end = el.selectionEnd ?? condition.length;
+    const next = condition.slice(0, start) + token + condition.slice(end);
+    setCondition(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + token.length;
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
+  const dirty = trimmed !== initialCondition.trim() || isDefault !== initialDefault;
+  const blocked = checking || error !== null;
+
+  const apply = () => {
+    const newCondition = conditionActive ? trimmed : null;
+    submitOps([
+      {
+        op: "set_edge_condition",
+        graph: edgeRef.graph,
+        from_node: edgeRef.from,
+        target: edgeRef.target,
+        condition: edgeRef.condition,
+        new_condition: newCondition,
+        new_default: newCondition === null ? isDefault : false,
+      },
+    ]);
+  };
+
+  return (
+    <div
+      className="edge-config nodrag nopan"
+      onKeyDown={(e) => e.stopPropagation()} // don't let Backspace delete the edge
+    >
+      <label className="edge-config-row">
+        <span className="edge-config-name">Condition</span>
+        <input
+          ref={inputRef}
+          type="text"
+          className="edge-config-input"
+          placeholder="state.priority == 'high'"
+          value={condition}
+          disabled={isDefault}
+          spellCheck={false}
+          onChange={(e) => {
+            setCondition(e.target.value);
+            if (e.target.value.trim() !== "") setIsDefault(false);
+          }}
+        />
+      </label>
+      <label className="edge-config-default">
+        <input
+          type="checkbox"
+          checked={isDefault}
+          onChange={(e) => setIsDefault(e.target.checked)}
+        />
+        default (unconditional)
+      </label>
+      {stateFields.length > 0 && (
+        <div className="edge-config-chips">
+          <span className="edge-config-name">Insert</span>
+          {stateFields.map((field) => (
+            <button
+              key={field}
+              type="button"
+              className="edge-config-chip"
+              title={`Insert state.${field}`}
+              onClick={() => insertField(field)}
+            >
+              {field}
+            </button>
+          ))}
+        </div>
+      )}
+      {error !== null && <div className="edge-config-error">{error}</div>}
+      <div className="edge-config-actions">
+        <button
+          type="button"
+          className="edge-config-apply"
+          disabled={!dirty || blocked}
+          onClick={apply}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
   );
 }

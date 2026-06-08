@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E4b): edge condition editor — selecting a route edge
+  now shows an inline editor in the selection toolbar to change its
+  `condition` or mark it the `default` (unconditional) route. The condition
+  is validated live by the same expression parser the generator uses (an
+  invalid condition blocks *Apply*), and declared `state` fields appear as
+  chips that insert `state.<field>` at the cursor. *Apply* writes a single
+  in-place `set_edge_condition` op that keeps the entry's position in the
+  `to:` list and, for a condition-value-only change, preserves the target's
+  quoting and comments. New read-only `POST /api/expression/validate`
+  endpoint and `state_fields` in the graph view-model
 - `abp editor` (phase E4a): edge interaction repair — edges now have a
   generous click target and a clearly visible selected state, selecting one
   shows a floating toolbar (`edge router → worker` + Delete button, so the

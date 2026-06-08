@@ -75,6 +75,13 @@ it, never a separate store.
     the `to:` list (evaluation order is routing semantics when conditions
     overlap), its condition, and its comments. Moving the source end
     relocates the entry to the new source's edge.
+  - **Edit an edge's condition** in the selection toolbar: type a condition
+    (validated live by the same expression parser the generator uses — an
+    invalid condition blocks *Apply*), or tick *default (unconditional)* to
+    make it the fallback route. Declared `state` fields appear as chips that
+    insert `state.<field>` at the cursor. *Apply* writes a single in-place
+    edit — the entry keeps its list position, and editing only the condition
+    value preserves the target's quoting and comments.
   - **Delete** a selected edge or node (toolbar button or `Backspace`).
     Deleting a node also removes every edge that references it. Synthetic
     edges (START→entry, supervisor delegation/return, parallel fan-out) are
@@ -166,10 +173,13 @@ back to canvas nodes).
 - `PUT /api/blueprint/yaml` — whole-file save from the source pane
   (parseable-YAML gate; broadcasts `file_changed` to other tabs)
 - `POST /api/blueprint/ops` — canvas/config ops (`add_node`, `remove_node`,
-  `add_edge`, `remove_edge`, `retarget_edge`, `set_field`, `unset_field`)
-  applied as targeted ruamel mutations; `409` when `base_hash` is stale,
-  `422` when an op cannot apply or the result fails validation (nothing
-  written)
+  `add_edge`, `remove_edge`, `retarget_edge`, `set_edge_condition`,
+  `set_field`, `unset_field`) applied as targeted ruamel mutations; `409`
+  when `base_hash` is stale, `422` when an op cannot apply or the result
+  fails validation (nothing written)
+- `POST /api/expression/validate` — check an edge condition with the
+  generator's expression parser (`{valid, error, referenced_fields}`);
+  read-only, powers the live condition editor
 - `PUT /api/layout` — persist canvas node positions to the layout sidecar
 - `POST /api/actions/{test,run,gate,generate,doctor,deploy}` — start a
   background action task; `409` when one is already running

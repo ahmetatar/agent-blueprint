@@ -52,7 +52,16 @@ deploy-azure = ["azure-mgmt-containerinstance", "azure-identity"]
 deploy-aws = ["boto3"]
 deploy-gcp = ["google-cloud-run"]
 # websockets: uvicorn's plain install has no WS protocol implementation
-editor = ["fastapi>=0.115", "uvicorn>=0.30", "watchfiles>=0.22", "websockets>=12"]
+# langgraph-checkpoint-sqlite: durable chat sessions (E5.5) — the editor runs the
+# generated project with a SQLite checkpointer (ABP_CHECKPOINT_DB) so a
+# conversation survives editor restarts; imported by the generated process only.
+editor = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "watchfiles>=0.22",
+    "websockets>=12",
+    "langgraph-checkpoint-sqlite>=1.0",
+]
 
 [tool.hatch.build]
 # Built frontend assets are VCS-ignored but must ship in the package.

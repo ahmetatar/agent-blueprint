@@ -230,6 +230,59 @@ def test_new_session_changes_thread_id(
         session.stop()
 
 
+def test_resume_thread_reloads_persisted_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ChatSession, "_materialize_project", _materialize_factory(_FAKE_MAIN))
+    bp = _blueprint(tmp_path)
+    collector = _Collector()
+    session = ChatSession(bp, collector)
+    try:
+        session.start(install=False)
+        thread_id = _wait_ready(collector)["thread_id"]
+        session.send("hi")
+        collector.wait_for(
+            lambda e: e.get("type") == "chat_message" and e["message"]["role"] == "agent"
+        )
+        session.stop()
+
+        # A brand-new session object (as if the editor restarted) resumes the
+        # same thread and gets the persisted transcript back.
+        collector2 = _Collector()
+        session2 = ChatSession(bp, collector2)
+        session2.start(install=False, thread_id=thread_id)
+        _wait_ready(collector2)
+        history = session2.snapshot()["history"]
+        assert [(m["role"], m["content"]) for m in history][:2] == [
+            ("user", "hi"),
+            ("agent", "turn 1:hi"),
+        ]
+        assert session2.snapshot()["thread_id"] == thread_id
+        session2.stop()
+    finally:
+        session.stop()
+
+
+def test_delete_active_thread_stops_and_forgets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ChatSession, "_materialize_project", _materialize_factory(_FAKE_MAIN))
+    bp = _blueprint(tmp_path)
+    collector = _Collector()
+    session = ChatSession(bp, collector)
+    session.start(install=False)
+    thread_id = _wait_ready(collector)["thread_id"]
+    session.send("hi")
+    collector.wait_for(
+        lambda e: e.get("type") == "chat_message" and e["message"]["role"] == "agent"
+    )
+    assert any(t["thread_id"] == thread_id for t in session.list_threads())
+
+    session.delete_thread(thread_id)
+    assert session.snapshot()["status"] == "stopped"  # active thread was stopped
+    assert all(t["thread_id"] != thread_id for t in session.list_threads())
+
+
 def test_stop_marks_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ChatSession, "_materialize_project", _materialize_factory(_FAKE_MAIN))
     collector = _Collector()

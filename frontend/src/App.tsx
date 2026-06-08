@@ -181,9 +181,15 @@ export default function App() {
         status: message.status,
         thread_id: message.thread_id,
         error: message.error,
-        // A (re)start clears history; the server snapshot is the source of truth.
-        history: message.status === "starting" ? [] : prev.history,
       }));
+      // A (re)start resets the transcript: empty for a new thread, the loaded
+      // history for a resumed one. The server snapshot is authoritative, and no
+      // chat_message arrives before "ready", so fetching here is race-free.
+      if (message.status === "starting") {
+        fetchChat()
+          .then(setChat)
+          .catch(() => undefined);
+      }
     } else if (message.type === "chat_message") {
       setChat((prev) => ({ ...prev, history: [...prev.history, message.message] }));
     }

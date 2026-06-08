@@ -142,6 +142,7 @@ class ExpressionRequest(BaseModel):
 
 class ChatStartRequest(BaseModel):
     install: bool = True
+    thread_id: str | None = None  # resume an existing thread, else start fresh
 
 
 class ChatSendRequest(BaseModel):
@@ -370,10 +371,21 @@ def create_app(
         """Current chat session (status, thread_id, history) — lets a tab resync."""
         return {"chat": chat.snapshot()}
 
+    @app.get("/api/chat/threads")
+    def chat_threads() -> dict[str, Any]:
+        """Past durable conversations for the thread browser (E5.5)."""
+        return {"threads": chat.list_threads()}
+
     @app.post("/api/chat/start")
     def chat_start(body: ChatStartRequest) -> dict[str, Any]:
-        """(Re)start a persistent chat session with a fresh thread_id."""
-        return {"chat": chat.start(install=body.install)}
+        """(Re)start a chat session — resume `thread_id` if given, else fresh."""
+        return {"chat": chat.start(install=body.install, thread_id=body.thread_id)}
+
+    @app.post("/api/chat/threads/{thread_id}/delete")
+    def chat_delete_thread(thread_id: str) -> dict[str, Any]:
+        """Forget a thread (durable checkpoint + transcript)."""
+        chat.delete_thread(thread_id)
+        return {"threads": chat.list_threads()}
 
     @app.post("/api/chat/send")
     def chat_send(body: ChatSendRequest) -> Any:

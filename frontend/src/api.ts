@@ -331,20 +331,43 @@ export type ChatWsMessage =
 /** The session is not ready to accept input (start one first). */
 export class ChatNotReadyError extends Error {}
 
+/** A past durable conversation, for the thread browser (E5.5). */
+export interface ChatThread {
+  thread_id: string;
+  updated: string | null;
+  count: number;
+  preview: string;
+}
+
 export async function fetchChat(): Promise<ChatState> {
   const response = await fetch("/api/chat");
   if (!response.ok) throw new Error(`API responded ${response.status}`);
   return ((await response.json()) as { chat: ChatState }).chat;
 }
 
-export async function startChat(install = true): Promise<ChatState> {
+export async function fetchChatThreads(): Promise<ChatThread[]> {
+  const response = await fetch("/api/chat/threads");
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { threads: ChatThread[] }).threads;
+}
+
+/** Start a chat — resume `threadId` if given, else a fresh thread. */
+export async function startChat(threadId?: string): Promise<ChatState> {
   const response = await fetch("/api/chat/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ install }),
+    body: JSON.stringify({ install: true, thread_id: threadId ?? null }),
   });
   if (!response.ok) throw new Error(`API responded ${response.status}`);
   return ((await response.json()) as { chat: ChatState }).chat;
+}
+
+export async function deleteChatThread(threadId: string): Promise<ChatThread[]> {
+  const response = await fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/delete`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { threads: ChatThread[] }).threads;
 }
 
 export async function sendChat(message: string): Promise<void> {

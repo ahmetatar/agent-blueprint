@@ -34,6 +34,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agent_blueprint.editor import chat_store
 from agent_blueprint.exceptions import (
     BlueprintCompilationError,
     BlueprintValidationError,
@@ -122,14 +123,18 @@ class ChatSession:
         self._history: list[dict[str, str]] = []
         self._stderr_tail: deque[str] = deque(maxlen=40)
         self._generation = 0  # bumped each (re)start so stale readers no-op
+        self._persist_lock = threading.Lock()  # serialize transcript writes
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self, *, install: bool = True) -> dict[str, Any]:
+    def start(self, *, install: bool = True, thread_id: str | None = None) -> dict[str, Any]:
         """(Re)start the session: stop any prior process, then spawn fresh.
 
+        With ``thread_id`` the conversation is *resumed* — the durable SQLite
+        checkpointer restores the agent's state and the display transcript is
+        reloaded from the thread index. Without it a new thread is started.
         Returns the snapshot immediately with ``status="starting"``; the real
         spawn happens on a worker thread and publishes ``chat_status`` when it
         is ready (or errors).
@@ -138,10 +143,14 @@ class ChatSession:
             self._teardown_locked()
             self._generation += 1
             generation = self._generation
-            self._thread_id = f"editor-{uuid.uuid4().hex[:8]}"
+            if thread_id:
+                self._thread_id = thread_id
+                self._history = chat_store.load_history(self._blueprint_path, thread_id)
+            else:
+                self._thread_id = f"editor-{uuid.uuid4().hex[:8]}"
+                self._history = []
             self._status = "starting"
             self._error = None
-            self._history = []
             self._stderr_tail.clear()
         self._publish_status()
         worker = threading.Thread(
@@ -159,6 +168,10 @@ class ChatSession:
                 raise ChatError("no chat session is ready — start one first")
             process = self._process
             self._history.append({"role": "user", "content": message})
+        # Persist the user turn BEFORE handing the message to the driver, so a
+        # fast reply (persisted on the reader thread) can't be overwritten by a
+        # later user-turn persist running here.
+        self._persist()
         try:
             assert process.stdin is not None
             process.stdin.write(json.dumps({"input": message}) + "\n")
@@ -183,6 +196,19 @@ class ChatSession:
                 "error": self._error,
                 "history": list(self._history),
             }
+
+    def list_threads(self) -> list[dict[str, Any]]:
+        """Past conversations for the thread browser (most recent first)."""
+        return chat_store.list_threads(self._blueprint_path)
+
+    def delete_thread(self, thread_id: str) -> dict[str, Any]:
+        """Forget a thread (durable checkpoint + index entry). Stops it if active."""
+        with self._lock:
+            active = self._thread_id
+        if active == thread_id:
+            self.stop()  # release the db handle before deleting its rows
+        chat_store.delete_thread(self._blueprint_path, thread_id)
+        return self.snapshot()
 
     # ------------------------------------------------------------------
     # Worker-thread spawn + readers
@@ -274,6 +300,7 @@ class ChatSession:
                 if generation != self._generation:
                     return
                 self._history.append({"role": role, "content": content})
+            self._persist()
             self._publish({"type": "chat_message", "message": {"role": role, "content": content}})
 
     def _handle_exit(self, generation: int, process: subprocess.Popen[str]) -> None:
@@ -346,7 +373,28 @@ class ChatSession:
         env["PYTHONUNBUFFERED"] = "1"
         env["ABP_THREAD_ID"] = self._thread_id or "editor"
         env.setdefault("ABP_TOOL_APPROVAL_MODE", "deny")
+        # Durable checkpointing (E5.5): a stable SQLite file next to the
+        # blueprint so the conversation survives editor restarts. The generated
+        # graph honours ABP_CHECKPOINT_DB regardless of its declared backend.
+        # Must be absolute — the child runs with cwd set to the generated dir.
+        chat_store.chat_dir(self._blueprint_path).mkdir(parents=True, exist_ok=True)
+        env["ABP_CHECKPOINT_DB"] = str(chat_store.db_path(self._blueprint_path).resolve())
         return env
+
+    def _persist(self) -> None:
+        """Save the current transcript to the thread index (best-effort).
+
+        Serialized by `_persist_lock` so concurrent turns (the main thread's
+        user turn and the reader thread's agent turn) can't interleave a
+        read-modify-write of the index.
+        """
+        with self._persist_lock:
+            with self._lock:
+                thread_id = self._thread_id
+                history = list(self._history)
+            if thread_id:
+                with contextlib.suppress(OSError):
+                    chat_store.save_history(self._blueprint_path, thread_id, history)
 
     def _teardown_locked(self) -> None:
         """Kill the current process and clean its temp dir. Caller holds the lock."""

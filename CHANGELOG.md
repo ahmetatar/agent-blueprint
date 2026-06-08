@@ -8,6 +8,20 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E5.5): durable chat threads — chat sessions now survive
+  editor restarts. The editor runs the generated project with a SQLite
+  checkpointer at a stable path (`.abp/chat/<stem>.db`) and a **Threads**
+  browser lists past conversations to *resume* (the agent's own state is
+  restored from the checkpoint; the transcript is reloaded) or *reset* (drops
+  the transcript and the checkpoint rows). Works for **any** blueprint
+  regardless of its `memory.backend`. Core change: `graph.py.j2` honours a new
+  `ABP_CHECKPOINT_DB` env override (forces a SQLite `checkpointer` at that
+  path) — and this fixes a latent bug in the existing `sqlite` backend, which
+  assigned `SqliteSaver.from_conn_string(...)` (a context manager) instead of a
+  live saver; both paths now use `SqliteSaver(sqlite3.connect(...))` + `setup()`.
+  New `editor/chat_store.py` (transcript index + checkpoint reset) and
+  `/api/chat/threads` + `/api/chat/threads/{id}/delete` endpoints; the `editor`
+  extra now includes `langgraph-checkpoint-sqlite`
 - `abp editor` (phase E5.4): step-level state view — a **Run…** result now
   lists each node's *state delta* (the partial update that node returned — i.e.
   what it changed) in execution order, above the final state, so you can read

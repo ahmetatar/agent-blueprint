@@ -125,22 +125,35 @@ def build_graph():
 {% endfor %}
 
     # Memory / checkpointing
+    _abp_chat_db = os.environ.get("ABP_CHECKPOINT_DB")
+    if _abp_chat_db:
+        # Durable chat checkpointer for `abp editor`: a stable SQLite file so a
+        # conversation survives across editor restarts, regardless of the
+        # blueprint's configured backend. SqliteSaver(conn) is the persistent
+        # constructor (from_conn_string is a short-lived context manager).
+        import sqlite3
+        from langgraph.checkpoint.sqlite import SqliteSaver as _AbpSqliteSaver
+        checkpointer = _AbpSqliteSaver(sqlite3.connect(_abp_chat_db, check_same_thread=False))
+        checkpointer.setup()
+    else:
 {% if ir.memory.backend.value == "in_memory" %}
-    checkpointer = MemorySaver()
+        checkpointer = MemorySaver()
 {% elif ir.memory.backend.value == "sqlite" %}
-    _db_path = os.environ.get("{{ ir.memory.connection_string_env or 'SQLITE_DB_PATH' }}", "{{ ir.name }}.db")
-    checkpointer = SqliteSaver.from_conn_string(_db_path)
+        import sqlite3
+        _db_path = os.environ.get("{{ ir.memory.connection_string_env or 'SQLITE_DB_PATH' }}", "{{ ir.name }}.db")
+        checkpointer = SqliteSaver(sqlite3.connect(_db_path, check_same_thread=False))
+        checkpointer.setup()
 {% elif ir.memory.backend.value == "postgres" %}
-    _pg_url = os.environ.get("{{ ir.memory.connection_string_env or 'DATABASE_URL' }}")
-    if not _pg_url:
-        raise RuntimeError(
-            "Postgres checkpointer requires the '{{ ir.memory.connection_string_env or 'DATABASE_URL' }}' "
-            "environment variable to be set."
-        )
-    checkpointer = PostgresSaver.from_conn_string(_pg_url)
+        _pg_url = os.environ.get("{{ ir.memory.connection_string_env or 'DATABASE_URL' }}")
+        if not _pg_url:
+            raise RuntimeError(
+                "Postgres checkpointer requires the '{{ ir.memory.connection_string_env or 'DATABASE_URL' }}' "
+                "environment variable to be set."
+            )
+        checkpointer = PostgresSaver.from_conn_string(_pg_url)
 {% elif ir.memory.backend.value == "redis" %}
-    _redis_url = os.environ.get("{{ ir.memory.connection_string_env or 'REDIS_URL' }}", "redis://localhost:6379")
-    checkpointer = RedisSaver.from_conn_string(_redis_url)
+        _redis_url = os.environ.get("{{ ir.memory.connection_string_env or 'REDIS_URL' }}", "redis://localhost:6379")
+        checkpointer = RedisSaver.from_conn_string(_redis_url)
 {% endif %}
 
     return builder.compile(checkpointer=checkpointer)

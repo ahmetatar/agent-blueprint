@@ -668,12 +668,30 @@ body,
   width: 220px;
   box-sizing: border-box;
   background: #fff;
-  border: 1px solid #d9d9de;
+  border: 1px solid #ebecef;
   border-top: 3px solid #6b7280;
-  border-radius: 8px;
-  padding: 0.45rem 0.6rem;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  border-radius: 13px;
+  padding: 0.6rem 0.8rem 0.65rem;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 5%),
+    0 8px 18px -8px rgb(16 24 40 / 14%);
   font-size: 0.8rem;
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.react-flow__node:hover .bp-node {
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 6%),
+    0 12px 24px -8px rgb(16 24 40 / 20%);
+}
+
+.react-flow__node.selected .bp-node {
+  border-color: #b9cdf5;
+  box-shadow:
+    0 0 0 2px rgb(27 111 216 / 35%),
+    0 8px 18px -8px rgb(16 24 40 / 16%);
 }
 
 .bp-node-head {
@@ -683,10 +701,10 @@ body,
 }
 
 .bp-node-type {
-  font-size: 0.65rem;
+  font-size: 0.64rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
 }
 
 .bp-node-entry {
@@ -726,12 +744,14 @@ body,
 }
 
 .bp-node-label {
-  font-weight: 600;
-  margin-top: 0.15rem;
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: #15171c;
+  margin-top: 0.1rem;
 }
 
 .bp-node-meta {
-  color: #777;
+  color: #6b7280;
   font-size: 0.7rem;
   font-family: ui-monospace, monospace;
   white-space: nowrap;
@@ -739,16 +759,31 @@ body,
   text-overflow: ellipsis;
 }
 
+/* A hairline divider separating the title (type + name) from the body,
+   echoing the clean header rule of React Flow's own node cards. */
+.bp-node-meta:first-of-type {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eef0f3;
+}
+
+.bp-node-meta + .bp-node-meta {
+  margin-top: 0.15rem;
+}
+
 .terminal-node {
   position: relative; /* anchor handles to the pill, not the taller container */
   width: 90px;
   box-sizing: border-box;
   text-align: center;
-  padding: 0.35rem 0;
+  padding: 0.4rem 0;
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.06em;
+  box-shadow:
+    0 1px 2px rgb(16 24 40 / 5%),
+    0 6px 14px -8px rgb(16 24 40 / 14%);
 }
 
 .terminal-start {

@@ -47,6 +47,7 @@ export interface GraphViewModel {
   edges: VmEdge[];
   agents: string[];
   tools: string[];
+  state_fields: string[];
 }
 
 export interface LintFinding {
@@ -156,6 +157,17 @@ export interface RetargetEdgeOp {
   new_target: string;
 }
 
+/** Change an existing edge's condition / default flag, in place. */
+export interface SetEdgeConditionOp {
+  op: "set_edge_condition";
+  graph?: string;
+  from_node: string;
+  target: string;
+  condition?: string | null; // the edge's current condition (matching key)
+  new_condition?: string | null; // null = unconditional
+  new_default?: boolean; // when new_condition is null: use the `default:` form
+}
+
 export interface SetFieldOp {
   op: "set_field";
   path: string;
@@ -173,8 +185,26 @@ export type EditOp =
   | AddEdgeOp
   | RemoveEdgeOp
   | RetargetEdgeOp
+  | SetEdgeConditionOp
   | SetFieldOp
   | UnsetFieldOp;
+
+/** Result of POST /api/expression/validate — drives the live condition check. */
+export interface ExpressionCheck {
+  valid: boolean;
+  error: string | null;
+  referenced_fields: string[];
+}
+
+export async function validateExpression(expression: string): Promise<ExpressionCheck> {
+  const response = await fetch("/api/expression/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expression }),
+  });
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return (await response.json()) as ExpressionCheck;
+}
 
 /** The file changed underneath the canvas — refetch and retry. */
 export class ConflictError extends Error {}

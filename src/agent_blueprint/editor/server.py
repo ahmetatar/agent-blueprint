@@ -36,7 +36,8 @@ from agent_blueprint.editor.diagnostics import lint_with_positions
 from agent_blueprint.editor.ops import EditOp, OpError, apply_ops
 from agent_blueprint.editor.tasks import ActionError, TaskBusyError, TaskManager, action_surface
 from agent_blueprint.editor.viewmodel import build_view_model
-from agent_blueprint.exceptions import BlueprintValidationError
+from agent_blueprint.exceptions import BlueprintValidationError, ExpressionError
+from agent_blueprint.ir.expression import analyze_expression, parse_expression
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import (
     load_blueprint_document,
@@ -132,6 +133,24 @@ class LayoutSaveRequest(BaseModel):
 
 class ActionRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExpressionRequest(BaseModel):
+    expression: str
+
+
+def check_expression(expression: str) -> dict[str, Any]:
+    """Validate an edge condition with the same parser the generator uses.
+
+    Returns ``{valid, error, referenced_fields}`` — the canvas edge-condition
+    editor calls this live so an invalid condition never reaches a write.
+    """
+    try:
+        compiled = parse_expression(expression)
+    except ExpressionError as e:
+        return {"valid": False, "error": str(e), "referenced_fields": []}
+    analysis = analyze_expression(compiled)
+    return {"valid": True, "error": None, "referenced_fields": sorted(analysis.referenced_fields)}
 
 
 class _WsBroadcaster:
@@ -308,6 +327,11 @@ def create_app(
             {"type": "file_changed", "path": str(blueprint_path), "origin": "save"}
         )
         return blueprint_info(blueprint_path)
+
+    @app.post("/api/expression/validate")
+    def validate_expression(body: ExpressionRequest) -> dict[str, Any]:
+        """Live edge-condition check for the canvas (read-only, no write)."""
+        return check_expression(body.expression)
 
     @app.post("/api/actions/{action}")
     def start_action(action: str, body: ActionRequest) -> Any:

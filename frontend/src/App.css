@@ -1019,3 +1019,99 @@ body,
 .selection-delete:hover {
   background: #fdf2f0;
 }
+
+.edge-config {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-size: 0.8rem;
+  min-width: 18rem;
+}
+
+.edge-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.edge-config-name {
+  color: #666;
+  white-space: nowrap;
+}
+
+.edge-config-input {
+  flex: 1;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #cfcfcf;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.edge-config-input:disabled {
+  background: #f3f3f3;
+  color: #999;
+}
+
+.edge-config-default {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #555;
+}
+
+.edge-config-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.edge-config-chip {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid #c9c0f0;
+  border-radius: 999px;
+  background: #f4f1ff;
+  color: #5b41d6;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.edge-config-chip:hover {
+  background: #e9e3ff;
+}
+
+.edge-config-error {
+  color: #c0392b;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
+
+.edge-config-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.edge-config-apply {
+  padding: 0.25rem 0.8rem;
+  border: 1px solid #5b41d6;
+  border-radius: 6px;
+  background: #5b41d6;
+  color: #fff;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.edge-config-apply:disabled {
+  background: #cfccdf;
+  border-color: #cfccdf;
+  cursor: not-allowed;
+}

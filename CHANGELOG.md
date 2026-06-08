@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E4.5): the *+ Node* dialog now covers every node type —
+  agent, function, handoff (channel + optional message template), parallel
+  (branch checkboxes + a join picker), subgraph (subgraph-ref picker +
+  key→value `input_map`/`output_map` rows), and supervisor (agent + worker
+  checkboxes). References are pickers drawn from the blueprint (the graph
+  view-model now exposes `subgraphs`), and the new node goes through the
+  existing strict validate-before-write path, so an illegal combination is
+  refused with the reason shown. Wiring supervisor workers / parallel
+  branches by drawing on the canvas remains a later phase
+
 - `abp editor` (phase E4.6): undo / redo — *↶ Undo* / *↷ Redo* buttons in the
   header and `⌘/Ctrl+Z` / `⌘/Ctrl+Shift+Z` (or `⌘/Ctrl+Y`) step through this
   session's edits. The history is a stack of whole-file YAML snapshots, so one

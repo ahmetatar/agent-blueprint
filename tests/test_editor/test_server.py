@@ -386,6 +386,33 @@ def test_set_edge_condition_op_via_api(blueprint_file: Path, tmp_path: Path) -> 
     assert "      to: END\n" not in content  # scalar normalized to the list form
 
 
+def test_add_handoff_node_via_api_validates_and_writes(
+    blueprint_file: Path, tmp_path: Path
+) -> None:
+    # The add-node dialog can create non-agent node types; a handoff node is
+    # valid standalone (channel defaults), so it round-trips through the
+    # strict validate-before-write path.
+    client = _client(blueprint_file, tmp_path)
+    base = client.get("/api/blueprint").json()["hash"]
+    resp = client.post(
+        "/api/blueprint/ops",
+        json={
+            "base_hash": base,
+            "ops": [
+                {
+                    "op": "add_node",
+                    "node_id": "escalate",
+                    "node": {"type": "handoff", "channel": "console"},
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert any(n["id"] == "escalate" and n["type"] == "handoff" for n in body["graph"]["nodes"])
+
+
 def test_validate_expression_accepts_valid_condition(
     blueprint_file: Path, tmp_path: Path
 ) -> None:

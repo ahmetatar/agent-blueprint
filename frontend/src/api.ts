@@ -48,6 +48,7 @@ export interface GraphViewModel {
   agents: string[];
   tools: string[];
   state_fields: string[];
+  subgraphs: string[];
 }
 
 export interface LintFinding {

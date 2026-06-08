@@ -86,6 +86,19 @@ _STREAM_FILE = os.environ.get("ABP_TRACE_STREAM_FILE")
 if _STREAM_FILE:
     register_trace_observer(_StreamFileObserver(_STREAM_FILE))
 
+# Opt-in content capture for local tooling (e.g. `abp editor`'s step-level
+# state view). Default OFF → events carry hashes only and the JSON manifest is
+# byte-identical, so goldens / harness diffs / gate baselines are unaffected.
+# When ON, node events additionally carry the *summarized* state (scalars
+# normalized; message lists collapsed to a count — same shape as final_state),
+# never raw message bodies.
+_TRACE_CONTENT = os.environ.get("ABP_TRACE_CONTENT", "").strip().lower() in (
+    "1",
+    "true",
+    "on",
+    "yes",
+)
+
 BUDGET_POLICY = {
     "max_tokens_per_run": {{ (ir.policies.budgets.max_tokens_per_run if ir.policies else none) | to_python }},
     "max_cost_usd": {{ (ir.policies.budgets.max_cost_usd if ir.policies else none) | to_python }},
@@ -220,8 +233,12 @@ class TraceRecorder:
             payload["route"] = route
         if input_state is not None:
             payload["input_state_hash"] = stable_trace_hash(input_state)
+            if _TRACE_CONTENT:
+                payload["input_state"] = _summarize_state_for_trace(input_state)
         if output_state is not None:
             payload["output_state_hash"] = stable_trace_hash(output_state)
+            if _TRACE_CONTENT:
+                payload["output_state"] = _summarize_state_for_trace(output_state)
         if args is not None:
             payload["args_hash"] = stable_trace_hash(args)
         if error is not None:

@@ -198,9 +198,20 @@ After a **Run…** finishes, the result view shows the run's *final state* —
 the same state snapshot the trace manifest records for harness
 `state_assertions`. Scalar fields are shown verbatim; message lists collapse
 to a count (e.g. `messages: 4 messages`); structured values render as compact
-JSON. This is privacy-preserving: per-node state values are **not** shown,
-because the trace carries only hashes per node — a per-node value view needs
-opt-in content capture, a later phase.
+JSON. For the per-node progression, see *State changes by node* below.
+
+### State changes by node (E5.4)
+
+Above the final state, a **Run…** result also lists each node's *state delta*
+— the partial update that node returned, i.e. exactly what it changed — in
+execution order, so you can read how the state evolved through the graph. This
+needs actual values (not just the hashes trace events normally carry), so the
+editor enables an opt-in content-capture mode (`ABP_TRACE_CONTENT`) **for the
+Run… action only**. The captured content is summarized the same way as the
+final state (scalars normalized, message lists as a count — never raw message
+bodies). The mode is **off by default everywhere else**: harness, eval, and
+gate runs stay hashes-only, so the JSON trace manifest is byte-identical and
+goldens / baselines are unaffected.
 
 ### Live execution view (E3b)
 

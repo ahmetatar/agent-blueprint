@@ -103,6 +103,13 @@ it, never a separate store.
   with the error shown on the canvas. Each op batch carries the file hash it
   was based on — if the file changed underneath (external editor, another
   tab), the edit is refused and the canvas refreshes instead.
+- **Undo / redo** — the *↶ Undo* / *↷ Redo* buttons in the header (or
+  `⌘/Ctrl+Z` and `⌘/Ctrl+Shift+Z` / `⌘/Ctrl+Y`) step through your edits this
+  session. The history is a stack of whole-file snapshots, so a single model
+  covers every kind of edit — canvas op, config form, *and* source save — and
+  restoring one brings back its comments and quoting byte-for-byte. While the
+  Source pane has unsaved changes the shortcuts defer to Monaco's own undo;
+  external edits on disk don't clear the history (it stays your local edits).
 
 ## Actions (E3a)
 

@@ -1,6 +1,7 @@
 # Visual Editor (`abp editor`)
 
-> **Status: phase E3 complete — editing, actions, live execution, deploy.**
+> **Status: phases E3–E5 in progress — editing, actions, live execution,
+> deploy, and a persistent chat session.**
 > The editor renders the blueprint as a live graph with validation/lint
 > diagnostics; the YAML source is editable in place, nodes/edges can be
 > added and removed on the canvas, node config (and the linked agent) is
@@ -8,8 +9,9 @@
 > sessions. The Actions tab runs `abp test` / `run` / `gate` / `generate` /
 > `doctor` in the background with live progress, canvas nodes light up as
 > the run executes them, and a confirm-gated Deploy builds and starts the
-> agent as a local container (docker/podman). See
-> [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
+> agent as a local container (docker/podman). The Chat tab holds a
+> *persistent* multi-turn conversation (the run view also shows a run's final
+> state). See [abp-editor-plan.md](abp-editor-plan.md) for the full roadmap.
 
 ```bash
 pip install "agent-blueprint[editor]"
@@ -161,6 +163,34 @@ task shows a **Cancel** button — cancelling terminates the underlying
 generated-project subprocess, so even a live-LLM scenario stops promptly.
 Buttons that don't apply are disabled with a hint (no harness scenarios →
 no Test; nothing to gate → no Gate).
+
+## Chat (E5.1)
+
+The **Chat** tab is a *persistent* conversation, in contrast to the one-shot
+**Run…**. **Start chat** keeps one generated-project process alive: the graph
+(and its in-memory checkpointer) is built once, so every message you send
+reuses the same `thread_id` and the conversation actually continues —
+follow-up questions see earlier turns. The active `thread_id` is shown in the
+toolbar; **New session** regenerates from the current blueprint (picking up any
+edits) and starts a fresh conversation with a new thread (history resets).
+
+Mechanically the editor writes its own small JSON-lines driver next to the
+generated project and runs it, exchanging one JSON object per line over the
+process's stdin/stdout; the agent's replies arrive over `/ws` and the message
+history is kept server-side so a reloaded tab resyncs. This stays entirely
+inside the editor — the generated templates are untouched.
+
+Notes and limits (v1):
+
+- **Not durable.** The checkpointer is in-memory, so a session lives only as
+  long as the editor process; closing the editor (or **New session**) discards
+  it. Durable, restart-surviving sessions are a later phase.
+- **Message-shaped blueprints.** Chat sends your text as the run input. A
+  blueprint whose `blueprint.input` declares a structured schema expects a JSON
+  payload instead, so plain chat text surfaces an input-contract error — use
+  **Run…** with a JSON message for those.
+- Tools that require approval are denied (same as **Run…**), and the first
+  start installs the generated project's dependencies.
 
 ### State inspector (E5.3)
 

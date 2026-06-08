@@ -34,6 +34,7 @@ from watchfiles import awatch
 from agent_blueprint.editor import layout_store
 from agent_blueprint.editor.diagnostics import lint_with_positions
 from agent_blueprint.editor.ops import EditOp, OpError, apply_ops
+from agent_blueprint.editor.session import ChatError, ChatSession
 from agent_blueprint.editor.tasks import ActionError, TaskBusyError, TaskManager, action_surface
 from agent_blueprint.editor.viewmodel import build_view_model
 from agent_blueprint.exceptions import BlueprintValidationError, ExpressionError
@@ -139,6 +140,14 @@ class ExpressionRequest(BaseModel):
     expression: str
 
 
+class ChatStartRequest(BaseModel):
+    install: bool = True
+
+
+class ChatSendRequest(BaseModel):
+    message: str
+
+
 def check_expression(expression: str) -> dict[str, Any]:
     """Validate an edge condition with the same parser the generator uses.
 
@@ -232,6 +241,7 @@ def create_app(
         loop.call_soon_threadsafe(_send)
 
     tasks = TaskManager(blueprint_path, publish_from_worker)
+    chat = ChatSession(blueprint_path, publish_from_worker)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -248,6 +258,7 @@ def create_app(
         )
         yield
         loop_box["loop"] = None
+        chat.stop()  # don't leave a generated-project process orphaned
         stop_event.set()
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -353,6 +364,31 @@ def create_app(
     @app.post("/api/tasks/current/cancel")
     def cancel_task() -> dict[str, bool]:
         return {"cancelled": tasks.cancel()}
+
+    @app.get("/api/chat")
+    def chat_state() -> dict[str, Any]:
+        """Current chat session (status, thread_id, history) — lets a tab resync."""
+        return {"chat": chat.snapshot()}
+
+    @app.post("/api/chat/start")
+    def chat_start(body: ChatStartRequest) -> dict[str, Any]:
+        """(Re)start a persistent chat session with a fresh thread_id."""
+        return {"chat": chat.start(install=body.install)}
+
+    @app.post("/api/chat/send")
+    def chat_send(body: ChatSendRequest) -> Any:
+        """Send a user message; the agent's reply arrives over /ws."""
+        if not body.message.strip():
+            return JSONResponse({"detail": "message must not be empty"}, status_code=422)
+        try:
+            chat.send(body.message)
+        except ChatError as e:
+            return JSONResponse({"detail": str(e)}, status_code=409)
+        return {"chat": chat.snapshot()}
+
+    @app.post("/api/chat/stop")
+    def chat_stop() -> dict[str, Any]:
+        return {"chat": chat.stop()}
 
     @app.put("/api/layout")
     def save_layout(body: LayoutSaveRequest) -> dict[str, bool]:

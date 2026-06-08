@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchBlueprint,
+  fetchChat,
   fetchCurrentTask,
   fetchSchema,
   saveYaml,
   type BlueprintInfo,
+  type ChatState,
+  type ChatWsMessage,
   type LintFinding,
   type TaskMessage,
   type TaskRecord,
@@ -12,13 +15,16 @@ import {
 } from "./api";
 import { GraphCanvas } from "./graph/GraphCanvas";
 import { ActionsPane } from "./panel/ActionsPane";
+import { ChatPane } from "./panel/ChatPane";
 import { ConfigPane } from "./panel/ConfigPane";
 import { IssuesPane } from "./panel/IssuesPane";
 import { SourcePane, type SourcePaneHandle } from "./panel/SourcePane";
 import { useLiveReload } from "./useLiveReload";
 import "./App.css";
 
-type Tab = "issues" | "source" | "config" | "actions";
+type Tab = "issues" | "source" | "config" | "actions" | "chat";
+
+const IDLE_CHAT: ChatState = { status: "idle", thread_id: null, error: null, history: [] };
 
 /** Live execution state of a canvas node, derived from streamed trace events. */
 export type RunState = "running" | "ok" | "error";
@@ -47,6 +53,7 @@ export default function App() {
   const [sourceDirty, setSourceDirty] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [task, setTask] = useState<TaskRecord | null>(null);
+  const [chat, setChat] = useState<ChatState>(IDLE_CHAT);
   // Canvas-id keyed run states; cleared when a task (or a new scenario
   // within it) starts, kept after task_done so the last run stays visible.
   const [runStates, setRunStates] = useState<Record<string, RunState>>({});
@@ -167,8 +174,30 @@ export default function App() {
     [applyTask, onTraceEvent],
   );
 
+  const onChatMessage = useCallback((message: ChatWsMessage) => {
+    if (message.type === "chat_status") {
+      setChat((prev) => ({
+        ...prev,
+        status: message.status,
+        thread_id: message.thread_id,
+        error: message.error,
+        // A (re)start clears history; the server snapshot is the source of truth.
+        history: message.status === "starting" ? [] : prev.history,
+      }));
+    } else if (message.type === "chat_message") {
+      setChat((prev) => ({ ...prev, history: [...prev.history, message.message] }));
+    }
+  }, []);
+
   useEffect(reload, [reload]);
-  useLiveReload(reload, onTaskMessage);
+  useLiveReload(reload, onTaskMessage, onChatMessage);
+
+  useEffect(() => {
+    // Resync an already-running chat session when a tab (re)loads.
+    fetchChat()
+      .then(setChat)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -355,6 +384,18 @@ export default function App() {
                 </span>
               )}
             </button>
+            <button
+              type="button"
+              className={tab === "chat" ? "tab tab-active" : "tab"}
+              onClick={() => setTab("chat")}
+            >
+              Chat
+              {chat.status === "ready" && (
+                <span className="running-dot" title="A chat session is live">
+                  ●
+                </span>
+              )}
+            </button>
           </nav>
           <div className="panel-body" hidden={tab !== "issues"}>
             <IssuesPane error={info.error} lint={info.lint} onFindingClick={showFindingInSource} />
@@ -382,6 +423,9 @@ export default function App() {
               task={task}
               onTask={applyTask}
             />
+          </div>
+          <div className="panel-body panel-body-chat" hidden={tab !== "chat"}>
+            <ChatPane chat={chat} valid={info.valid} />
           </div>
           <div className="panel-body panel-body-source" hidden={tab !== "source"}>
             <SourcePane

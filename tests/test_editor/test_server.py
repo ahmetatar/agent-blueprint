@@ -577,3 +577,77 @@ def test_ws_pushes_task_events(blueprint_file: Path, tmp_path: Path) -> None:
                 message = ws.receive_json()
             assert message["type"] == "task_done"
             assert message["task"]["status"] == "passed"
+
+
+# ---------------------------------------------------------------------------
+# Chat session endpoints (phase E5.1)
+# ---------------------------------------------------------------------------
+
+_FAKE_CHAT_MAIN = """\
+def run(user_input, thread_id="default"):
+    return "echo:%s" % user_input
+"""
+
+
+def _fake_materialize(main_source: str):
+    import tempfile
+
+    def fake(self: object, *, install: bool = True) -> Path:
+        tempdir = Path(tempfile.mkdtemp(prefix="abp_chat_srv_"))
+        (tempdir / "main.py").write_text(main_source, encoding="utf-8")
+        return tempdir
+
+    return fake
+
+
+def test_chat_state_starts_idle(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    body = client.get("/api/chat").json()["chat"]
+    assert body["status"] == "idle"
+    assert body["thread_id"] is None
+    assert body["history"] == []
+
+
+def test_chat_send_empty_message_rejected(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    assert client.post("/api/chat/send", json={"message": "   "}).status_code == 422
+
+
+def test_chat_send_without_session_is_conflict(blueprint_file: Path, tmp_path: Path) -> None:
+    client = _client(blueprint_file, tmp_path)
+    resp = client.post("/api/chat/send", json={"message": "hi"})
+    assert resp.status_code == 409
+    assert "start one first" in resp.json()["detail"]
+
+
+def test_chat_start_then_send_roundtrip(
+    blueprint_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_blueprint.editor.session import ChatSession
+
+    monkeypatch.setattr(
+        ChatSession, "_materialize_project", _fake_materialize(_FAKE_CHAT_MAIN)
+    )
+    app = server.create_app(blueprint_file, token=None, static_dir=tmp_path / "no-static")
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            started = client.post("/api/chat/start", json={"install": False}).json()["chat"]
+            assert started["status"] in ("starting", "ready")
+            # Wait for the worker thread to report ready over the WS.
+            message = ws.receive_json()
+            while not (message["type"] == "chat_status" and message["status"] == "ready"):
+                message = ws.receive_json()
+            thread_id = message["thread_id"]
+            assert thread_id.startswith("editor-")
+
+            client.post("/api/chat/send", json={"message": "hi"})
+            # First the echoed user turn, then the agent reply.
+            roles = []
+            while len(roles) < 2:
+                event = ws.receive_json()
+                if event["type"] == "chat_message":
+                    roles.append((event["message"]["role"], event["message"]["content"]))
+            assert roles == [("user", "hi"), ("agent", "echo:hi")]
+
+        state = client.get("/api/chat").json()["chat"]
+        assert [m["role"] for m in state["history"]] == ["user", "agent"]

@@ -305,3 +305,57 @@ export async function cancelTask(): Promise<boolean> {
   if (!response.ok) throw new Error(`API responded ${response.status}`);
   return ((await response.json()) as { cancelled: boolean }).cancelled;
 }
+
+// Persistent chat session (phase E5.1) — mirrors editor/session.py.
+
+export type ChatStatus = "idle" | "starting" | "ready" | "error" | "stopped";
+export type ChatRole = "user" | "agent" | "error";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatState {
+  status: ChatStatus;
+  thread_id: string | null;
+  error: string | null;
+  history: ChatMessage[];
+}
+
+/** Pushed over /ws as the session starts and as replies arrive. */
+export type ChatWsMessage =
+  | { type: "chat_status"; status: ChatStatus; thread_id: string | null; error: string | null }
+  | { type: "chat_message"; message: ChatMessage };
+
+/** The session is not ready to accept input (start one first). */
+export class ChatNotReadyError extends Error {}
+
+export async function fetchChat(): Promise<ChatState> {
+  const response = await fetch("/api/chat");
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { chat: ChatState }).chat;
+}
+
+export async function startChat(install = true): Promise<ChatState> {
+  const response = await fetch("/api/chat/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ install }),
+  });
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+  return ((await response.json()) as { chat: ChatState }).chat;
+}
+
+export async function sendChat(message: string): Promise<void> {
+  const response = await fetch("/api/chat/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (response.status === 409) {
+    const body = (await response.json()) as { detail?: string };
+    throw new ChatNotReadyError(body.detail ?? "no chat session is ready");
+  }
+  if (!response.ok) throw new Error(`API responded ${response.status}`);
+}

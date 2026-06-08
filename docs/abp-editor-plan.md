@@ -263,9 +263,17 @@ templates) requires explicit user approval *before* the change is made.
   with inverse ops.
 
 ### Phase E5 — sessions & state (priority 2, highest impact)
-- **E5.1** Chat session: a *persistent* runner process (the generated REPL
-  kept alive via Popen, stdio bridged over WS) so the conversation actually
-  continues; message history panel, active `thread_id`, "New session".
+- **E5.1** Chat session (SHIPPED): a *persistent* runner process kept alive via
+  `Popen` so the conversation actually continues — message history panel,
+  active `thread_id`, "New session". Editor-only: rather than driving the
+  generated `_abp_runner.py` REPL and parsing its `You:`/`Agent:` text (a
+  robust fix would touch the template), the editor drops its **own** JSON-lines
+  driver (`editor/session.py` → `_abp_editor_chat.py`) next to the generated
+  project and runs that; it imports the same `run` from `main.py`, so the
+  module-level `MemorySaver` carries history across turns. Replies stream over
+  `/ws`; "New session" regenerates (picking up edits) with a fresh thread.
+  Verified end-to-end against a real local LLM (multi-turn memory works). v1
+  limits: in-memory only (durable = E5.5), message-shaped blueprints only.
 - **E5.2** Immediate honesty stop-gap (SHIPPED, with E5.3): the Run… form
   states that every Run starts a fresh session (in-memory checkpointer, no
   history) until E5.1 lands.

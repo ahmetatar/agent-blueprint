@@ -1102,6 +1102,128 @@ body,
   font-family: var(--font-mono, monospace);
 }
 
+/* ---- chat session (E5.1) ------------------------------------------------- */
+
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 100%;
+}
+
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.chat-thread {
+  font-size: 0.78rem;
+  color: #555;
+}
+
+.chat-status {
+  margin-left: auto;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #777;
+}
+
+.chat-status-ready {
+  color: #1b7f3b;
+}
+
+.chat-status-error {
+  color: #c0392b;
+}
+
+.chat-note {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.chat-error {
+  margin: 0;
+  padding: 0.6rem;
+  border-radius: 6px;
+  background: #fdf2f0;
+  color: #8c2318;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-history {
+  flex: 1;
+  min-height: 8rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.chat-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  max-width: 92%;
+  font-size: 0.85rem;
+}
+
+.chat-bubble-user {
+  align-self: flex-end;
+  background: #e8f0fe;
+}
+
+.chat-bubble-agent {
+  align-self: flex-start;
+  background: #ffffff;
+  border: 1px solid #ececec;
+}
+
+.chat-bubble-error {
+  align-self: flex-start;
+  background: #fdf2f0;
+  color: #8c2318;
+}
+
+.chat-role {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}
+
+.chat-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.chat-input:disabled {
+  background: #f2f2f2;
+}
+
 /* ---- live execution highlight (E3b) -------------------------------------- */
 
 .bp-node-run-running {

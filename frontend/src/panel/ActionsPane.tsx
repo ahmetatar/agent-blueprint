@@ -215,6 +215,10 @@ export function ActionsPane({ surface, valid, task, onTask }: Props) {
           <button type="submit" className="action-button" disabled={!runInput.trim()}>
             Run
           </button>
+          <p className="run-note muted">
+            One-shot: every Run starts a fresh session (in-memory checkpointer, no
+            history). A persistent chat session is coming in a later phase.
+          </p>
         </form>
       )}
 
@@ -381,6 +385,7 @@ function ResultView({ task }: { task: TaskRecord }) {
       );
     }
     case "run": {
+      const finalState = result.final_state as Record<string, unknown> | null;
       return (
         <div className="task-result">
           <p className="task-summary">exit code {result.returncode as number}</p>
@@ -390,6 +395,7 @@ function ResultView({ task }: { task: TaskRecord }) {
           {(result.stderr as string) && (
             <pre className="task-output task-output-stderr">{result.stderr as string}</pre>
           )}
+          <StateInspector state={finalState} />
         </div>
       );
     }
@@ -452,6 +458,39 @@ function ResultView({ task }: { task: TaskRecord }) {
     default:
       return null;
   }
+}
+
+/**
+ * Post-run state inspector (E5.3). Renders the trace manifest's `final_state`
+ * — scalars verbatim, message lists as a count (the recorder collapses them to
+ * `{__messages__: N}`), everything else as compact JSON. Per-node state values
+ * are not shown: the trace carries only hashes per node, so a per-node value
+ * view needs opt-in content capture (E5.4, a core change).
+ */
+function StateInspector({ state }: { state: Record<string, unknown> | null }) {
+  if (!state || Object.keys(state).length === 0) return null;
+  return (
+    <div className="state-inspector">
+      <p className="state-inspector-head">Final state</p>
+      <dl className="state-fields">
+        {Object.entries(state).map(([key, value]) => (
+          <div key={key} className="state-field">
+            <dt>{key}</dt>
+            <dd>{formatStateValue(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function formatStateValue(value: unknown): string {
+  if (value !== null && typeof value === "object" && "__messages__" in value) {
+    const count = (value as { __messages__: number }).__messages__;
+    return `${count} message${count === 1 ? "" : "s"}`;
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 function FailureList({ items }: { items: string[] }) {

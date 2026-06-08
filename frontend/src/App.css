@@ -1053,6 +1053,55 @@ body,
   color: #1b6fd8;
 }
 
+/* ---- state inspector (E5.3) ---------------------------------------------- */
+
+.run-note {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.state-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.state-inspector-head {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.state-fields {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  background: #f6f6f6;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.state-field {
+  display: grid;
+  grid-template-columns: minmax(6rem, 30%) 1fr;
+  gap: 0.5rem;
+}
+
+.state-field dt {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.state-field dd {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+}
+
 /* ---- live execution highlight (E3b) -------------------------------------- */
 
 .bp-node-run-running {

@@ -156,6 +156,12 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Changed
 
+- `abp editor`: node cards restyled for a cleaner, more professional look —
+  larger corner radius, a soft layered elevation shadow (with a gentle hover
+  lift and a clear selected ring), a hairline divider between the title
+  (type + name) and the body, a larger node name, and more generous padding.
+  The per-type accent bar was dropped for a uniform white card (the node type
+  is still signalled by the colour of the type label); content is unchanged
 - `abp editor`: canvas polish — connection lines are slightly heavier (1.5px)
   for legibility; the blue edge reconnect handles no longer sit on every edge
   (they appear only when an edge is hovered or selected, which is when you'd

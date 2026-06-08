@@ -8,6 +8,20 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E5.1): persistent **Chat** tab — unlike the one-shot
+  **Run…**, *Start chat* keeps one generated-project process alive, so the
+  graph's in-memory checkpointer is built once and every message reuses the
+  same `thread_id`: the conversation actually continues and follow-up
+  questions see earlier turns. *New session* regenerates from the current
+  blueprint (picking up edits) with a fresh thread; message history is kept
+  server-side so a reloaded tab resyncs, and replies stream over `/ws`. The
+  editor drives its own JSON-lines driver dropped next to the generated
+  project (one JSON object per line over stdin/stdout) rather than parsing the
+  human REPL — so the feature stays entirely inside `editor/`, with **no**
+  template/core change. New `editor/session.py` and
+  `/api/chat[/start|/send|/stop]` endpoints. Limits (v1): in-memory only (not
+  durable across editor restarts), and message-shaped blueprints only (a
+  structured `blueprint.input` schema still needs **Run…** with a JSON payload)
 - `abp editor` (phase E5.3 + E5.2): state inspector — after a **Run…**
   finishes, the result view shows the run's *final state* (the same snapshot
   the trace manifest records for harness `state_assertions`): scalar fields

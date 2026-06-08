@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `abp editor` (phase E5.4): step-level state view — a **Run…** result now
+  lists each node's *state delta* (the partial update that node returned — i.e.
+  what it changed) in execution order, above the final state, so you can read
+  how state evolved through the graph. Backed by an opt-in content-capture mode
+  in the generated trace recorder (`ABP_TRACE_CONTENT`): when set, node events
+  additionally carry the *summarized* state (scalars normalized, message lists
+  as a count — never raw bodies) alongside the existing hashes. The editor
+  enables it for the Run… action only; it is **off by default everywhere
+  else**, so harness/eval/gate manifests stay byte-identical and goldens /
+  baselines are unaffected
 - `abp editor` (phase E5.1): persistent **Chat** tab — unlike the one-shot
   **Run…**, *Start chat* keeps one generated-project process alive, so the
   graph's in-memory checkpointer is built once and every message reuses the

@@ -1102,6 +1102,38 @@ body,
   font-family: var(--font-mono, monospace);
 }
 
+.state-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.state-step-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.state-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem 0.55rem;
+  border-left: 3px solid #c9d6ea;
+  background: #f8f9fb;
+  border-radius: 0 6px 6px 0;
+}
+
+.state-step-node {
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: #2c4a78;
+}
+
 /* ---- chat session (E5.1) ------------------------------------------------- */
 
 .chat-pane {

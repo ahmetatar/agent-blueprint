@@ -35,6 +35,7 @@ def import_trace_module(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delenv("ABP_TRACE_FILE", raising=False)
     monkeypatch.delenv("ABP_TRACE_STREAM_FILE", raising=False)
+    monkeypatch.delenv("ABP_TRACE_CONTENT", raising=False)
 
     def _import():
         sys.modules.pop("_abp_trace", None)
@@ -111,3 +112,38 @@ def test_unwritable_stream_path_never_breaks_the_run(
     )
     manifest = _drive_run(import_trace_module())  # must not raise
     assert manifest["run"]["run_id"] == "r1"
+
+
+# ---- opt-in content capture (E5.4) ---------------------------------------
+
+
+def test_content_off_by_default_hashes_only(import_trace_module) -> None:
+    manifest = _drive_run(import_trace_module())
+    events = {e["event"]: e for e in manifest["trace"]}
+    started = events["node_started"]
+    assert "input_state_hash" in started
+    assert "input_state" not in started  # default posture: no content
+    finished = events["node_finished"]
+    assert "output_state_hash" in finished
+    assert "output_state" not in finished
+
+
+def test_content_mode_adds_summarized_state(import_trace_module, monkeypatch) -> None:
+    monkeypatch.setenv("ABP_TRACE_CONTENT", "1")
+    manifest = _drive_run(import_trace_module())
+    events = {e["event"]: e for e in manifest["trace"]}
+    # Content sits alongside the hashes, never replacing them.
+    assert events["node_started"]["input_state"] == {"x": 1}
+    assert events["node_started"]["input_state_hash"]
+    assert events["node_finished"]["output_state"] == {"x": 2}
+
+
+def test_content_off_manifest_byte_identical(import_trace_module, monkeypatch) -> None:
+    # The default (content off) must match the pre-E5.4 normalized manifest so
+    # goldens / harness diffs / gate baselines are untouched.
+    without = _drive_run(import_trace_module())
+    base = sys.modules["_abp_trace"].stable_trace_json(without)
+    # An explicit "off" value behaves like unset.
+    monkeypatch.setenv("ABP_TRACE_CONTENT", "off")
+    off = _drive_run(import_trace_module())
+    assert sys.modules["_abp_trace"].stable_trace_json(off) == base

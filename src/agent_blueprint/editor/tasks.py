@@ -319,6 +319,25 @@ def _trace_store(path: Path) -> Path:
     return path.parent / ".abp" / "traces"
 
 
+def _state_steps(events: Any) -> list[dict[str, Any]]:
+    """Per-node state deltas from a content-captured run (E5.4).
+
+    Each ``node_finished`` event's ``output_state`` is the partial update that
+    node returned — what it changed. Returns ``[{node, updates}]`` in order;
+    empty when content capture is off or no node reported a delta.
+    """
+    if not isinstance(events, list):
+        return []
+    steps: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("event") != "node_finished":
+            continue
+        updates = event.get("output_state")
+        if isinstance(updates, dict):
+            steps.append({"node": event.get("node"), "updates": updates})
+    return steps
+
+
 def _scenario_summary(result: ScenarioResult) -> dict[str, Any]:
     return {
         "scenario": result.scenario_id,
@@ -495,7 +514,10 @@ def _action_run(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
             user_input=user_input,
             install=install,
             env_file=env_file if env_file.exists() else None,
-            extra_env=stream_env,
+            # Opt into per-node state content (E5.4) for this run only — the
+            # interactive run has no golden, so enriching its trace is safe;
+            # harness/gate runs deliberately stay hashes-only.
+            extra_env={**stream_env, "ABP_TRACE_CONTENT": "1"},
         )
     manifest = captured.trace_manifest or {}
     events = manifest.get("trace", [])
@@ -512,6 +534,10 @@ def _action_run(ctx: _TaskContext) -> tuple[str, dict[str, Any]]:
             "stderr": captured.stderr,
             "trace_events": len(events) if isinstance(events, list) else 0,
             "final_state": final_state if isinstance(final_state, dict) else None,
+            # Per-node state deltas (E5.4): each node_finished's output_state is
+            # the partial update that node returned — i.e. exactly what it
+            # changed. Present only when content capture produced it.
+            "state_steps": _state_steps(events),
         },
     )
 

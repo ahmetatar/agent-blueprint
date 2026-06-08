@@ -386,6 +386,7 @@ function ResultView({ task }: { task: TaskRecord }) {
     }
     case "run": {
       const finalState = result.final_state as Record<string, unknown> | null;
+      const steps = (result.state_steps as StateStep[] | undefined) ?? [];
       return (
         <div className="task-result">
           <p className="task-summary">exit code {result.returncode as number}</p>
@@ -395,6 +396,7 @@ function ResultView({ task }: { task: TaskRecord }) {
           {(result.stderr as string) && (
             <pre className="task-output task-output-stderr">{result.stderr as string}</pre>
           )}
+          <StateSteps steps={steps} />
           <StateInspector state={finalState} />
         </div>
       );
@@ -460,12 +462,47 @@ function ResultView({ task }: { task: TaskRecord }) {
   }
 }
 
+/** One node's state delta from a content-captured run (E5.4). */
+interface StateStep {
+  node: string | null;
+  updates: Record<string, unknown>;
+}
+
+/**
+ * Per-node state steps (E5.4). Each entry is the partial update a node
+ * returned — i.e. exactly what it changed — captured via the opt-in
+ * `ABP_TRACE_CONTENT` mode the editor enables for Run… (harness/gate stay
+ * hashes-only). Reads as a timeline of how the state evolved through the graph.
+ */
+function StateSteps({ steps }: { steps: StateStep[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="state-steps">
+      <p className="state-inspector-head">State changes by node</p>
+      <ol className="state-step-list">
+        {steps.map((step, index) => (
+          <li key={index} className="state-step">
+            <span className="state-step-node">{step.node ?? "?"}</span>
+            <dl className="state-fields">
+              {Object.entries(step.updates).map(([key, value]) => (
+                <div key={key} className="state-field">
+                  <dt>{key}</dt>
+                  <dd>{formatStateValue(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /**
  * Post-run state inspector (E5.3). Renders the trace manifest's `final_state`
  * — scalars verbatim, message lists as a count (the recorder collapses them to
- * `{__messages__: N}`), everything else as compact JSON. Per-node state values
- * are not shown: the trace carries only hashes per node, so a per-node value
- * view needs opt-in content capture (E5.4, a core change).
+ * `{__messages__: N}`), everything else as compact JSON. The per-node
+ * progression is shown separately by `StateSteps` (E5.4).
  */
 function StateInspector({ state }: { state: Record<string, unknown> | null }) {
   if (!state || Object.keys(state).length === 0) return null;

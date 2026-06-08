@@ -327,6 +327,39 @@ def test_run_action_final_state_absent_is_none(
     assert record.result["final_state"] is None
 
 
+def test_run_action_surfaces_state_steps(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # node_finished events carry per-node output_state (deltas) when content
+    # capture is on; the editor turns them into ordered state_steps (E5.4).
+    manifest = {
+        "trace": [
+            {"event": "node_started", "node": "a", "input_state": {"x": 0}},
+            {"event": "node_finished", "node": "a", "output_state": {"intent": "refund"}},
+            {"event": "node_finished", "node": "b", "output_state": {"resolved": True}},
+            {"event": "tool_called", "tool": "lookup"},  # ignored — no delta
+        ],
+    }
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(manifest=manifest))
+    record, _ = _run_to_completion(blueprint_file, "run", {"input": "hi", "install": False})
+    assert record.result is not None
+    assert record.result["state_steps"] == [
+        {"node": "a", "updates": {"intent": "refund"}},
+        {"node": "b", "updates": {"resolved": True}},
+    ]
+
+
+def test_run_action_state_steps_empty_without_content(
+    blueprint_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Hashes-only events (content capture off) yield no steps, no crash.
+    manifest = {"trace": [{"event": "node_finished", "node": "a", "output_state_hash": "abc"}]}
+    monkeypatch.setattr(LocalRunner, "run_capture", _fake_run_capture(manifest=manifest))
+    record, _ = _run_to_completion(blueprint_file, "run", {"input": "hi", "install": False})
+    assert record.result is not None
+    assert record.result["state_steps"] == []
+
+
 def test_run_action_refuses_sandboxed_blueprint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -284,9 +284,15 @@ templates) requires explicit user approval *before* the change is made.
   planned **per-node last-update view was cut** — trace events carry only
   state *hashes* per node, so a per-node *value* view requires opt-in content
   capture, which is E5.4 (a core/template change, needs approval).
-- **E5.4** Step-level state diffs: needs opt-in content capture
-  (`ABP_TRACE_CONTENT`-style mode; default stays hashes-only) — core/template
-  change, needs approval.
+- **E5.4** Step-level state diffs (SHIPPED): the **Run…** result lists each
+  node's state *delta* (the partial update it returned) in execution order. Core
+  change: opt-in `ABP_TRACE_CONTENT` mode in `_abp_trace.py.j2` — when set, node
+  events carry the *summarized* state (same shape as `final_state`) alongside
+  the hashes; **default off** → manifest byte-identical, goldens/harness/gate
+  untouched. The editor sets it for the Run… action only; harness/eval/gate stay
+  hashes-only. Verified with a real run; tests cover content on/off + byte
+  identity. (Chat step-diffs not wired — the chat driver doesn't capture trace;
+  future.)
 - **E5.5** Durable checkpoints (sqlite) + thread browser: continue/reset
   sessions across editor restarts — core change, needs approval.
 

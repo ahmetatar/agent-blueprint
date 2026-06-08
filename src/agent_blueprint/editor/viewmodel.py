@@ -45,6 +45,9 @@ def build_view_model(spec: BlueprintSpec) -> dict[str, Any]:
         # Declared state fields — the edge-condition editor offers these as
         # `state.<field>` autocomplete chips.
         "state_fields": list(spec.state.fields),
+        # Defined subgraph names — the add-node dialog picks one for a
+        # subgraph node's `ref`.
+        "subgraphs": list(spec.subgraphs),
     }
 
 

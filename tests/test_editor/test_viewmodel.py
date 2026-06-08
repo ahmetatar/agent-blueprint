@@ -294,6 +294,12 @@ def test_nodes_carry_graph_ref_and_vm_lists_agents(vm_builder) -> None:
     assert vm["agents"] == ["triage", "fixer"]
 
 
+def test_vm_lists_subgraph_names_for_add_node_dialog(vm_builder) -> None:
+    # The add-node dialog picks a subgraph node's `ref` from this list.
+    assert vm_builder(_PARALLEL_SUBGRAPH)["subgraphs"] == ["wrap_up"]
+    assert vm_builder(_CONDITIONAL)["subgraphs"] == []
+
+
 def test_subgraph_scope_in_refs(vm_builder) -> None:
     vm = vm_builder(_PARALLEL_SUBGRAPH)
     assert _node(vm, "finish:polish")["graph_ref"] == "subgraphs.wrap_up"

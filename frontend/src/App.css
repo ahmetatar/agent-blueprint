@@ -233,7 +233,9 @@ body,
 }
 
 .dialog {
-  width: 320px;
+  width: 340px;
+  max-height: 76vh;
+  overflow-y: auto;
   padding: 1rem 1.2rem;
   border-radius: 8px;
   background: #fff;
@@ -241,6 +243,71 @@ body,
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+}
+
+.dialog-optional {
+  color: #999;
+  font-weight: 400;
+}
+
+.dialog-checks,
+.dialog-map {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem 0.55rem;
+  margin: 0;
+}
+
+.dialog-checks legend,
+.dialog-map legend {
+  font-size: 0.8rem;
+  color: #444;
+  padding: 0 0.25rem;
+}
+
+.dialog-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.dialog-maprow {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.dialog-maprow input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+.dialog-maprow span {
+  color: #999;
+}
+
+.dialog-maprow-remove {
+  border: none;
+  background: transparent;
+  color: #b00020;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dialog-maprow-add {
+  border: 1px dashed #c0c0c0;
+  border-radius: 4px;
+  background: #fff;
+  color: #555;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
 }
 
 .dialog h2 {

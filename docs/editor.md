@@ -86,8 +86,16 @@ it, never a separate store.
     Deleting a node also removes every edge that references it. Synthetic
     edges (START→entry, supervisor delegation/return, parallel fan-out) are
     display-only.
-  - **Add a node** via the *+ Node* button (agent or function node;
-    top-level graph).
+  - **Add a node** via the *+ Node* button (top-level graph). The dialog
+    covers every node type — agent (pick an agent), function (name an
+    action), handoff (channel + optional message template), parallel (tick
+    branches + a join node), subgraph (pick a defined subgraph + key→value
+    `input_map`/`output_map` rows), and supervisor (pick an agent + tick
+    workers). References are pickers drawn from the blueprint, and the result
+    is strict-validated before it's written, so an incomplete or illegal
+    combination is rejected with the reason shown rather than saved. (Wiring
+    supervisor workers / parallel branches by *drawing* on the canvas is a
+    later phase.)
 - **Config forms** — selecting a node opens the *Config* tab: the node's
   fields (per node type, plus its retry policy) and — for agent-backed
   nodes — the linked agent definition (model, system prompt, tools,

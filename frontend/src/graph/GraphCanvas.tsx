@@ -366,6 +366,13 @@ export function GraphCanvas({
       {adding && (
         <AddNodeDialog
           agents={graph.agents}
+          subgraphs={graph.subgraphs}
+          nodeIds={graph.nodes
+            .filter(
+              (node) =>
+                node.parent === null && node.type !== "start" && node.type !== "end",
+            )
+            .map((node) => node.label)}
           existingIds={new Set(graph.nodes.map((node) => node.label))}
           onSubmit={(op) => {
             setAdding(false);

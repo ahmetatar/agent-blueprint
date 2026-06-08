@@ -262,7 +262,7 @@ templates) requires explicit user approval *before* the change is made.
 - **E4.6** Undo/redo: ops are already discrete mutations — an op journal
   with inverse ops.
 
-### Phase E5 — sessions & state (priority 2, highest impact)
+### Phase E5 — sessions & state (priority 2, highest impact) — **COMPLETE**
 - **E5.1** Chat session (SHIPPED): a *persistent* runner process kept alive via
   `Popen` so the conversation actually continues — message history panel,
   active `thread_id`, "New session". Editor-only: rather than driving the
@@ -272,8 +272,9 @@ templates) requires explicit user approval *before* the change is made.
   project and runs that; it imports the same `run` from `main.py`, so the
   module-level `MemorySaver` carries history across turns. Replies stream over
   `/ws`; "New session" regenerates (picking up edits) with a fresh thread.
-  Verified end-to-end against a real local LLM (multi-turn memory works). v1
-  limits: in-memory only (durable = E5.5), message-shaped blueprints only.
+  Verified end-to-end against a real local LLM (multi-turn memory works).
+  (Durability across restarts added in E5.5.) v1 limit: message-shaped
+  blueprints only.
 - **E5.2** Immediate honesty stop-gap (SHIPPED, with E5.3): the Run… form
   states that every Run starts a fresh session (in-memory checkpointer, no
   history) until E5.1 lands.
@@ -293,8 +294,20 @@ templates) requires explicit user approval *before* the change is made.
   hashes-only. Verified with a real run; tests cover content on/off + byte
   identity. (Chat step-diffs not wired — the chat driver doesn't capture trace;
   future.)
-- **E5.5** Durable checkpoints (sqlite) + thread browser: continue/reset
-  sessions across editor restarts — core change, needs approval.
+- **E5.5** Durable checkpoints (sqlite) + thread browser (SHIPPED): chat
+  sessions survive editor restarts. Core change: `graph.py.j2` honours a new
+  `ABP_CHECKPOINT_DB` env override (forces a SQLite checkpointer at a stable
+  path for **any** blueprint, regardless of `memory.backend`) — and fixes a
+  latent bug where the existing `sqlite` backend assigned
+  `SqliteSaver.from_conn_string(...)` (a context manager) instead of a live
+  saver; both now use `SqliteSaver(sqlite3.connect(...))` + `setup()`. Editor:
+  `editor/chat_store.py` (`.abp/chat/<stem>.db` checkpoint + `<stem>.threads.json`
+  transcript index), session resume by `thread_id`, a **Threads** browser
+  (resume / reset). The `editor` extra gained `langgraph-checkpoint-sqlite`.
+  Verified end-to-end: a cold new `ChatSession` resumed a thread after a
+  simulated restart and the agent recalled prior context (real LLM). v1: the
+  thread transcript is an editor-side index for display; the sqlite checkpoint
+  is the source of truth for continuation.
 
 ### Phase E6 — observability suite (priority 3; runtime is ready, editor isn't)
 - **E6.1** Traces tab: browse `.abp/traces/` (origin/status filters), open a

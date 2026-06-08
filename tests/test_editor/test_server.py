@@ -651,3 +651,50 @@ def test_chat_start_then_send_roundtrip(
 
         state = client.get("/api/chat").json()["chat"]
         assert [m["role"] for m in state["history"]] == ["user", "agent"]
+
+
+def test_chat_threads_endpoint_lists_saved(blueprint_file: Path, tmp_path: Path) -> None:
+    from agent_blueprint.editor import chat_store
+
+    chat_store.save_history(blueprint_file, "t1", [{"role": "user", "content": "hello there"}])
+    client = _client(blueprint_file, tmp_path)
+    threads = client.get("/api/chat/threads").json()["threads"]
+    assert [t["thread_id"] for t in threads] == ["t1"]
+    assert threads[0]["preview"] == "hello there"
+
+
+def test_chat_delete_thread_endpoint(blueprint_file: Path, tmp_path: Path) -> None:
+    from agent_blueprint.editor import chat_store
+
+    chat_store.save_history(blueprint_file, "t1", [{"role": "user", "content": "x"}])
+    client = _client(blueprint_file, tmp_path)
+    remaining = client.post("/api/chat/threads/t1/delete").json()["threads"]
+    assert remaining == []
+
+
+def test_chat_start_resume_loads_history(
+    blueprint_file: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_blueprint.editor import chat_store
+    from agent_blueprint.editor.session import ChatSession
+
+    # Persisted transcript for an existing thread…
+    chat_store.save_history(
+        blueprint_file,
+        "t1",
+        [{"role": "user", "content": "earlier"}, {"role": "agent", "content": "ok"}],
+    )
+    monkeypatch.setattr(
+        ChatSession, "_materialize_project", _fake_materialize(_FAKE_CHAT_MAIN)
+    )
+    app = server.create_app(blueprint_file, token=None, static_dir=tmp_path / "no-static")
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            client.post("/api/chat/start", json={"install": False, "thread_id": "t1"})
+            message = ws.receive_json()
+            while not (message["type"] == "chat_status" and message["status"] == "ready"):
+                message = ws.receive_json()
+            assert message["thread_id"] == "t1"
+        # Resumed snapshot carries the persisted transcript.
+        state = client.get("/api/chat").json()["chat"]
+        assert [m["content"] for m in state["history"]] == ["earlier", "ok"]

@@ -168,11 +168,12 @@ no Test; nothing to gate → no Gate).
 
 The **Chat** tab is a *persistent* conversation, in contrast to the one-shot
 **Run…**. **Start chat** keeps one generated-project process alive: the graph
-(and its in-memory checkpointer) is built once, so every message you send
-reuses the same `thread_id` and the conversation actually continues —
-follow-up questions see earlier turns. The active `thread_id` is shown in the
-toolbar; **New session** regenerates from the current blueprint (picking up any
-edits) and starts a fresh conversation with a new thread (history resets).
+and its checkpointer are built once, so every message you send reuses the same
+`thread_id` and the conversation actually continues — follow-up questions see
+earlier turns. The active `thread_id` is shown in the toolbar; **New session**
+regenerates from the current blueprint (picking up any edits) and starts a
+fresh conversation with a new thread (history resets). Conversations are
+*durable* across editor restarts — see *Durable threads* below.
 
 Mechanically the editor writes its own small JSON-lines driver next to the
 generated project and runs it, exchanging one JSON object per line over the
@@ -180,11 +181,20 @@ process's stdin/stdout; the agent's replies arrive over `/ws` and the message
 history is kept server-side so a reloaded tab resyncs. This stays entirely
 inside the editor — the generated templates are untouched.
 
+**Durable threads (E5.5).** Chat is durable: the editor runs the generated
+project with a SQLite checkpointer at a stable path (`.abp/chat/<stem>.db`), so
+a conversation survives even after the editor restarts. The **Threads** button
+opens a browser of past conversations — *resume* one to continue it (the
+agent's own state is restored from the checkpoint, and the transcript is
+reloaded), or *reset* to forget it (drops both the saved transcript and the
+checkpoint rows). This works for **any** blueprint regardless of its declared
+`memory.backend`: the generated graph honours `ABP_CHECKPOINT_DB` when the
+editor sets it. The `.abp/chat/` directory is editor-private state, like
+`.abp/traces/` — safe to delete. (Requires `agent-blueprint[editor]`, which
+pulls `langgraph-checkpoint-sqlite`.)
+
 Notes and limits (v1):
 
-- **Not durable.** The checkpointer is in-memory, so a session lives only as
-  long as the editor process; closing the editor (or **New session**) discards
-  it. Durable, restart-surviving sessions are a later phase.
 - **Message-shaped blueprints.** Chat sends your text as the run input. A
   blueprint whose `blueprint.input` declares a structured schema expects a JSON
   payload instead, so plain chat text surfaces an input-contract error — use

@@ -35,10 +35,7 @@ export function BlueprintNode({ data }: NodeProps) {
   const { vm, findings, runState } = data as NodeData;
   const accent = ACCENT[vm.type] ?? "#6b7280";
   return (
-    <div
-      className={`bp-node${runState ? ` bp-node-run-${runState}` : ""}`}
-      style={{ borderTopColor: accent }}
-    >
+    <div className={`bp-node${runState ? ` bp-node-run-${runState}` : ""}`}>
       <Handle type="target" position={Position.Top} />
       <div className="bp-node-head">
         <span className="bp-node-type" style={{ color: accent }}>

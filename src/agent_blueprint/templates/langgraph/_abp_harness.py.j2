@@ -70,11 +70,12 @@ def consume_tool_output(tool_name: str, args: dict[str, Any]) -> Any:
     fixtures = harness_fixtures()["tool_outputs"]
     if tool_mode() not in {"stub", "replay"}:
         return None
-    if tool_name not in fixtures:
+    # A "*" entry is a default stub for any tool without its own fixture.
+    if tool_name not in fixtures and "*" not in fixtures:
         raise RuntimeError(
             f"No stubbed tool fixture configured for '{tool_name}' while ABP_TOOL_MODE={tool_mode()}"
         )
-    entry = fixtures[tool_name]
+    entry = fixtures[tool_name] if tool_name in fixtures else fixtures["*"]
     if isinstance(entry, list):
         entry = _next_fixture(entry, _TOOL_CURSOR, tool_name, "tool")
     record_tool_output(tool_name, entry)
@@ -105,36 +106,48 @@ class HarnessMockLLM:
         self._tools = tools
         return self
 
-    def invoke(self, working: list[Any]) -> MockLLMResponse:
+    def invoke(self, working: list[Any]) -> Any:
         del working
+        # Return a real AIMessage so the result flows through LangGraph's
+        # add_messages reducer (a custom object raises MESSAGE_COERCION_FAILURE).
+        # Imported lazily to keep this helper importable without langchain in
+        # unit tests that never call invoke().
+        from langchain_core.messages import AIMessage
+
+        outputs = harness_fixtures()["llm_outputs"]
+        # Per-node fixture wins; otherwise fall back to the "*" default. Cursor
+        # is keyed by node id, so each node cycles its sequence independently.
         entry = _next_fixture(
-            harness_fixtures()["llm_outputs"].get(self._node_id, []),
+            outputs.get(self._node_id) or outputs.get("*", []),
             _LLM_CURSOR,
             self._node_id,
             "LLM",
         )
         if isinstance(entry, str):
-            return MockLLMResponse(content=entry)
+            return AIMessage(content=entry)
         if not isinstance(entry, dict):
-            return MockLLMResponse(content=str(entry))
+            return AIMessage(content=str(entry))
         tool_calls = []
         for index, raw_call in enumerate(entry.get("tool_calls", []) or []):
             tool_calls.append({
                 "id": raw_call.get("id", f"{self._node_id}-tool-{index}"),
                 "name": raw_call["name"],
                 "args": raw_call.get("args", {}),
+                "type": "tool_call",
             })
-        return MockLLMResponse(
-            content=str(entry.get("content", "")),
-            tool_calls=tool_calls,
-            usage_metadata=entry.get("usage"),
-            cost_usd=entry.get("cost_usd"),
-        )
+        message = AIMessage(content=str(entry.get("content", "")), tool_calls=tool_calls)
+        if entry.get("usage") is not None:
+            message.usage_metadata = entry["usage"]
+        return message
 
 
 def build_llm(node_id: str, factory: Any) -> Any:
     if llm_mode() in {"mock", "replay"}:
-        if node_id not in harness_fixtures()["llm_outputs"]:
+        outputs = harness_fixtures()["llm_outputs"]
+        # A "*" entry is a default mock for any node without its own fixture,
+        # so large graphs need not enumerate every (incl. namespaced subgraph)
+        # node by hand.
+        if node_id not in outputs and "*" not in outputs:
             raise RuntimeError(
                 f"No mocked LLM fixture configured for node '{node_id}' while ABP_LLM_MODE={llm_mode()}"
             )

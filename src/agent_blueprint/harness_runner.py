@@ -124,6 +124,7 @@ def run_harness_scenario(
     origin: str = "harness",
     process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
     extra_env: dict[str, str] | None = None,
+    source_dir: Path | None = None,
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
     tool_mode = (scenario.tool_mode or ir.harness.defaults.tool_mode).value  # type: ignore[union-attr]
@@ -148,7 +149,9 @@ def run_harness_scenario(
             },
         }
 
-    runner = LocalRunner(ir, thread_id=scenario.id, process_hook=process_hook)
+    runner = LocalRunner(
+        ir, thread_id=scenario.id, process_hook=process_hook, source_dir=source_dir
+    )
     execution_mode = resolve_harness_trace_mode(llm_mode, tool_mode)
     captured = runner.run_capture(
         user_input=scenario_user_input(ir, scenario),

@@ -101,9 +101,18 @@ def _load_generated_nodes_module(
             self.content = content
             self.tool_call_id = tool_call_id
 
+    class AIMessage:
+        type = "ai"
+
+        def __init__(self, content="", tool_calls=None):
+            self.content = content
+            self.tool_calls = tool_calls or []
+            self.usage_metadata = None
+
     fake_messages.HumanMessage = HumanMessage
     fake_messages.SystemMessage = SystemMessage
     fake_messages.ToolMessage = ToolMessage
+    fake_messages.AIMessage = AIMessage
 
     fake_openai = types.ModuleType("langchain_openai")
 

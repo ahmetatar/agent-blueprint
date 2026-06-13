@@ -231,3 +231,57 @@ class TestNestedSubgraphs:
         fan = next(n for n in ir.nodes if n.id == "wf__fan")
         assert fan.node_def.branches == ["wf__b1", "wf__b2"]
         assert fan.node_def.join == "wf__m"
+
+
+class TestSupervisorOnFinishToSubgraph:
+    """A supervisor's on_finish targeting a subgraph node must be remapped to
+    that subgraph's entry adapter, or the generated Command(goto=...) hits an
+    unknown node at runtime."""
+
+    def _spec(self) -> dict:
+        return {
+            "blueprint": {"name": "sup-sub"},
+            "state": {"fields": {
+                "messages": {"type": "list[message]", "reducer": "append"},
+                "plan": {"type": "list", "default": []},
+                "reviewed": {"type": "list", "default": []},
+            }},
+            "agents": {
+                "lead": {"model": "gpt-4o"},
+                "w": {"model": "gpt-4o"},
+                "rev": {"model": "gpt-4o"},
+            },
+            "graph": {
+                "entry_point": "boss",
+                "nodes": {
+                    "boss": {
+                        "type": "supervisor",
+                        "agent": "lead",
+                        "workers": ["w"],
+                        "on_finish": "gate",
+                    },
+                    "w": {"agent": "w"},
+                    "gate": {
+                        "type": "subgraph",
+                        "ref": "review",
+                        "input_map": {"plan": "inner_plan"},
+                        "output_map": {"inner_reviewed": "reviewed"},
+                    },
+                },
+                "edges": [{"from": "gate", "to": "END"}],
+            },
+            "subgraphs": {
+                "review": {
+                    "entry_point": "r",
+                    "nodes": {"r": {"agent": "rev"}},
+                    "edges": [{"from": "r", "to": "END"}],
+                },
+            },
+        }
+
+    def test_on_finish_remapped_to_subgraph_entry(self):
+        ir = compile_spec(self._spec())
+        ids = {n.id for n in ir.nodes}
+        assert "gate__entry" in ids
+        boss = next(n for n in ir.nodes if n.id == "boss")
+        assert boss.node_def.on_finish == "gate__entry"

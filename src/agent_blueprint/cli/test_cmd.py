@@ -76,7 +76,8 @@ def test(
 
     results = [
         run_harness_scenario(
-            ir, item, install=install, trace_store=trace_store, save_traces=save_traces
+            ir, item, install=install, trace_store=trace_store, save_traces=save_traces,
+            source_dir=blueprint.parent,
         )
         for item in scenarios
     ]

@@ -139,7 +139,7 @@ harness:
         seen_kwargs: list[dict] = []
         from agent_blueprint import harness_runner
 
-        def fake_run_harness_scenario(ir, scenario, *, install, trace_store=None, save_traces="all"):
+        def fake_run_harness_scenario(ir, scenario, *, install, trace_store=None, save_traces="all", source_dir=None):
             seen_kwargs.append({"trace_store": trace_store, "save_traces": save_traces})
             return harness_runner.ScenarioResult(
                 scenario_id=scenario.id, passed=True, returncode=0,
@@ -179,7 +179,7 @@ harness:
         seen_kwargs: list[dict] = []
         from agent_blueprint import harness_runner
 
-        def fake_run_harness_scenario(ir, scenario, *, install, trace_store=None, save_traces="all"):
+        def fake_run_harness_scenario(ir, scenario, *, install, trace_store=None, save_traces="all", source_dir=None):
             seen_kwargs.append({"trace_store": trace_store})
             return harness_runner.ScenarioResult(
                 scenario_id=scenario.id, passed=True, returncode=0,

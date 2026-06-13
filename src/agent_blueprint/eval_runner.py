@@ -131,6 +131,7 @@ def run_eval_suite(
             origin="eval",
             process_hook=process_hook,
             extra_env=extra_env,
+            source_dir=blueprint_dir,
         )
         case_results.append(_evaluate_case_result(suite, case, scenario_result))
 

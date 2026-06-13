@@ -326,6 +326,18 @@ def _expand_one_level(
                 remapped_targets.append(remapped)
             edges.append(EdgeDef.model_validate({"from": edge_source, "to": remapped_targets}))
 
+    # A supervisor's on_finish may target a subgraph node; edges get remapped to
+    # the subgraph entry below, but on_finish is a node attribute, so remap it
+    # here too (otherwise the generated Command(goto=...) hits an unknown node).
+    for node_id, node_def in list(nodes.items()):
+        if (
+            node_def.type == NodeType.supervisor
+            and node_def.on_finish in subgraph_entry_nodes
+        ):
+            remapped_node = node_def.model_copy(deep=True)
+            remapped_node.on_finish = subgraph_entry_nodes[node_def.on_finish]
+            nodes[node_id] = remapped_node
+
     for edge in in_edges:
         from_node = subgraph_exit_nodes.get(edge.from_node, edge.from_node)
         remapped_targets = []

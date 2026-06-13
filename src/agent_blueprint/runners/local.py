@@ -34,9 +34,14 @@ class LocalRunner:
         ir: AgentGraph,
         thread_id: str = "default",
         process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
+        source_dir: Path | None = None,
     ) -> None:
         self._ir = ir
         self._thread_id = thread_id
+        # Directory of the source blueprint; added to PYTHONPATH so function-tool
+        # impls placed next to the blueprint resolve regardless of the cwd you
+        # invoke `abp run`/`abp test` from.
+        self._source_dir = source_dir
         self._tempdir: Path | None = None
         # Called with the child process right after spawn — lets a caller
         # (e.g. the editor's task runner) terminate a run on cancellation.
@@ -223,12 +228,22 @@ class LocalRunner:
                 key, _, value = line.partition("=")
                 env.setdefault(key.strip(), value.strip())
 
-        # PYTHONPATH: CWD first (so impl: "myapp.x" resolves), then tempdir
+        # PYTHONPATH: CWD first (so impl: "myapp.x" resolves), then the
+        # blueprint's own dir (so impls next to it resolve when run from
+        # elsewhere — e.g. CI from the repo root), then the tempdir.
         cwd = str(Path.cwd())
         assert self._tempdir is not None
         tempdir = str(self._tempdir)
         existing = env.get("PYTHONPATH", "")
-        parts = [p for p in [cwd, tempdir, existing] if p]
+        # Resolve to an absolute path: the subprocess runs with cwd=tempdir, so a
+        # relative entry would resolve against the tempdir and never be found.
+        source = str(self._source_dir.resolve()) if self._source_dir else ""
+        seen: set[str] = set()
+        parts: list[str] = []
+        for candidate in (cwd, source, tempdir, existing):
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                parts.append(candidate)
         env["PYTHONPATH"] = os.pathsep.join(parts)
 
         env["ABP_THREAD_ID"] = self._thread_id

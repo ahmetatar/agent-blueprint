@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.error import YAMLError
 from ruamel.yaml.representer import RoundTripRepresenter
 
 from agent_blueprint.exceptions import BlueprintValidationError
@@ -88,9 +89,25 @@ def _normalize_harness_fragment(raw: Any, source: Path) -> dict[str, Any]:
     return _resolve_harness_paths(plain, source.parent)
 
 
+def _read_yaml(path: Path) -> Any:
+    """Parse a YAML file, turning ruamel parse errors into a clean
+    BlueprintValidationError with line/column instead of a raw traceback."""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return yaml.load(f)
+    except YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        problem = getattr(e, "problem", None) or "could not parse YAML"
+        if mark is not None:
+            raise BlueprintValidationError(
+                f"YAML syntax error in {path} at line {mark.line + 1}, "
+                f"column {mark.column + 1}: {problem}"
+            ) from e
+        raise BlueprintValidationError(f"YAML syntax error in {path}: {e}") from e
+
+
 def _load_yaml_plain(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.load(f)
+    raw = _read_yaml(path)
     if raw is None:
         raise BlueprintValidationError(f"YAML file is empty: {path}")
     plain = _to_plain(raw)
@@ -107,8 +124,7 @@ def load_blueprint_document(path: Path) -> CommentedMap:
         raise BlueprintValidationError(
             f"Expected a .yml or .yaml file, got: {path.suffix}"
         )
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.load(f)
+    raw = _read_yaml(path)
     if raw is None:
         raise BlueprintValidationError(f"YAML file is empty: {path}")
     if not isinstance(raw, CommentedMap):

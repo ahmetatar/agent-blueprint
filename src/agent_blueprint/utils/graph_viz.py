@@ -13,6 +13,15 @@ def _safe_id(name: str) -> str:
     return name.replace("-", "_")
 
 
+def _safe_label(text: str) -> str:
+    """Make arbitrary free-text (e.g. a node description) safe inside a quoted
+    Mermaid label. Node labels are user-controlled, so collapse whitespace/
+    newlines to single spaces and entity-encode the quote that would otherwise
+    terminate the label. Wrapping in quotes lets Mermaid treat the rest
+    literally (em dashes, brackets, parens, etc.)."""
+    return " ".join(text.split()).replace('"', "#quot;")
+
+
 def to_mermaid(spec: BlueprintSpec) -> str:
     """Generate a Mermaid flowchart from a BlueprintSpec."""
     lines = ["flowchart TD"]
@@ -21,7 +30,7 @@ def to_mermaid(spec: BlueprintSpec) -> str:
     for node_name, node in spec.graph.nodes.items():
         label = node.description or (node.agent or node_name)
         safe_name = _safe_id(node_name)
-        lines.append(f"    {safe_name}[{label}]")
+        lines.append(f'    {safe_name}["{_safe_label(label)}"]')
 
     lines.append("    __END__([END])")
 

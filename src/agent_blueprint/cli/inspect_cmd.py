@@ -5,7 +5,6 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 from rich.console import Console
-from rich.syntax import Syntax
 
 from agent_blueprint.exceptions import BlueprintValidationError
 from agent_blueprint.models.blueprint import BlueprintSpec
@@ -36,7 +35,10 @@ def inspect(
         console.print(f"[green]Mermaid diagram written to[/] {output}")
     else:
         console.print(f"\n[bold cyan]Graph[/] — {spec.blueprint.name}\n")
-        console.print(Syntax(diagram, "text", theme="monokai"))
+        # Print the diagram raw: no Rich wrapping (which would split long node
+        # lines mid-label and break Mermaid) and no markup parsing (labels
+        # contain '[' / ']'). Copy-paste fidelity matters more than highlighting.
+        print(diagram)
         console.print(
             "\n[dim]Paste the above into https://mermaid.live to visualize[/]"
         )

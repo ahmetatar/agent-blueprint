@@ -220,6 +220,18 @@ def _lint_unreachable_nodes(spec: BlueprintSpec) -> list[LintFinding]:
             if target.target in spec.graph.nodes:
                 adjacency.setdefault(edge.from_node, set()).add(target.target)
 
+    # Low-confidence escalation is a dynamic reroute: the generator injects the
+    # escalation target into the router of every node that has an outgoing edge
+    # (see templates/langgraph/graph.py.j2), so it is reachable from each such
+    # node even without an explicit edge. Mirror that here so a node reachable
+    # only via `policies.escalation.on_low_confidence` is not falsely flagged.
+    escalation_target = (
+        spec.policies.escalation.on_low_confidence if spec.policies else None
+    )
+    if escalation_target and escalation_target in spec.graph.nodes:
+        for edge in spec.graph.edges:
+            adjacency.setdefault(edge.from_node, set()).add(escalation_target)
+
     visited: set[str] = set()
     stack = [spec.graph.entry_point]
     while stack:

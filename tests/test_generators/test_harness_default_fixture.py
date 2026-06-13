@@ -2,12 +2,30 @@
 
 import importlib.util
 import sys
+import types
 
 import pytest
 
 from agent_blueprint.generators.langgraph import LangGraphGenerator
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
+
+
+def _stub_langchain_messages(monkeypatch):
+    """invoke() lazily imports AIMessage from langchain_core, which is a
+    generated-project dep not installed in CI. Stub it so the test exercises the
+    fixture-selection logic without the real package."""
+    class AIMessage:
+        def __init__(self, content="", tool_calls=None):
+            self.content = content
+            self.tool_calls = tool_calls or []
+            self.usage_metadata = None
+
+    fake_pkg = types.ModuleType("langchain_core")
+    fake_msgs = types.ModuleType("langchain_core.messages")
+    fake_msgs.AIMessage = AIMessage
+    monkeypatch.setitem(sys.modules, "langchain_core", fake_pkg)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_msgs)
 
 
 def _load_harness(tmp_path, monkeypatch):
@@ -33,6 +51,7 @@ def _load_harness(tmp_path, monkeypatch):
 class TestDefaultLlmFixture:
     def test_star_covers_unmocked_node_and_specific_wins(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ABP_LLM_MODE", "mock")
+        _stub_langchain_messages(monkeypatch)
         m = _load_harness(tmp_path, monkeypatch)
         m._HARNESS_FIXTURES_CACHE = {
             "llm_outputs": {"*": [{"content": "DEFAULT"}], "special": [{"content": "SPECIAL"}]},

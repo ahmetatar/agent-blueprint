@@ -97,7 +97,8 @@ def gate(
 
     harness_results: list[ScenarioResult] = [
         run_harness_scenario(
-            ir, scenario, install=install, trace_store=trace_store, save_traces=save_traces
+            ir, scenario, install=install, trace_store=trace_store, save_traces=save_traces,
+            source_dir=blueprint.parent,
         )
         for scenario in scenarios
     ]

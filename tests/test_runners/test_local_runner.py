@@ -1,5 +1,6 @@
 """Tests for LocalRunner — generation and env setup (no real subprocess)."""
 
+import os
 from pathlib import Path
 
 
@@ -69,6 +70,24 @@ class TestLocalRunnerEnv:
         runner._tempdir = tmp_path
         env = runner._build_env(None)
         assert str(tmp_path) in env["PYTHONPATH"]
+
+    def test_pythonpath_includes_source_dir_as_absolute(self, tmp_path):
+        # impls placed next to the blueprint must resolve even when run from
+        # elsewhere (subprocess cwd is the tempdir), so the entry is absolute.
+        ir = load_ir("basic_chatbot.yml")
+        src = tmp_path / "project"
+        src.mkdir()
+        runner = LocalRunner(ir, source_dir=src)
+        runner._tempdir = tmp_path / "run"
+        runner._tempdir.mkdir()
+        env = runner._build_env(None)
+        assert str(src.resolve()) in env["PYTHONPATH"].split(os.pathsep)
+
+    def test_no_source_dir_omits_empty_pythonpath_entry(self, tmp_path):
+        runner = self._make_runner()
+        runner._tempdir = tmp_path
+        env = runner._build_env(None)
+        assert "" not in env["PYTHONPATH"].split(os.pathsep)
 
     def test_thread_id_in_env(self, tmp_path):
         runner = self._make_runner(thread_id="sess-42")

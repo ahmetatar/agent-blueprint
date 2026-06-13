@@ -100,7 +100,7 @@ def run(
             runner = SandboxRunner(ir, spec, sandbox_cfg, thread_id=thread_id)
             console.print(f"→ Sandbox engine: [cyan]{runner.engine}[/]")
         else:
-            runner = LocalRunner(ir, thread_id=thread_id)
+            runner = LocalRunner(ir, thread_id=thread_id, source_dir=blueprint.parent)
         rc = runner.run(
             user_input=input,
             install=install and not use_sandbox,

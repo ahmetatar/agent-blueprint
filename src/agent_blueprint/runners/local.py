@@ -249,6 +249,10 @@ class LocalRunner:
         env["ABP_THREAD_ID"] = self._thread_id
         env.setdefault("ABP_TOOL_APPROVAL_MODE", "deny")
         env.setdefault("ABP_TRACE_FILE", str(self._tempdir / "abp_trace.json"))
+        # Write artifacts to an absolute location so the trace records an absolute
+        # path that downstream readers (e.g. the rubric eval, run from another
+        # cwd) can resolve while the tempdir is still alive.
+        env.setdefault("ABP_ARTIFACT_DIR", str(self._tempdir))
         if extra_env:
             env.update(extra_env)
         return env

@@ -95,6 +95,15 @@ class TestLocalRunnerEnv:
         env = runner._build_env(None)
         assert env["ABP_THREAD_ID"] == "sess-42"
 
+    def test_artifact_dir_defaults_to_tempdir_absolute(self, tmp_path, monkeypatch):
+        # Artifacts must land at an absolute path so the trace records a location
+        # downstream readers (e.g. the rubric eval) can resolve from another cwd.
+        monkeypatch.delenv("ABP_ARTIFACT_DIR", raising=False)
+        runner = self._make_runner()
+        runner._tempdir = tmp_path
+        env = runner._build_env(None)
+        assert env["ABP_ARTIFACT_DIR"] == str(tmp_path)
+
     def test_tool_approval_mode_defaults_to_deny(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ABP_TOOL_APPROVAL_MODE", raising=False)
         runner = self._make_runner()

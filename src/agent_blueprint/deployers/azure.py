@@ -24,11 +24,11 @@ class AzureDeployer(BaseDeployer):
             errors.append(
                 "Azure CLI not found. Install: https://aka.ms/installazurecli"
             )
-        if not self._probe(["docker", "info"]):
-            errors.append("Docker daemon is not running or docker CLI not found.")
         if not self._probe(["az", "account", "show"]):
             errors.append("Not logged in to Azure. Run: az login")
 
+        # No local Docker check: the image is built in the cloud via `az acr
+        # build` (ACR Tasks), so no local container engine is required.
         return errors
 
     # ------------------------------------------------------------------
@@ -49,19 +49,17 @@ class AzureDeployer(BaseDeployer):
 
         print(f"\n→ [Azure] Deploying '{self._app_name}' to Container Apps")
 
-        # 1. ACR login
-        self._cmd(["az", "acr", "login", "--name", cfg.acr_name], dry_run=dry_run)
+        # 1. Build + push the image remotely in ACR (ACR Tasks) — no local
+        # Docker/Podman daemon needed; the build context is uploaded and built
+        # in the cloud, then the image lands in the registry.
+        self._cmd([
+            "az", "acr", "build",
+            "--registry", cfg.acr_name,
+            "--image", f"{self._app_name}:{image_tag}",
+            str(code_dir),
+        ], dry_run=dry_run)
 
-        # 2. Build image
-        self._cmd(
-            ["docker", "build", "-t", full_image, str(code_dir)],
-            dry_run=dry_run,
-        )
-
-        # 3. Push image
-        self._cmd(["docker", "push", full_image], dry_run=dry_run)
-
-        # 4. Create or update Container App
+        # 2. Create or update Container App
         app_exists = self._probe([
             "az", "containerapp", "show",
             "--name", self._app_name,

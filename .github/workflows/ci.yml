@@ -50,4 +50,13 @@ jobs:
       - name: CLI smoke tests
         run: |
           abp --help
-          abp validate examples/basic-chatbot.yml
+          abp validate examples/growops/growops.yml
+          abp lint examples/growops/growops.yml
+
+      # The flagship example is a living offline test. This needs the generated
+      # project's runtime deps (not part of abp's own deps), so it installs them
+      # in a dedicated step and runs the harness with no API key.
+      - name: Example offline harness
+        run: |
+          pip install langgraph langgraph-checkpoint-sqlite langchain-openai langchain-anthropic
+          abp test examples/growops/growops.yml

@@ -57,13 +57,29 @@ class TestAzurePrerequisites:
             errors = deployer.check_prerequisites()
         assert any("Azure CLI" in e for e in errors)
 
-    def test_missing_docker(self):
+    def test_docker_not_required(self):
+        # The image is built remotely via `az acr build`, so a missing local
+        # Docker/Podman is not a prerequisite error.
         deployer = AzureDeployer(_az_config(), "test-agent")
         def probe(cmd):
-            return "docker" not in cmd[0]
+            return "docker" not in cmd[0]   # az present, docker absent
         with patch.object(deployer, "_probe", side_effect=probe):
             errors = deployer.check_prerequisites()
-        assert any("Docker" in e for e in errors)
+        assert errors == []
+
+    def test_deploy_builds_in_acr_not_locally(self, tmp_path):
+        # No local `docker build`/`docker push`; image is built via `az acr build`.
+        deployer = AzureDeployer(_az_config(), "test-agent")
+        calls, fake_cmd = _record_cmds(deployer)
+        with (
+            patch.object(deployer, "_cmd", side_effect=fake_cmd),
+            patch.object(deployer, "_probe", return_value=False),
+            patch.object(deployer, "_capture", return_value=""),
+        ):
+            deployer.deploy(tmp_path, {}, image_tag="v1")
+        flat = [" ".join(c) for c in calls]
+        assert any(c.startswith("az acr build") for c in flat)
+        assert not any("docker" in c for c in flat)
 
     def test_not_logged_in(self):
         deployer = AzureDeployer(_az_config(), "test-agent")

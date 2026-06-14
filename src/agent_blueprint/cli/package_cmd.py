@@ -64,9 +64,24 @@ def package(
     from agent_blueprint.generators.langgraph import LangGraphGenerator
     from agent_blueprint.packagers.cli import CliPackager, dist_name_for
 
+    # Collect user `impl` modules that live next to the blueprint (e.g. a
+    # function-tool impl `farm_impl.py`) so the packaged CLI can resolve them.
+    from agent_blueprint.models.tools import ToolType
+
+    impl_paths = [t.impl for t in spec.tools.values() if t.type == ToolType.function and t.impl]
+    impl_paths += [r.impl for r in spec.retrievers.values() if r.impl]
+    user_modules: dict[str, str] = {}
+    for impl_path in impl_paths:
+        root = impl_path.split(".")[0]
+        if root in user_modules:
+            continue
+        candidate = blueprint.parent / f"{root}.py"
+        if candidate.exists():
+            user_modules[root] = candidate.read_text(encoding="utf-8")
+
     try:
         files = LangGraphGenerator().generate(ir)
-        packaged = CliPackager().package(files, ir)
+        packaged = CliPackager().package(files, ir, user_modules=user_modules)
     except GeneratorError as e:
         err_console.print(f"[bold red]Generation error:[/] {e}")
         raise typer.Exit(1) from e

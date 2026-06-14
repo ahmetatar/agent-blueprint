@@ -51,9 +51,16 @@ def package_name_for(blueprint_name: str) -> str:
     return pkg
 
 
-def _rewrite_local_imports(source: str) -> str:
-    """Rewrite generator-emitted cross-imports to package-relative form."""
-    return _FROM_IMPORT_RE.sub(lambda m: f"from .{m.group(1)} import ", source)
+def _rewrite_local_imports(source: str, extra_modules: tuple[str, ...] = ()) -> str:
+    """Rewrite generator-emitted cross-imports to package-relative form.
+
+    `extra_modules` are user `impl` modules copied into the package (e.g. a
+    function-tool impl living next to the blueprint), so their absolute imports
+    (`from farm_impl import ...`) become package-relative too.
+    """
+    modules = "|".join(re.escape(m) for m in (*_LOCAL_MODULES, *extra_modules))
+    pattern = re.compile(rf"^from ({modules}) import ", flags=re.MULTILINE)
+    return pattern.sub(lambda m: f"from .{m.group(1)} import ", source)
 
 
 def _parse_requirements(requirements: str) -> list[str]:
@@ -77,12 +84,24 @@ class CliPackager:
         )
         self._env.filters["to_python"] = _to_python
 
-    def package(self, files: dict[str, str], ir: AgentGraph) -> dict[str, str]:
+    def package(
+        self,
+        files: dict[str, str],
+        ir: AgentGraph,
+        user_modules: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         """Map generator output (flat layout) to a src-layout CLI package.
 
         Returns a new {relative_path: content} mapping; the input is not
         mutated. requirements.txt is folded into pyproject dependencies.
+
+        `user_modules` maps a top-level module name to its source — function-tool
+        / retriever `impl` modules that live next to the blueprint. They are
+        copied into the package and their absolute imports rewritten to relative,
+        so the installed CLI can resolve `impl: "<module>.func"` references.
         """
+        user_modules = user_modules or {}
+        extra = tuple(user_modules)
         dist_name = dist_name_for(ir.name)
         pkg_name = package_name_for(ir.name)
         pkg_dir = f"src/{pkg_name}"
@@ -94,10 +113,13 @@ class CliPackager:
             if filename == "requirements.txt":
                 dependencies = _parse_requirements(content)
             elif filename.endswith(".py"):
-                packaged[f"{pkg_dir}/{filename}"] = _rewrite_local_imports(content)
+                packaged[f"{pkg_dir}/{filename}"] = _rewrite_local_imports(content, extra)
             else:
                 # Non-Python project files (.env.example) stay at the root.
                 packaged[filename] = content
+
+        for mod_name, mod_source in user_modules.items():
+            packaged[f"{pkg_dir}/{mod_name}.py"] = _rewrite_local_imports(mod_source, extra)
 
         for template_name, output_name in (
             ("cli.py.j2", f"{pkg_dir}/cli.py"),

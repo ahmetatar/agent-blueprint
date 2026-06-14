@@ -124,3 +124,45 @@ class TestObservabilityVariant:
         assert "from ._abp_otel import" in packaged["src/my_cool_agent/main.py"]
         # otel deps folded into pyproject as well
         assert "opentelemetry-sdk" in packaged["pyproject.toml"]
+
+
+class TestUserImplModules:
+    """User `impl` modules next to the blueprint are copied into the package and
+    their absolute imports rewritten to package-relative, so the installed CLI
+    resolves `impl: "<module>.func"` references."""
+
+    def _spec_with_impl(self) -> dict:
+        return {
+            "blueprint": {"name": "growops"},
+            "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+            "agents": {"a": {"model": "gpt-4o", "tools": ["pt"]}},
+            "tools": {"pt": {"type": "function", "impl": "farm_impl.parse_telemetry"}},
+            "graph": {
+                "entry_point": "a",
+                "nodes": {"a": {"agent": "a"}},
+                "edges": [{"from": "a", "to": "END"}],
+            },
+        }
+
+    def test_user_module_included_and_imports_relativized(self):
+        spec = BlueprintSpec.model_validate(self._spec_with_impl())
+        ir = compile_blueprint(spec)
+        files = LangGraphGenerator().generate(ir)
+        packaged = CliPackager().package(
+            files, ir, user_modules={"farm_impl": "def parse_telemetry(payload):\n    return {}\n"}
+        )
+        pkg = package_name_for("growops")
+        assert f"src/{pkg}/farm_impl.py" in packaged
+        tools = packaged[f"src/{pkg}/tools.py"]
+        assert "from .farm_impl import" in tools
+        assert "from farm_impl import" not in tools
+
+    def test_without_user_modules_impl_import_stays_absolute(self):
+        spec = BlueprintSpec.model_validate(self._spec_with_impl())
+        ir = compile_blueprint(spec)
+        files = LangGraphGenerator().generate(ir)
+        packaged = CliPackager().package(files, ir)  # no user_modules
+        pkg = package_name_for("growops")
+        tools = packaged[f"src/{pkg}/tools.py"]
+        assert "from farm_impl import" in tools
+        assert f"src/{pkg}/farm_impl.py" not in packaged

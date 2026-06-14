@@ -1,0 +1,1 @@
+{"id": "report_has_sections", "input": {"bed_id": "bed-A1", "soil_moisture": 42.0, "air_temp_c": 22.5, "humidity": 60.0, "co2_ppm": 800}, "expected": {"artifacts": ["grow_report"]}}

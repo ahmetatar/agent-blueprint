@@ -1,0 +1,365 @@
+blueprint:
+  name: "growops"
+  version: "1.0"
+  description: "Autonomous vertical-farm operations brain"
+
+settings:
+  default_model: "gpt-4o"
+  default_temperature: 0.3
+
+input:
+  schema:
+    bed_id:        { type: string }
+    soil_moisture: { type: number }
+    air_temp_c:    { type: number }
+    humidity:      { type: number }
+    co2_ppm:       { type: number }
+
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+    bed_id:        { type: string, nullable: true }
+    soil_moisture: { type: number, nullable: true }
+    air_temp_c:    { type: number, nullable: true }
+    humidity:      { type: number, nullable: true }
+    co2_ppm:       { type: number, nullable: true }
+    findings:      { type: list, reducer: append, default: [] }
+    status:        { type: string, enum: [nominal, attention, critical], nullable: true }
+    risk_level:    { type: string, enum: [low, medium, high], nullable: true }
+    confidence:    { type: number, nullable: true }
+    recommended_actions: { type: list, default: [] }
+    approved_plan:       { type: list, default: [] }
+
+model_providers:
+  azure:
+    provider: azure_openai
+    base_url: "${env.AZURE_OPENAI_ENDPOINT}"
+    deployment: "gpt-4o"
+    api_version: "2024-06-01"
+    api_key_env: AZURE_OPENAI_API_KEY
+  thinker:
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+
+retrievers:
+  agronomy:
+    impl: "farm_impl.agronomy_retriever"
+    description: "Local markdown corpus of agronomy / plant-disease notes"
+    config: { corpus: "corpus/" }
+
+tools:
+  read_sensors:
+    type: api
+    method: GET
+    url: "${env.SENSOR_GATEWAY_URL}/beds/{bed_id}/sensors"
+    auth: { type: api_key, key_env: SENSOR_API_KEY, header: "X-API-Key" }
+    parameters:
+      bed_id: { type: string, required: true }
+  parse_telemetry:
+    type: function
+    impl: "farm_impl.parse_telemetry"
+    parameters:
+      payload: { type: string, required: true }
+    returns: { type: object }
+  compute_vpd:
+    type: function
+    impl: "farm_impl.compute_vpd"
+    parameters:
+      air_temp_c: { type: number, required: true }
+      humidity:   { type: number, required: true }
+    returns: { type: number }
+  set_actuator:
+    type: api
+    method: POST
+    url: "${env.ACTUATOR_GATEWAY_URL}/beds/{bed_id}/actuate"
+    auth: { type: bearer, token_env: ACTUATOR_TOKEN }
+    parameters:
+      bed_id: { type: string, required: true }
+      device: { type: string, required: true, enum: [pump, fan, vent, grow_light, doser] }
+      action: { type: string, required: true }
+  search_agronomy:
+    type: retrieval
+    retriever: agronomy
+    top_k: 4
+
+agents:
+  grower:
+    name: "Grower"
+    model: "${settings.default_model}"
+    system_prompt: "Read and parse telemetry for one grow bed."
+    tools: [read_sensors, parse_telemetry, compute_vpd]
+  irrigation_analyst:
+    name: "Irrigation Analyst"
+    model: "${settings.default_model}"
+    system_prompt: "Assess irrigation. Respond JSON {\"domain\":\"irrigation\",\"note\":\"...\"}."
+  climate_analyst:
+    name: "Climate Analyst"
+    model: "${settings.default_model}"
+    system_prompt: "Assess climate. Respond JSON {\"domain\":\"climate\",\"note\":\"...\"}."
+  pest_analyst:
+    name: "Pest Analyst"
+    model: "${settings.default_model}"
+    system_prompt: "Assess pest risk. Respond JSON {\"domain\":\"pest\",\"note\":\"...\"}."
+    tools: [search_agronomy]
+    rag: { tool: search_agronomy, mode: hybrid }
+  synthesizer:
+    name: "Synthesizer"
+    model: "gpt-4o"
+    model_provider: azure
+    system_prompt: "Merge findings. Respond JSON with status, risk_level, confidence, recommended_actions."
+  grow_ops_lead:
+    name: "Grow Ops Lead"
+    model: "claude-sonnet-4-6"
+    model_provider: thinker
+    system_prompt: "Delegate remediation to specialists. Do nothing if nominal."
+    reasoning:
+      enabled: true
+      params: { max_thinking_tokens: 2000 }
+  irrigation_actuator:
+    name: "Irrigation Actuator"
+    model: "${settings.default_model}"
+    system_prompt: "Adjust irrigation via set_actuator."
+    tools: [set_actuator]
+  climate_actuator:
+    name: "Climate Actuator"
+    model: "${settings.default_model}"
+    system_prompt: "Adjust climate via set_actuator."
+    tools: [set_actuator]
+  nutrient_dosing:
+    name: "Nutrient Dosing"
+    model: "${settings.default_model}"
+    system_prompt: "Dose nutrients via set_actuator."
+    tools: [set_actuator]
+  safety_proposer:
+    name: "Safety Proposer"
+    model: "${settings.default_model}"
+    system_prompt: "Restate the candidate_plan as concrete steps."
+  safety_critic:
+    name: "Safety Critic"
+    model: "${settings.default_model}"
+    system_prompt: "Challenge each step for crop safety."
+  safety_finalizer:
+    name: "Safety Finalizer"
+    model: "${settings.default_model}"
+    system_prompt: "Produce the cleared reviewed_plan."
+  report_writer:
+    name: "Report Writer"
+    model: "${settings.default_model}"
+    system_prompt: "Write the grow report. Respond JSON with status, summary, actions, next_check."
+
+graph:
+  entry_point: ingest
+  nodes:
+    ingest:
+      agent: grower
+      description: "Read + parse telemetry for one grow bed"
+    sense:
+      type: parallel
+      branches: [irrigation_analyst, climate_analyst, pest_analyst]
+      join: synthesize
+    irrigation_analyst: { agent: irrigation_analyst }
+    climate_analyst:     { agent: climate_analyst }
+    pest_analyst:        { agent: pest_analyst }
+    synthesize:
+      agent: synthesizer
+      description: "Merge analyst findings into an overall bed status"
+    ask_agronomist:
+      type: handoff
+      channel: slack
+      action: ask_agronomist
+      message_template: "Bed {bed_id}: status {status}, confidence {confidence} — needs a human call."
+    plan:
+      type: supervisor
+      agent: grow_ops_lead
+      workers: [irrigation_actuator, climate_actuator, nutrient_dosing]
+      max_iterations: 6
+      on_finish: safety_gate
+    irrigation_actuator: { agent: irrigation_actuator }
+    climate_actuator:    { agent: climate_actuator }
+    nutrient_dosing:     { agent: nutrient_dosing }
+    safety_gate:
+      type: subgraph
+      ref: safety_flow
+      input_map:  { recommended_actions: candidate_plan }
+      output_map: { reviewed_plan: approved_plan }
+    nutrient_safety_gate:
+      type: subgraph
+      ref: safety_flow
+      input_map:  { approved_plan: candidate_plan }
+      output_map: { reviewed_plan: approved_plan }
+    report:
+      agent: report_writer
+      description: "Write the per-cycle grow report"
+  edges:
+    - from: ingest
+      to: sense
+    - from: synthesize
+      to: plan
+    - from: ask_agronomist
+      to: END
+    - from: safety_gate
+      to: nutrient_safety_gate
+    - from: nutrient_safety_gate
+      to: report
+    - from: report
+      to: END
+
+subgraphs:
+  safety_flow:
+    entry_point: propose
+    nodes:
+      propose:  { agent: safety_proposer }
+      critique: { agent: safety_critic }
+      finalize: { agent: safety_finalizer }
+    edges:
+      - { from: propose,  to: critique }
+      - { from: critique, to: finalize }
+      - { from: finalize, to: END }
+
+contracts:
+  state:
+    immutable_fields: [bed_id]
+    invariants:
+      - "0 <= state.soil_moisture <= 100"
+  nodes:
+    irrigation_analyst:
+      requires: [soil_moisture]
+      produces: [findings]
+      output_contract: AnalystFinding
+    climate_analyst:
+      requires: [air_temp_c, humidity, co2_ppm]
+      produces: [findings]
+      output_contract: AnalystFinding
+    pest_analyst:
+      requires: [humidity]
+      produces: [findings]
+      output_contract: AnalystFinding
+    synthesize:
+      requires: [findings]
+      produces: [status, risk_level, confidence, recommended_actions]
+      output_contract: GrowAssessment
+    report:
+      output_contract: GrowReport
+  outputs:
+    AnalystFinding:
+      type: object
+      required: [domain, note]
+      properties:
+        domain: { type: string }
+        note:   { type: string }
+    GrowAssessment:
+      type: object
+      required: [status, risk_level, confidence]
+      properties:
+        status:     { type: string, enum: [nominal, attention, critical] }
+        risk_level: { type: string, enum: [low, medium, high] }
+        confidence: { type: number }
+    GrowReport:
+      type: object
+      required: [status, summary, actions]
+      properties:
+        status:     { type: string }
+        summary:    { type: string }
+        actions:    { type: array }
+        next_check: { type: string }
+
+artifacts:
+  grow_report:
+    format: markdown
+    producer: report
+    path: "reports/{bed_id}-cycle.md"
+    contract: GrowReport
+
+policies:
+  escalation:
+    on_low_confidence: ask_agronomist
+    confidence_threshold: 0.7
+  approvals:
+    mode: selective
+    tools: [set_actuator]
+    on_violation: block
+  tool_usage:
+    max_calls_per_node: 4
+    max_calls_per_run: 12
+    require_explicit_arguments: true
+    on_unknown_tool: fail
+  budgets:
+    max_tokens_per_run: 40000
+    max_latency_seconds: 60
+
+output:
+  schema:
+    status:     { type: string, enum: [nominal, attention, critical] }
+    risk_level: { type: string, enum: [low, medium, high] }
+    confidence: { type: number }
+    recommended_actions: { type: list, required: false, nullable: true }
+    approved_plan:       { type: list, required: false, nullable: true }
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+    seed: 7
+    fixtures:
+      llm_outputs:
+        "*": [{ content: "ok", usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        irrigation_analyst: [{ content: '{"domain":"irrigation","note":"soil moisture adequate"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        climate_analyst:    [{ content: '{"domain":"climate","note":"temp and CO2 nominal"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        pest_analyst:       [{ content: '{"domain":"pest","note":"no disease signal"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        synthesize:         [{ content: '{"status":"nominal","risk_level":"low","confidence":0.9,"recommended_actions":["hold"]}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        report:             [{ content: '{"status":"nominal","summary":"All nominal.","actions":["none"],"next_check":"1h"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+      tool_outputs:
+        "*": { ok: true }
+        search_agronomy: [{ text: "note", source: "corpus/x.md" }]
+        read_sensors: { soil_moisture: 42, air_temp_c: 22.5, humidity: 60, co2_ppm: 800 }
+        set_actuator: { ok: true }
+        compute_vpd: 1.05
+  scenarios:
+    - id: nominal_cycle
+      input: { bed_id: "bed-A1", soil_moisture: 42.0, air_temp_c: 22.5, humidity: 60.0, co2_ppm: 800 }
+      expected:
+        route: report
+        artifacts: [grow_report]
+    - id: low_confidence_escalation
+      input: { bed_id: "bed-A1", soil_moisture: 42.0, air_temp_c: 22.5, humidity: 60.0, co2_ppm: 800 }
+      fixtures:
+        llm_outputs:
+          synthesize: [{ content: '{"status":"attention","risk_level":"medium","confidence":0.4,"recommended_actions":["inspect"]}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+      expected:
+        route: ask_agronomist
+
+evals:
+  suites:
+    - id: status_routing
+      metric: exact_match
+      dataset: datasets/status_routing.jsonl
+      description: "Routing classification: nominal → report, low-confidence → human"
+    - id: grow_policy
+      metric: policy_violations
+      dataset: datasets/grow_policy.jsonl
+      description: "A compliant cycle emits zero policy violations"
+    - id: report_quality
+      metric: rubric
+      dataset: datasets/report_quality.jsonl
+      description: "The grow report has the required sections"
+      metadata:
+        rubric:
+          artifact: grow_report
+          required_sections: [Status, Summary, Actions]
+          min_word_count: 5
+
+observability:
+  tracing:
+    enabled: true
+    exporter: console        # spans to stdout offline; otlp → Azure Monitor in prod
+
+run:
+  sandbox:
+    enabled: false           # opt-in via `abp run --sandbox`
+    engine: auto             # podman → docker probe
+    image: "python:3.11-slim"
+    network: bridge
+
+memory:
+  backend: sqlite
+  connection_string_env: GROWOPS_DB_PATH   # default: growops.db — each thread_id is a bed's journal

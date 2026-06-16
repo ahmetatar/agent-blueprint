@@ -1,14 +1,32 @@
 """Utilities for collecting and resolving required secrets from a blueprint."""
 
 import os
+from typing import TYPE_CHECKING
 
 from agent_blueprint.models.blueprint import BlueprintSpec
 
+if TYPE_CHECKING:
+    from agent_blueprint.ir.compiler import AgentGraph
 
-def collect_required_secrets(spec: BlueprintSpec) -> set[str]:
+#: Runtime env keys for each provider, used when an agent resolves to a provider
+#: via a bare model (no `model_providers` entry whose api_key_env would cover it).
+_PROVIDER_ENV_KEYS: dict[str, list[str]] = {
+    "openai": ["OPENAI_API_KEY"],
+    "anthropic": ["ANTHROPIC_API_KEY"],
+    "google": ["GOOGLE_API_KEY"],
+    "azure_openai": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"],
+}
+
+
+def collect_required_secrets(
+    spec: BlueprintSpec, ir: "AgentGraph | None" = None
+) -> set[str]:
     """Return the set of environment variable names required at runtime.
 
-    Scans model_providers, tools (auth), and mcp_servers.
+    Scans model_providers and tool auth. When the compiled `ir` is supplied,
+    also adds the implicit provider key for each node's resolved provider — e.g.
+    an agent on a bare `gpt-4o` (no model_providers entry) still needs
+    OPENAI_API_KEY, which the model_providers scan alone would miss.
     """
     secrets: set[str] = set()
 
@@ -28,6 +46,12 @@ def collect_required_secrets(spec: BlueprintSpec) -> set[str]:
             ]:
                 if env_var:
                     secrets.add(env_var)
+
+    if ir is not None:
+        for node in ir.nodes:
+            resolved = getattr(node, "resolved_provider", None)
+            if resolved:
+                secrets.update(_PROVIDER_ENV_KEYS.get(resolved, []))
 
     return secrets
 

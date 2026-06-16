@@ -155,7 +155,7 @@ def deploy(
             k, _, v = kv.partition("=")
             extra_env[k.strip()] = v.strip()
 
-    required = collect_required_secrets(spec)
+    required = collect_required_secrets(spec, ir)
     secrets, missing = resolve_secrets(required, extra=extra_env)
 
     if missing:
@@ -185,6 +185,25 @@ def deploy(
             dest = tmpdir / filename
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(content, encoding="utf-8")
+
+        # Copy user `impl` modules that live next to the blueprint (e.g. a
+        # function-tool impl `farm_impl.py`) into the build context — the
+        # generated tools.py imports them, and the Dockerfile COPYs the context.
+        from agent_blueprint.models.tools import ToolType
+
+        impl_paths = [t.impl for t in spec.tools.values() if t.type == ToolType.function and t.impl]
+        impl_paths += [r.impl for r in spec.retrievers.values() if r.impl]
+        copied: set[str] = set()
+        for impl_path in impl_paths:
+            root = impl_path.split(".")[0]
+            if root in copied:
+                continue
+            candidate = blueprint.parent / f"{root}.py"
+            if candidate.exists():
+                (tmpdir / f"{root}.py").write_text(
+                    candidate.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                copied.add(root)
 
         # Add Dockerfile + server.py
         DeployPackager().package(tmpdir, ir)

@@ -271,3 +271,54 @@ class TestDeployExecution:
         flat = _flat(result)
         assert "Dry run" in flat
         assert "Dockerfile" in flat
+
+    def test_copies_user_impl_module_into_build_context(self, tmp_path):
+        # A function-tool impl living next to the blueprint must be copied into
+        # the build context — the generated tools.py imports it.
+        content = """\
+blueprint:
+  name: "deploy-impl-test"
+state:
+  fields:
+    messages:
+      type: "list[message]"
+      reducer: append
+tools:
+  compute:
+    type: function
+    impl: "farm_impl.compute_vpd"
+    parameters:
+      x: { type: number, required: true }
+    returns: { type: number }
+agents:
+  assistant:
+    model: "gpt-4o"
+    tools: [compute]
+graph:
+  entry_point: assistant
+  nodes:
+    assistant:
+      agent: assistant
+  edges:
+    - from: assistant
+      to: END
+"""
+        path = _write_blueprint(tmp_path, content)
+        (tmp_path / "farm_impl.py").write_text(
+            "def compute_vpd(x):\n    return x\n", encoding="utf-8"
+        )
+        with (
+            patch(
+                "agent_blueprint.deployers.docker.DockerDeployer.check_prerequisites",
+                return_value=[],
+            ),
+            patch(
+                "agent_blueprint.deployers.docker.DockerDeployer.deploy",
+                return_value=DeployResult(success=True),
+            ),
+        ):
+            result = runner.invoke(
+                app, ["deploy", str(path), "--platform", "docker", "--dry-run"]
+            )
+        assert result.exit_code == 0
+        assert "farm_impl.py" in _flat(result)

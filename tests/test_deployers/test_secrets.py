@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from agent_blueprint.deployers.secrets import collect_required_secrets, resolve_secrets
+from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
@@ -37,6 +38,15 @@ class TestCollectRequiredSecrets:
         # GCP_PROJECT_ID is a project_env field on GCPDeployConfig, not a secret
         # (it's on the deploy config, not the runtime blueprint)
         assert "GCP_PROJECT_ID" not in secrets
+
+    def test_ir_adds_implicit_provider_key_for_bare_model(self):
+        # basic_chatbot has no model_providers entry, only a bare `gpt-4o` agent.
+        # The model_providers scan alone misses its OPENAI_API_KEY; the compiled
+        # IR resolves the provider so the runtime key is added.
+        spec = load("basic_chatbot.yml")
+        assert collect_required_secrets(spec) == set()
+        ir = compile_blueprint(spec)
+        assert "OPENAI_API_KEY" in collect_required_secrets(spec, ir)
 
 
 class TestResolveSecrets:

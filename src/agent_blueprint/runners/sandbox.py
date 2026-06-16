@@ -8,7 +8,7 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from agent_blueprint.deployers.secrets import collect_required_secrets
+from agent_blueprint.deployers.secrets import _PROVIDER_ENV_KEYS, collect_required_secrets
 from agent_blueprint.exceptions import SandboxError
 from agent_blueprint.ir.compiler import AgentGraph
 from agent_blueprint.models.blueprint import BlueprintSpec
@@ -23,16 +23,6 @@ _OLLAMA_HOSTS = {
 
 #: Trace output path inside the container (the temp dir is mounted there)
 _CONTAINER_OUT = "/abp-out"
-
-#: Conventional API-key env vars read implicitly by provider SDKs. Forwarded
-#: for providers the graph actually uses, even without an explicit
-#: model_providers entry (where api_key_env would cover it).
-_PROVIDER_ENV_KEYS: dict[str, list[str]] = {
-    "openai": ["OPENAI_API_KEY"],
-    "anthropic": ["ANTHROPIC_API_KEY"],
-    "google": ["GOOGLE_API_KEY"],
-    "azure_openai": ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"],
-}
 
 
 def engine_available(runtime: str) -> bool:

@@ -48,6 +48,51 @@ class TestCollectRequiredSecrets:
         ir = compile_blueprint(spec)
         assert "OPENAI_API_KEY" in collect_required_secrets(spec, ir)
 
+    def test_ir_ignores_non_agent_nodes(self, tmp_path):
+        # Non-agent nodes (here a function-tool node) keep the default
+        # `resolved_provider` and must NOT pull in a spurious provider key —
+        # only the azure agent's key should be collected.
+        content = """\
+blueprint:
+  name: "azure-only"
+settings:
+  default_model: "gpt-4o"
+  default_model_provider: azure
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+model_providers:
+  azure:
+    provider: azure_openai
+    base_url: "https://example.openai.azure.com"
+    deployment: "gpt-4o"
+    api_key_env: AZURE_OPENAI_API_KEY
+agents:
+  assistant:
+    model: "${settings.default_model}"
+graph:
+  entry_point: assistant
+  nodes:
+    assistant: { agent: assistant }
+    notify:
+      type: handoff
+      channel: slack
+      action: notify
+      message_template: "done"
+  edges:
+    - from: assistant
+      to: notify
+    - from: notify
+      to: END
+"""
+        path = tmp_path / "azure_only.yml"
+        path.write_text(content, encoding="utf-8")
+        spec = BlueprintSpec.model_validate(load_blueprint_yaml(path))
+        ir = compile_blueprint(spec)
+        secrets = collect_required_secrets(spec, ir)
+        assert "AZURE_OPENAI_API_KEY" in secrets
+        assert "OPENAI_API_KEY" not in secrets
+
 
 class TestResolveSecrets:
     def test_resolves_from_environment(self, monkeypatch):

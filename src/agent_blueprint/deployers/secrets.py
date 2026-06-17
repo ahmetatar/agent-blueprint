@@ -49,6 +49,11 @@ def collect_required_secrets(
 
     if ir is not None:
         for node in ir.nodes:
+            # Only agent nodes call an LLM; non-agent nodes (tool/join/subgraph
+            # adapters) keep the default `resolved_provider` and would otherwise
+            # pull in a spurious key (matches the compiler's `if node.agent` use).
+            if not node.agent:
+                continue
             resolved = getattr(node, "resolved_provider", None)
             if resolved:
                 secrets.update(_PROVIDER_ENV_KEYS.get(resolved, []))

@@ -12,6 +12,58 @@ This document takes you from zero to a deployed, working agent — and back down
 
 ---
 
+## What the system actually does
+
+Picture an indoor vertical farm with many grow beds, each wired with cheap
+sensors (soil moisture, air temperature, humidity, CO₂). Once per cycle, a bed's
+reading is handed to GrowOps, and a small team of specialist agents decides
+whether the bed is fine — or needs intervention — and never touches the hardware
+without a human's say-so. Each agent owns one job:
+
+- **Grower** — the intake. Reads the bed's sensors, parses the raw telemetry, and
+  computes a derived metric (vapor-pressure deficit) that the analysts care about.
+- **Three analysts, working in parallel** — each judges one domain and reports a
+  short finding:
+  - *Irrigation Analyst* — is the soil moisture right?
+  - *Climate Analyst* — are temperature, humidity, and CO₂ in range?
+  - *Pest Analyst* — any disease/pest risk? (it consults a small agronomy
+    knowledge base via RAG).
+- **Synthesizer** — merges the three findings into one verdict: a **status**
+  (`nominal` / `attention` / `critical`), a risk level, a confidence score, and a
+  list of recommended actions.
+
+What happens next depends on that verdict:
+
+- **Healthy bed (`nominal`)** → skip everything, just write a report. Most cycles
+  end here, cheaply, with no side effects.
+- **Needs work (`attention` / `critical`)** → hand off to the **Grow Ops Lead**, a
+  supervisor that delegates to the right specialist *actuator* agent — *Irrigation
+  Actuator* (pump), *Climate Actuator* (fan / vent / grow-light), or *Nutrient
+  Dosing* (doser).
+- **Not sure (low confidence)** → don't guess. Escalate to a human over Slack and
+  stop.
+
+Two safeguards sit in front of any physical action:
+
+1. **Safety review** — before a remediation plan runs, a *propose → critique →
+   finalize* loop double-checks it for crop safety (it runs once for the action
+   plan and again for nutrient dosing).
+2. **Human approval** — the actuator tool that actually moves hardware
+   (`set_actuator`) is **approval-gated**. In headless operation it refuses to
+   fire and asks for a human yes. The agent can *decide* to water a bed; it cannot
+   *water* it on its own.
+
+Finally, the **Report Writer** produces a short markdown report of the cycle, and
+each bed keeps its own memory (a SQLite journal keyed by bed id), so the system
+has continuity from one cycle to the next.
+
+The net behavior: an autonomous monitor that is cautious by construction — it
+acts decisively when a bed is healthy (do nothing, log it), reasons carefully
+when something is off, and hands control to a human at exactly the two moments
+that matter: when it's unsure, and before it touches the crop.
+
+---
+
 ## What this example exercises
 
 - **Multi-agent graph**: a `parallel` fan-out of three analysts → a `synthesize`

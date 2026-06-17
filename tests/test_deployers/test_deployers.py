@@ -89,6 +89,28 @@ class TestAzurePrerequisites:
             errors = deployer.check_prerequisites()
         assert any("az login" in e for e in errors)
 
+    def test_secrets_bound_via_containerapp_update(self, tmp_path):
+        # Env vars are bound to secrets via `az containerapp update
+        # --set-env-vars`. The `az containerapp env vars` group does not exist
+        # (`containerapp env` is the managed environment), so it must not appear.
+        deployer = AzureDeployer(_az_config(), "test-agent")
+        calls, fake_cmd = _record_cmds(deployer)
+        with (
+            patch.object(deployer, "_cmd", side_effect=fake_cmd),
+            patch.object(deployer, "_probe", return_value=False),
+            patch.object(deployer, "_capture", return_value=""),
+        ):
+            deployer.deploy(tmp_path, {"AZURE_OPENAI_API_KEY": "k"}, image_tag="v1")
+        flat = [" ".join(c) for c in calls]
+        assert any("containerapp secret set" in c for c in flat)
+        assert any(
+            "containerapp update" in c
+            and "--set-env-vars" in c
+            and "AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key" in c
+            for c in flat
+        )
+        assert not any("containerapp env vars" in c for c in flat)
+
 
 class TestAWSPrerequisites:
     def test_all_prerequisites_met(self):

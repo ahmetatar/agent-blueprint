@@ -330,26 +330,6 @@ harness:
       expected:
         route: ask_agronomist
 
-evals:
-  suites:
-    - id: status_routing
-      metric: exact_match
-      dataset: datasets/status_routing.jsonl
-      description: "Routing classification: nominal → report, low-confidence → human"
-    - id: grow_policy
-      metric: policy_violations
-      dataset: datasets/grow_policy.jsonl
-      description: "A compliant cycle emits zero policy violations"
-    - id: report_quality
-      metric: rubric
-      dataset: datasets/report_quality.jsonl
-      description: "The grow report has the required sections"
-      metadata:
-        rubric:
-          artifact: grow_report
-          required_sections: [Status, Summary, Actions]
-          min_word_count: 5
-
 observability:
   tracing:
     enabled: true

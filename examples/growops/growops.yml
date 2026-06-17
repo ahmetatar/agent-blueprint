@@ -5,7 +5,9 @@ blueprint:
 
 settings:
   default_model: "gpt-4o"
-  default_temperature: 0.3
+  default_model_provider: azure   # every agent resolves to the one Azure OpenAI deployment
+  default_temperature: 0.0          # deterministic, tighter JSON adherence for the contracts
+  max_graph_steps: 60             # remediation path is deep (supervisor + two safety-gate subgraphs)
 
 input:
   schema:
@@ -33,13 +35,10 @@ state:
 model_providers:
   azure:
     provider: azure_openai
-    base_url: "${env.AZURE_OPENAI_ENDPOINT}"
-    deployment: "gpt-4o"
+    base_url: "${env.AZURE_OPENAI_ENDPOINT}"   # https://<resource>.openai.azure.com
+    deployment: "gpt-4o"                        # your Azure OpenAI deployment name
     api_version: "2024-06-01"
     api_key_env: AZURE_OPENAI_API_KEY
-  thinker:
-    provider: anthropic
-    api_key_env: ANTHROPIC_API_KEY
 
 retrievers:
   agronomy:
@@ -104,17 +103,22 @@ agents:
     rag: { tool: search_agronomy, mode: hybrid }
   synthesizer:
     name: "Synthesizer"
-    model: "gpt-4o"
-    model_provider: azure
-    system_prompt: "Merge findings. Respond JSON with status, risk_level, confidence, recommended_actions."
+    model: "${settings.default_model}"
+    system_prompt: >
+      Merge the analyst findings into one bed assessment. Default to status
+      "nominal" — choose "attention" or "critical" ONLY when an analyst finding
+      explicitly reports an out-of-range reading or a real problem (e.g. dry soil,
+      heat/CO2 stress, disease signal). If every finding says readings are adequate
+      / in range / no concern, status MUST be "nominal" with an empty
+      recommended_actions list. Reply with ONLY a JSON object (no markdown, no
+      prose), with exactly these keys: status (exactly one of: nominal, attention,
+      critical — lowercase), risk_level (exactly one of: low, medium, high —
+      lowercase), confidence (a number between 0 and 1), recommended_actions (an
+      array of short action strings).
   grow_ops_lead:
     name: "Grow Ops Lead"
-    model: "claude-sonnet-4-6"
-    model_provider: thinker
+    model: "${settings.default_model}"
     system_prompt: "Delegate remediation to specialists. Do nothing if nominal."
-    reasoning:
-      enabled: true
-      params: { max_thinking_tokens: 2000 }
   irrigation_actuator:
     name: "Irrigation Actuator"
     model: "${settings.default_model}"
@@ -145,7 +149,11 @@ agents:
   report_writer:
     name: "Report Writer"
     model: "${settings.default_model}"
-    system_prompt: "Write the grow report. Respond JSON with status, summary, actions, next_check."
+    system_prompt: >
+      Write a short markdown grow report for this bed using exactly these three
+      section headers: "## Status" (the overall status word), "## Summary" (a
+      one-line description), and "## Actions" (recommended actions, or "none").
+      You may add a final "Next check:" line. Keep it under 8 lines.
 
 graph:
   entry_point: ingest
@@ -194,7 +202,10 @@ graph:
     - from: ingest
       to: sense
     - from: synthesize
-      to: plan
+      to:
+        - condition: "state.status == 'nominal'"
+          target: report          # healthy bed — skip remediation, just write the report
+        - default: plan           # attention/critical — delegate to the supervisor
     - from: ask_agronomist
       to: END
     - from: safety_gate
@@ -239,7 +250,7 @@ contracts:
       produces: [status, risk_level, confidence, recommended_actions]
       output_contract: GrowAssessment
     report:
-      output_contract: GrowReport
+      requires: [status]        # the human-readable report is markdown prose, not a JSON contract
   outputs:
     AnalystFinding:
       type: object
@@ -254,21 +265,12 @@ contracts:
         status:     { type: string, enum: [nominal, attention, critical] }
         risk_level: { type: string, enum: [low, medium, high] }
         confidence: { type: number }
-    GrowReport:
-      type: object
-      required: [status, summary, actions]
-      properties:
-        status:     { type: string }
-        summary:    { type: string }
-        actions:    { type: array }
-        next_check: { type: string }
 
 artifacts:
   grow_report:
     format: markdown
     producer: report
     path: "reports/{bed_id}-cycle.md"
-    contract: GrowReport
 
 policies:
   escalation:
@@ -307,7 +309,7 @@ harness:
         climate_analyst:    [{ content: '{"domain":"climate","note":"temp and CO2 nominal"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
         pest_analyst:       [{ content: '{"domain":"pest","note":"no disease signal"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
         synthesize:         [{ content: '{"status":"nominal","risk_level":"low","confidence":0.9,"recommended_actions":["hold"]}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
-        report:             [{ content: '{"status":"nominal","summary":"All nominal.","actions":["none"],"next_check":"1h"}', usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
+        report:             [{ content: "## Status\nnominal\n## Summary\nAll readings are within the normal range.\n## Actions\nnone\nNext check: 1h.", usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } }]
       tool_outputs:
         "*": { ok: true }
         search_agronomy: [{ text: "note", source: "corpus/x.md" }]
@@ -359,6 +361,17 @@ run:
     engine: auto             # podman → docker probe
     image: "python:3.11-slim"
     network: bridge
+
+deploy:
+  platform: azure
+  azure:
+    resource_group: growops-rg
+    location: westeurope
+    acr_name: growopsacr7a4315       # ACR names are globally unique — change for your own deploy
+    container_app_env: growops-env
+    app_name: growops
+    min_replicas: 0                  # scale-to-zero between cycles
+    max_replicas: 3
 
 memory:
   backend: sqlite

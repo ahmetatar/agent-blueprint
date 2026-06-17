@@ -578,6 +578,71 @@ abp deploy examples/growops/growops.yml --platform azure
 **✋ Checkpoint:** a scheduled, hardware-in-the-loop, human-gated grow-room
 brain — running on Azure. Record the demo. 🎉
 
+### As actually deployed (2026-06-17)
+
+The blueprint was deployed live to Azure Container Apps with a real Azure OpenAI
+`gpt-4o` deployment. What it took, end to end:
+
+**1. Provision the cloud resources `abp deploy` assumes already exist** (the
+deployer builds + ships the app; it does not create the model, registry, or
+environment):
+```bash
+az group create -n growops-rg -l westeurope
+az acr create -n <globally-unique-acr> -g growops-rg --sku Basic
+az containerapp env create -n growops-env -g growops-rg -l westeurope
+# Azure OpenAI account + a gpt-4o deployment (region with gpt-4o quota, e.g. swedencentral):
+az cognitiveservices account create -n <aoai-name> -g growops-rg -l swedencentral \
+  --kind OpenAI --sku S0 --custom-domain <aoai-name> --yes
+az cognitiveservices account deployment create -n <aoai-name> -g growops-rg \
+  --deployment-name gpt-4o --model-name gpt-4o --model-version 2024-11-20 \
+  --model-format OpenAI --sku-name Standard --sku-capacity 10
+```
+
+**2. A mock sensor gateway** (the ESP32 fleet stand-in, in `companion/`) gives
+the agent a live endpoint to read telemetry from:
+```bash
+az acr build --registry <acr> --image mock-sensors:latest examples/growops/companion
+az containerapp create -n growops-sensors -g growops-rg --environment growops-env \
+  --image <acr>.azurecr.io/mock-sensors:latest --registry-server <acr>.azurecr.io \
+  --ingress external --target-port 8080 --min-replicas 1 --max-replicas 1
+```
+
+**3. Deploy the agent**, with the model/secrets/gateway env wired at deploy time:
+```bash
+export AZURE_OPENAI_ENDPOINT="https://<aoai-name>.openai.azure.com/"
+export AZURE_OPENAI_API_KEY="$(az cognitiveservices account keys list -n <aoai-name> -g growops-rg --query key1 -o tsv)"
+export SENSOR_GATEWAY_URL="https://<sensors-fqdn>"
+export SENSOR_API_KEY=demo-sensor-key ACTUATOR_TOKEN=demo-actuator-token
+export ACTUATOR_GATEWAY_URL="https://actuators.growops.invalid"   # placeholder — actuators are human-gated
+abp deploy examples/growops/growops.yml
+```
+
+**4. Hit it.** A healthy bed runs the full graph and returns clean:
+```bash
+curl -X POST https://<app-fqdn>/invoke -H 'Content-Type: application/json' \
+  -d '{"input":{"bed_id":"bed-B2","soil_moisture":55,"air_temp_c":22,"humidity":60,"co2_ppm":800},"thread_id":"bed-B2"}'
+# → {"response":{"status":"nominal","risk_level":"low","confidence":0.95,"recommended_actions":[],"approved_plan":null}}
+```
+
+**What the real deploy proved — and fixed.** Running on a real model (not the
+mock harness) surfaced three ABP bugs, all fixed in the same cycle: the Azure
+deployer bound env vars with a non-existent `az containerapp env vars` command;
+`azure_openai` agents shipped without `langchain-openai`; and node
+`output_contract` extraction couldn't parse JSON that the model wrapped in
+```` ```json ```` fences. It also drove example hardening: status-based routing
+(`synthesize → report` when `nominal`, else `→ plan`) so a healthy bed skips
+remediation; `max_graph_steps: 60` for the deep remediation path; the report node
+emits **markdown** (its natural form) instead of a brittle JSON contract; and
+`default_temperature: 0` for tighter JSON adherence. The runtime guarantees all
+fired in production: the output contract caught an off-enum status, the step
+limit caught a runaway, and the approval gate blocked `set_actuator` headless —
+exactly the human-in-the-loop behavior the design intends.
+
+> **Note on the autonomous scheduler & `memory.backend: postgres`:** the shipped
+> example uses `memory.backend: sqlite` (per-bed journal, M15). A Container Apps
+> cron Job doing `curl … /invoke` per bed on a schedule is the autonomous driver;
+> for multi-replica shared memory, switch to `postgres` + `DATABASE_URL`.
+
 ---
 
 ## Where we update CI

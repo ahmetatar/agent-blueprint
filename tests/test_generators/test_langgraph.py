@@ -1413,6 +1413,60 @@ class TestLangGraphGenerator:
         manifest = trace_mod.current_recorder().manifest
         assert [event["event"] for event in manifest["trace"]] == ["node_started", "node_finished"]
 
+    def test_node_output_contract_tolerates_markdown_fenced_json(self, tmp_path, monkeypatch):
+        # Real models routinely wrap JSON in ```json fences; the extractor must
+        # still recover the structured output instead of failing the contract.
+        module = _load_generated_nodes_module(
+            tmp_path,
+            monkeypatch,
+            spec_data={
+                "blueprint": {"name": "node-output-contract-fenced"},
+                "state": {
+                    "fields": {
+                        "messages": {"type": "list[message]", "reducer": "append"},
+                        "route": {"type": "string", "nullable": True, "default": None},
+                        "confidence": {"type": "number", "nullable": True, "default": None},
+                    }
+                },
+                "agents": {"assistant": {"model": "gpt-4o"}},
+                "contracts": {
+                    "nodes": {
+                        "assistant": {
+                            "output_contract": "route_payload",
+                            "produces": ["route", "confidence"],
+                        }
+                    },
+                    "outputs": {
+                        "route_payload": {
+                            "type": "object",
+                            "required": ["route", "confidence"],
+                            "properties": {
+                                "route": {"type": "string"},
+                                "confidence": {"type": "number"},
+                            },
+                            "additionalProperties": False,
+                        }
+                    },
+                },
+                "graph": {"entry_point": "assistant", "nodes": {"assistant": {"agent": "assistant"}}, "edges": []},
+            },
+            llm_script=[
+                {"content": 'Here is the result:\n```json\n{"route":"billing","confidence":0.91}\n```'}
+            ],
+        )
+
+        trace_mod = sys.modules["_abp_trace"]
+        trace_mod.start_trace(
+            run_id="run-fenced",
+            blueprint="node-output-contract-fenced",
+            blueprint_version="1.0",
+            mode="live",
+        )
+
+        result = module.node_assistant({"messages": [module.HumanMessage("hello")]})
+        assert result["route"] == "billing"
+        assert result["confidence"] == 0.91
+
     def test_node_output_contract_can_store_object_under_single_produced_field(
         self,
         tmp_path,
@@ -2899,6 +2953,39 @@ class TestLangGraphGenerator:
         assert "langgraph-checkpoint-sqlite" not in files["requirements.txt"]
         assert "langgraph-checkpoint-redis" not in files["requirements.txt"]
         assert "langgraph-checkpoint-postgres" not in files["requirements.txt"]
+
+    def _provider_ir(self, provider: str, **provider_fields):
+        # Minimal single-agent blueprint whose one agent resolves to `provider`.
+        spec = BlueprintSpec.model_validate({
+            "blueprint": {"name": "prov"},
+            "settings": {"default_model": "m", "default_model_provider": "p"},
+            "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
+            "model_providers": {"p": {"provider": provider, **provider_fields}},
+            "agents": {"a": {"model": "m", "model_provider": "p"}},
+            "graph": {
+                "entry_point": "a",
+                "nodes": {"a": {"agent": "a"}},
+                "edges": [{"from": "a", "to": "END"}],
+            },
+        })
+        return compile_blueprint(spec)
+
+    def test_azure_openai_requirements_include_langchain_openai(self):
+        # AzureChatOpenAI lives in langchain_openai — an azure_openai agent must
+        # pull in langchain-openai, not silently ship without it.
+        ir = self._provider_ir(
+            "azure_openai",
+            base_url="https://x.openai.azure.com",
+            deployment="gpt-4o",
+            api_key_env="AZURE_OPENAI_API_KEY",
+        )
+        reqs = self.gen.generate(ir)["requirements.txt"]
+        assert "langchain-openai" in reqs
+
+    def test_bedrock_requirements_include_langchain_aws(self):
+        ir = self._provider_ir("bedrock")
+        reqs = self.gen.generate(ir)["requirements.txt"]
+        assert "langchain-aws" in reqs
 
     def test_reasoning_generates_extended_thinking(self):
         ir = load_ir("reasoning_agent.yml")

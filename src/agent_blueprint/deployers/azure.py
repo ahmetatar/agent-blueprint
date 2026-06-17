@@ -103,12 +103,14 @@ class AzureDeployer(BaseDeployer):
                 f"{k}=secretref:{k.lower().replace('_', '-')}"
                 for k in secrets
             ]
+            # Bind each env var to its secret via `containerapp update`. (There
+            # is no `az containerapp env vars` command — `containerapp env` is
+            # the managed-environment group, not the app's env vars.)
             self._cmd([
-                "az", "containerapp", "env", "vars", "set",
+                "az", "containerapp", "update",
                 "--name", self._app_name,
                 "--resource-group", cfg.resource_group,
-                "--container-name", self._app_name,
-                "--env-vars", *env_pairs,
+                "--set-env-vars", *env_pairs,
             ], dry_run=dry_run)
 
         # 6. Get URL

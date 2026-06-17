@@ -439,6 +439,41 @@ def _validate_schema_value(path: str, value: Any, schema: dict[str, Any]) -> Any
     return validated
 
 
+def _loads_lenient(content: str) -> Any:
+    """Parse JSON from an LLM message, tolerating common real-model wrapping.
+
+    Models routinely wrap JSON in ```/```json fences or add a sentence before
+    or after it. A strict json.loads on the whole string then fails. We try the
+    raw string first, then strip a single code fence, then fall back to the
+    substring spanning the outermost {...} / [...]. Raises ValueError if none
+    parse, so the caller treats it as "no structured output".
+    """
+    text = content.strip()
+
+    fenced = text
+    if fenced.startswith("```"):
+        fenced = fenced[3:]
+        if fenced[:4].lower() == "json":
+            fenced = fenced[4:]
+        if fenced.endswith("```"):
+            fenced = fenced[:-3]
+        fenced = fenced.strip()
+
+    for candidate in (text, fenced):
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    starts = [i for i in (fenced.find("{"), fenced.find("[")) if i != -1]
+    ends = [i for i in (fenced.rfind("}"), fenced.rfind("]")) if i != -1]
+    if starts and ends:
+        sliced = fenced[min(starts):max(ends) + 1]
+        return json.loads(sliced)  # may raise — caller handles ValueError
+
+    raise ValueError("no JSON object found in content")
+
+
 def _extract_structured_output_candidate(new_messages: list[Any]) -> Any:
     for msg in reversed(new_messages):
         tool_calls = getattr(msg, "tool_calls", None)
@@ -450,8 +485,8 @@ def _extract_structured_output_candidate(new_messages: list[Any]) -> Any:
         content = getattr(msg, "content", None)
         if isinstance(content, str) and content.strip():
             try:
-                return json.loads(content)
-            except json.JSONDecodeError:
+                return _loads_lenient(content)
+            except (ValueError, json.JSONDecodeError):
                 continue
     return None
 

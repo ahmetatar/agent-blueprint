@@ -1,7 +1,7 @@
 langgraph>=0.3
 langchain-core>=0.3
 {% set providers = ir.used_providers %}
-{% if 'openai' in providers or 'custom' in providers %}
+{% if 'openai' in providers or 'azure_openai' in providers or 'openai_compatible' in providers %}
 langchain-openai>=0.2
 {% endif %}
 {% if 'anthropic' in providers %}
@@ -12,6 +12,9 @@ langchain-google-genai>=2.0
 {% endif %}
 {% if 'ollama' in providers %}
 langchain-ollama>=0.2
+{% endif %}
+{% if 'bedrock' in providers %}
+langchain-aws>=0.2
 {% endif %}
 httpx>=0.27
 python-dotenv>=1.0

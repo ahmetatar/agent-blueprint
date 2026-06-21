@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-blueprint"
-version = "0.3.0"
+version = "0.4.0"
 description = "Declarative, framework-agnostic AI agent orchestration via YAML"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 keywords = ["ai", "agents", "llm", "langgraph", "yaml", "cli", "orchestration"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -94,7 +94,7 @@ testpaths = ["tests"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.3.0"
+version = "0.4.0"
 version_provider = "pep621"
 tag_format = "v$version"
 version_scheme = "pep440"

@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-21
+
+First beta release. The YAML → IR → LangGraph → deploy pipeline and its
+governance surfaces (lint, doctor, harness, eval, gate, traces, OTel, sandbox,
+package, deploy) are validated end-to-end, including a live Azure Container
+Apps deployment (GrowOps). Promoted to `Development Status :: 4 - Beta`.
+
+Supported surface: the **LangGraph** target and the **Docker / Podman / AWS App
+Runner / Azure Container Apps** deployers. Roadmap (not production-ready): the
+`plain` target (minimal), CrewAI (not implemented), MCP tool generation
+(guarded), and the GCP Cloud Run deployer (partial). The blueprint schema is
+not yet frozen — breaking changes will be marked and documented.
+
 ### Added
 
 - `abp editor` (phase E5.5): durable chat threads — chat sessions now survive

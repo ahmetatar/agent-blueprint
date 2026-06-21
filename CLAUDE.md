@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agent-blueprint` (CLI: `abp`) — declarative, framework-agnostic AI agent orchestration via YAML. A validated YAML blueprint compiles to an intermediate representation (IR) and generates runnable agent projects (LangGraph today; plain Python minimal; CrewAI not implemented). Published on PyPI, v0.3.x Alpha, Python 3.11+.
+`agent-blueprint` (CLI: `abp`) — declarative, framework-agnostic AI agent orchestration via YAML. A validated YAML blueprint compiles to an intermediate representation (IR) and generates runnable agent projects (LangGraph today; plain Python minimal; CrewAI not implemented). Published on PyPI, v0.4.x Beta, Python 3.11+.
 
 ## Commands
 

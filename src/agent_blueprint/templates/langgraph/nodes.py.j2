@@ -72,9 +72,13 @@ RETRY_POLICY_BY_NODE = {
         "max_attempts": {{ node.node_def.retry.max_attempts | to_python }},
         "backoff_seconds": {{ node.node_def.retry.backoff_seconds | to_python }},
         "on": {{ node.node_def.retry.on | map(attribute="value") | list | to_python }},
+{% if node.node_def.retry.on_exhausted %}
+        "on_exhausted": {{ node.node_def.retry.on_exhausted | to_python }},
+{% endif %}
     },
 {% endfor %}
 }
+{% set fallback_nodes = ir.nodes | selectattr("node_def.retry.on_exhausted") | list %}
 {% set context_nodes = ir.nodes | selectattr("agent") | selectattr("agent.memory") | list %}
 {% if context_nodes %}
 CONTEXT_POLICY_BY_NODE = {
@@ -256,6 +260,40 @@ def _apply_context_policy(node_id: str, working: list) -> list:
 
 
 {% endif %}
+{% if fallback_nodes %}
+class _RetryFallback(Exception):
+    """Raised when a node's LLM call is exhausted and a fallback route is configured."""
+
+    def __init__(self, node_id: str, target: str, error: Exception) -> None:
+        super().__init__(f"{node_id}: retries exhausted, falling back to {target}")
+        self.node_id = node_id
+        self.target = target
+        self.error = error
+
+
+def _with_retry_fallback(node_id: str, target: str, fn: Any) -> Any:
+    """Turn an exhausted LLM call into a reroute instead of a run failure.
+
+    The undeclared `__abp_fallback_*` keys are an ephemeral same-superstep signal
+    read by the node's conditional-edge router (like the escalation keys).
+    """
+    def wrapper(state: AgentState) -> dict:
+        try:
+            return fn(state)
+        except _RetryFallback as fallback:
+            emit_trace_event(
+                "retry_fallback",
+                node=node_id,
+                error=str(fallback.error),
+                metadata={"fallback": target},
+            )
+            return {"__abp_fallback_target": target, "__abp_fallback_source": node_id}
+
+    wrapper.__name__ = getattr(fn, "__name__", node_id)
+    return wrapper
+
+
+{% endif %}
 def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
     retry_policy = RETRY_POLICY_BY_NODE.get(node_id, {})
     max_attempts = int(retry_policy.get("max_attempts") or 1)
@@ -278,6 +316,10 @@ def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
                     },
                 )
                 clear_current_node()
+{% if fallback_nodes %}
+                if retry_policy.get("on_exhausted"):
+                    raise _RetryFallback(node_id, retry_policy["on_exhausted"], exc) from exc
+{% endif %}
                 raise
             emit_trace_event(
                 "retry_scheduled",
@@ -1425,4 +1467,10 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% endif %}
 
 {% endif %}
+{% endfor %}
+{% for node in fallback_nodes %}
+
+node_{{ node.id | safe_id }} = _with_retry_fallback(
+    "{{ node.id }}", "{{ node.node_def.retry.on_exhausted }}", node_{{ node.id | safe_id }}
+)
 {% endfor %}

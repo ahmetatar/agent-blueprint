@@ -22,6 +22,12 @@ from nodes import (
 )
 
 ESCALATION_TARGET = {{ (ir.policies.escalation.on_low_confidence if ir.policies else none) | to_python }}
+{% set fallbacks = {} %}
+{% for n in ir.nodes %}
+{% if n.node_def.retry.on_exhausted %}
+{% set _ = fallbacks.update({n.id: n.node_def.retry.on_exhausted}) %}
+{% endif %}
+{% endfor %}
 
 
 def build_graph():
@@ -67,6 +73,10 @@ def build_graph():
 {% for edge in ir.edges %}
 {% if edge.is_conditional %}
     def _route_{{ edge.from_node | safe_id }}(state) -> str:
+{% if fallbacks.get(edge.from_node) %}
+        if state.get("__abp_fallback_source") == "{{ edge.from_node }}":
+            return "{{ fallbacks[edge.from_node] }}"
+{% endif %}
 {% if ir.policies and ir.policies.escalation.on_low_confidence %}
         if (
             state.get("__abp_escalation_target")
@@ -93,6 +103,9 @@ def build_graph():
 {% if ir.policies and ir.policies.escalation.on_low_confidence %}
             "{{ ir.policies.escalation.on_low_confidence }}": "{{ ir.policies.escalation.on_low_confidence }}",
 {% endif %}
+{% if fallbacks.get(edge.from_node) %}
+            "{{ fallbacks[edge.from_node] }}": "{{ fallbacks[edge.from_node] }}",
+{% endif %}
 {% for target in edge.targets %}
             "{{ target.target }}": {% if target.target == "END" %}END{% else %}"{{ target.target }}"{% endif %},
 {% endfor %}
@@ -101,6 +114,10 @@ def build_graph():
 {% else %}
 {% if ir.policies and ir.policies.escalation.on_low_confidence %}
     def _route_{{ edge.from_node | safe_id }}(state) -> str:
+{% if fallbacks.get(edge.from_node) %}
+        if state.get("__abp_fallback_source") == "{{ edge.from_node }}":
+            return "{{ fallbacks[edge.from_node] }}"
+{% endif %}
         if (
             state.get("__abp_escalation_target")
             and state.get("__abp_escalation_source") == "{{ edge.from_node }}"
@@ -113,7 +130,26 @@ def build_graph():
         _route_{{ edge.from_node | safe_id }},
         {
             "{{ ir.policies.escalation.on_low_confidence }}": "{{ ir.policies.escalation.on_low_confidence }}",
+{% if fallbacks.get(edge.from_node) %}
+            "{{ fallbacks[edge.from_node] }}": "{{ fallbacks[edge.from_node] }}",
+{% endif %}
             {% if edge.targets[0].target == "END" %}"END": END{% else %}"{{ edge.targets[0].target }}": "{{ edge.targets[0].target }}"{% endif %},
+        }
+    )
+{% elif fallbacks.get(edge.from_node) %}
+    def _route_{{ edge.from_node | safe_id }}(state) -> str | list[str]:
+        if state.get("__abp_fallback_source") == "{{ edge.from_node }}":
+            return "{{ fallbacks[edge.from_node] }}"
+        return {{ (edge.targets | map(attribute="target") | list) if edge.targets | length > 1 else edge.targets[0].target | to_python }}
+
+    builder.add_conditional_edges(
+        "{{ edge.from_node }}",
+        _route_{{ edge.from_node | safe_id }},
+        {
+            "{{ fallbacks[edge.from_node] }}": "{{ fallbacks[edge.from_node] }}",
+{% for target in edge.targets %}
+            "{{ target.target }}": {% if target.target == "END" %}END{% else %}"{{ target.target }}"{% endif %},
+{% endfor %}
         }
     )
 {% else %}
@@ -121,6 +157,20 @@ def build_graph():
     builder.add_edge("{{ edge.from_node }}", {% if target.target == "END" %}END{% else %}"{{ target.target }}"{% endif %})
 {% endfor %}
 {% endif %}
+{% endif %}
+{% endfor %}
+{% for fb_node, fb_target in fallbacks.items() %}
+{% if not (ir.edges | selectattr("from_node", "equalto", fb_node) | list) %}
+    def _route_{{ fb_node | safe_id }}(state) -> str:
+        if state.get("__abp_fallback_source") == "{{ fb_node }}":
+            return "{{ fb_target }}"
+        return "END"
+
+    builder.add_conditional_edges(
+        "{{ fb_node }}",
+        _route_{{ fb_node | safe_id }},
+        {"{{ fb_target }}": "{{ fb_target }}", "END": END},
+    )
 {% endif %}
 {% endfor %}
 

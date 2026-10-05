@@ -283,6 +283,10 @@ def _expand_one_level(
                 "abp_subgraph_ref": node_def.ref,
                 "abp_state_key_map": state_key_map,
             }
+            if expanded_node.retry.on_exhausted:
+                expanded_node.retry.on_exhausted = _namespace_id(
+                    node_id, expanded_node.retry.on_exhausted
+                )
             if expanded_node.type == NodeType.parallel:
                 expanded_node.branches = [
                     _namespace_id(node_id, branch) for branch in expanded_node.branches
@@ -336,6 +340,13 @@ def _expand_one_level(
         ):
             remapped_node = node_def.model_copy(deep=True)
             remapped_node.on_finish = subgraph_entry_nodes[node_def.on_finish]
+            nodes[node_id] = remapped_node
+
+    # Same for a retry fallback that targets a subgraph node.
+    for node_id, node_def in list(nodes.items()):
+        if node_def.retry.on_exhausted in subgraph_entry_nodes:
+            remapped_node = node_def.model_copy(deep=True)
+            remapped_node.retry.on_exhausted = subgraph_entry_nodes[node_def.retry.on_exhausted]
             nodes[node_id] = remapped_node
 
     for edge in in_edges:

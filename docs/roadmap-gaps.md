@@ -84,7 +84,7 @@ fallback routes, verification loops), so the safety checks are tied to those.
 **Done when.** Retry + approval interplay is checked statically and enforced at
 runtime; docs in `docs/tools.md` and `docs/runtime-guarantees.md`.
 
-## 3. Retry exhaustion fallback and parallel failure policies: `todo`
+## 3. Retry exhaustion fallback and parallel failure policies: `in progress`
 
 **Gap.** Exhausted retries fail deterministically with no fallback route;
 `parallel.failure_policy` only supports `fail_fast`; retry condition is only
@@ -92,7 +92,7 @@ runtime; docs in `docs/tools.md` and `docs/runtime-guarantees.md`.
 
 **Scope.**
 - `retry.on_exhausted: <node>` (fallback route / escalation target), validated
-  in `models/blueprint.py` cross-refs.
+  in `models/graph.py` cross-refs. **Done (3a).**
 - Parallel policies: `continue` (collect partial results) and `quorum`.
 - Extra retry conditions (e.g. output-contract violation, timeout).
 - Trace events for fallback taken.

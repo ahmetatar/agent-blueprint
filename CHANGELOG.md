@@ -16,16 +16,17 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `keep_recent_tool_results`): oversized tool results are truncated
   (head + tail) and stale ones stubbed in the LLM view only, with a
   `context_compacted` trace event. See `docs/memory.md`.
-
 - Tool side-effect metadata (`tools.*.side_effect: none|read|write|irreversible`,
   `idempotent`, `approval_waived`). `irreversible` implies the approval gate
   unless waived. See `docs/tools.md`.
-
 - Per-tool retry (`tools.*.retry`) around tool execution, with
   `retry_scheduled` / `retry_exhausted` trace events carrying the tool name.
   Retrying a `write`/`irreversible` tool requires `idempotent: true`; new
   `unsafe-retry` lint warns on retried non-GET api tools with no declared
   `side_effect`.
+- `retry.on_exhausted` on agent nodes: reroute to a fallback node when the
+  node's LLM call fails after all attempts, with a `retry_fallback` trace
+  event. See `docs/runtime-guarantees.md`.
 
 ### Fixed
 

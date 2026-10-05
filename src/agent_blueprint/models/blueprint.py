@@ -19,7 +19,7 @@ from agent_blueprint.models.providers import ModelProviderDef
 from agent_blueprint.models.retrievers import RetrieverDef
 from agent_blueprint.models.run import RunConfig
 from agent_blueprint.models.state import StateDef
-from agent_blueprint.models.tools import ToolDef, ToolType
+from agent_blueprint.models.tools import SideEffect, ToolDef, ToolType
 
 
 class BlueprintMeta(BaseModel):
@@ -224,4 +224,35 @@ class BlueprintSpec(BaseModel):
                     f"policies.escalation.on_low_confidence references undefined graph node "
                     f"'{escalation_target}'"
                 )
+        self._validate_verification()
         return self
+
+    def _validate_verification(self) -> None:
+        graphs = [("graph", self.graph, True)] + [
+            (f"subgraphs.{name}", sub, False) for name, sub in self.subgraphs.items()
+        ]
+        for prefix, graph, is_main in graphs:
+            for node_id, node in graph.nodes.items():
+                if node.verify is None:
+                    continue
+                where = f"{prefix}.nodes.{node_id}"
+                if node.verify.output_contract:
+                    node_contract = self.contracts.nodes.get(node_id) if (self.contracts and is_main) else None
+                    if node_contract is None or not node_contract.output_contract:
+                        raise ValueError(
+                            f"{where}.verify.output_contract requires contracts.nodes.{node_id}"
+                            ".output_contract (main graph nodes only)"
+                        )
+                agent = self.agents.get(node.agent) if node.agent else None
+                for tool_name in (agent.tools if agent else []):
+                    tool = self.tools.get(tool_name)
+                    if (
+                        tool is not None
+                        and tool.side_effect in (SideEffect.write, SideEffect.irreversible)
+                        and tool.idempotent is not True
+                    ):
+                        raise ValueError(
+                            f"{where}.verify re-runs the node, and agent tool '{tool_name}' has "
+                            f"side_effect: {tool.side_effect.value} without 'idempotent: true'; "
+                            "a re-attempt could repeat its effect"
+                        )

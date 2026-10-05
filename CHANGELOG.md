@@ -27,6 +27,11 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 - `retry.on_exhausted` on agent nodes: reroute to a fallback node when the
   node's LLM call fails after all attempts, with a `retry_fallback` trace
   event. See `docs/runtime-guarantees.md`.
+- `verify` on agent nodes: bounded self-check loop (`max_attempts`,
+  `output_contract`, custom `functions`) that re-runs the node with failure
+  feedback, then routes to `retry.on_exhausted` or raises. New
+  `verification_failed` / `verification_exhausted` trace events. See
+  `docs/runtime-guarantees.md`.
 
 ### Fixed
 

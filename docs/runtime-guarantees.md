@@ -340,6 +340,35 @@ graph:
 - Validation: only on `agent` nodes; the target must exist, cannot be the node itself, and the node cannot be a parallel branch or a supervisor worker. Inside a subgraph the target is a node of that subgraph; an outer node may target a subgraph node (it enters at the subgraph's entry).
 - Lint: a node reachable only via a fallback is not reported as unreachable, and a fallback counts as a route out of a loop for `unbounded-loop`.
 
+#### Verification loop: `verify`
+
+`retry` handles a failing call; `verify` handles a call that *succeeds with a bad answer*. An agent node can check its own output and, if a check fails, run again with the failure reason as feedback:
+
+```yaml
+contracts:
+  nodes:
+    triage: { output_contract: route_payload, produces: [route] }
+
+graph:
+  nodes:
+    triage:
+      agent: triage
+      verify:
+        max_attempts: 3                 # total attempts, including the first (min 2)
+        output_contract: true           # re-attempt when the node output contract fails
+        functions: [checks.is_polite]   # custom `module.attr` checks
+      retry:
+        on_exhausted: human_review      # where to go when every attempt failed
+```
+
+- **Checks:** `output_contract: true` turns the node's output-contract failure into a re-attempt instead of a run failure (requires `contracts.nodes.<node>.output_contract`, main-graph nodes only). A custom check is `check(output: str, state: dict)`; `True`/`None` passes, `False` fails with a generic reason, and a string fails with that string as the reason. `state` is the node input merged with its updates. A check that raises is a bug and fails the run.
+- **Loop:** a failed attempt's updates are discarded and the node runs again with a feedback message appended to its input messages; only the passing attempt reaches state. Every attempt counts toward LLM budgets and tool-usage limits.
+- **Exhaustion:** emits `verification_exhausted`, then routes to `retry.on_exhausted` when set (same fallback mechanism as above) and otherwise raises `VerificationError`.
+- **Trace:** `verification_failed` (per failed attempt: `attempt`, `max_attempts`) and `verification_exhausted`.
+- **Safety:** a re-attempt re-runs the node, including its tools. A node whose agent has a `write`/`irreversible` tool that is not `idempotent: true` is rejected at validation. Artifacts written before a custom check fails are overwritten by the next attempt.
+- **Doctor:** `abp doctor` reports a `verify.functions` path that cannot be imported.
+- **Testing:** in `abp test` mock mode the LLM replies are fixed, so a failing check fails every attempt; use scripted/replay replies to exercise the passing path. An LLM-judge/rubric check is not implemented yet.
+
 Real-life use case:
 
 - a model provider returns a transient transport error; the node retries once, then either succeeds with a visible retry trace or fails with a clear exhausted-retry event

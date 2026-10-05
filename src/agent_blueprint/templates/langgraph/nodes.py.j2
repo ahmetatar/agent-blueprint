@@ -79,6 +79,18 @@ RETRY_POLICY_BY_NODE = {
 {% endfor %}
 }
 {% set fallback_nodes = ir.nodes | selectattr("node_def.retry.on_exhausted") | list %}
+{% set verify_nodes = ir.nodes | selectattr("node_def.verify") | list %}
+{% if verify_nodes %}
+VERIFY_POLICY_BY_NODE = {
+{% for node in verify_nodes %}
+    "{{ node.id }}": {
+        "max_attempts": {{ node.node_def.verify.max_attempts | to_python }},
+        "output_contract": {{ node.node_def.verify.output_contract | to_python }},
+        "functions": {{ node.node_def.verify.functions | to_python }},
+    },
+{% endfor %}
+}
+{% endif %}
 {% set context_nodes = ir.nodes | selectattr("agent") | selectattr("agent.memory") | list %}
 {% if context_nodes %}
 CONTEXT_POLICY_BY_NODE = {
@@ -294,6 +306,92 @@ def _with_retry_fallback(node_id: str, target: str, fn: Any) -> Any:
 
 
 {% endif %}
+{% if verify_nodes %}
+def _final_output_text(updates: dict, messages_key: str) -> str:
+    for msg in reversed(list(updates.get(messages_key) or [])):
+        content = getattr(msg, "content", None)
+        if content:
+            return str(content)
+    return ""
+
+
+def _run_verify_checks(node_id: str, policy: dict, state: Any, updates: dict, messages_key: str) -> list[str]:
+    """Custom check functions: `check(output, state) -> True | None | False | str`.
+
+    True/None passes; False fails with a generic reason; a string fails with that reason.
+    """
+    import importlib
+
+    reasons: list[str] = []
+    output = _final_output_text(updates, messages_key)
+    merged = {**dict(state), **{k: v for k, v in updates.items() if k != messages_key}}
+    for dotted in policy["functions"]:
+        module_path, _, attr = dotted.rpartition(".")
+        verdict = getattr(importlib.import_module(module_path), attr)(output, merged)
+        if verdict is True or verdict is None:
+            continue
+        reasons.append(verdict if isinstance(verdict, str) and verdict else f"check '{dotted}' failed")
+    return reasons
+
+
+def _with_verification(node_id: str, messages_key: str, fn: Any) -> Any:
+    """Re-run an agent node with feedback until its output passes, bounded by max_attempts.
+
+    A failed attempt's updates are discarded; only the passing attempt reaches state.
+    Exhaustion routes to `retry.on_exhausted` when configured, otherwise raises.
+    """
+    policy = VERIFY_POLICY_BY_NODE[node_id]
+
+    def wrapper(state: AgentState) -> dict:
+        max_attempts = int(policy["max_attempts"])
+        attempt_state: Any = state
+        reasons: list[str] = []
+        for attempt in range(1, max_attempts + 1):
+            updates: dict | None = None
+            try:
+                updates = fn(attempt_state)
+                reasons = _run_verify_checks(node_id, policy, state, updates, messages_key)
+            except _OutputContractError as exc:
+                if not policy["output_contract"]:
+                    raise
+                reasons = [str(exc)]
+            if not reasons:
+                return updates  # type: ignore[return-value]
+            emit_trace_event(
+                "verification_failed",
+                node=node_id,
+                error="; ".join(reasons),
+                metadata={"attempt": attempt, "max_attempts": max_attempts},
+            )
+            if attempt < max_attempts:
+                feedback = HumanMessage(
+                    content="Your previous answer failed verification: "
+                    + "; ".join(reasons)
+                    + ". Correct it and answer again."
+                )
+                attempt_state = {**state, messages_key: list(state.get(messages_key) or []) + [feedback]}
+        error = VerificationError(
+            f"Node '{node_id}' failed verification after {max_attempts} attempts: " + "; ".join(reasons)
+        )
+        emit_trace_event(
+            "verification_exhausted",
+            node=node_id,
+            error=str(error),
+            metadata={"max_attempts": max_attempts},
+        )
+        clear_current_node()
+{% if fallback_nodes %}
+        on_exhausted = RETRY_POLICY_BY_NODE.get(node_id, {}).get("on_exhausted")
+        if on_exhausted:
+            raise _RetryFallback(node_id, on_exhausted, error)
+{% endif %}
+        raise error
+
+    wrapper.__name__ = getattr(fn, "__name__", node_id)
+    return wrapper
+
+
+{% endif %}
 def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
     retry_policy = RETRY_POLICY_BY_NODE.get(node_id, {})
     max_attempts = int(retry_policy.get("max_attempts") or 1)
@@ -354,6 +452,16 @@ def _emit_human_review_event(
     print(json.dumps(payload, sort_keys=True), file=sys.stderr)
 
 
+{% if verify_nodes %}
+class _OutputContractError(ValueError):
+    """Node output-contract failure (the only ValueError a verify loop re-attempts)."""
+
+
+class VerificationError(RuntimeError):
+    """A node's output failed verification on every attempt."""
+
+
+{% endif %}
 def _contract_error(
     node_id: str,
     message: str,
@@ -372,6 +480,10 @@ def _contract_error(
         metadata={"stage": stage, "contract_kind": contract_kind},
     )
     clear_current_node()
+{% if verify_nodes %}
+    if stage == "node_output_contract":
+        raise _OutputContractError(message)
+{% endif %}
     raise ValueError(message)
 
 
@@ -1467,6 +1579,12 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
 {% endif %}
 
 {% endif %}
+{% endfor %}
+{% for node in verify_nodes %}
+
+node_{{ node.id | safe_id }} = _with_verification(
+    "{{ node.id }}", "{{ node.node_def.metadata.get('abp_state_key_map', {}).get('messages', 'messages') }}", node_{{ node.id | safe_id }}
+)
 {% endfor %}
 {% for node in fallback_nodes %}
 

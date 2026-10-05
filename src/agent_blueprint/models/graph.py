@@ -29,6 +29,11 @@ class RetryPolicyDef(BaseModel):
     on: list[RetryCondition] = Field(default_factory=lambda: [RetryCondition.exception])
 
 
+class NodeRetryPolicyDef(RetryPolicyDef):
+    # Fallback route taken when the node's LLM call fails after all attempts.
+    on_exhausted: str | None = None
+
+
 class HandoffChannel(str, Enum):
     slack = "slack"
     email = "email"
@@ -76,7 +81,7 @@ class NodeDef(BaseModel):
     ref: str | None = None
     input_map: dict[str, str] = Field(default_factory=dict)
     output_map: dict[str, str] = Field(default_factory=dict)
-    retry: RetryPolicyDef = Field(default_factory=RetryPolicyDef)
+    retry: NodeRetryPolicyDef = Field(default_factory=NodeRetryPolicyDef)
     description: str | None = None
     action: str | None = None
     channel: HandoffChannel | None = None
@@ -169,6 +174,8 @@ class GraphDef(BaseModel):
                     f"Parallel node '{node_id}' branch node(s) cannot declare explicit outgoing edges: {rendered}"
                 )
 
+        self._validate_retry_fallbacks()
+
         worker_owner: dict[str, str] = {}
         for node_id, node in self.nodes.items():
             if node.type != NodeType.supervisor:
@@ -212,3 +219,29 @@ class GraphDef(BaseModel):
                     f"declare explicit outgoing edges: {rendered}"
                 )
         return self
+
+    def _validate_retry_fallbacks(self) -> None:
+        # Branches and supervisor workers converge through static edges, so a
+        # fallback reroute from them would also fire those edges.
+        converging = {b for n in self.nodes.values() if n.type == NodeType.parallel for b in n.branches}
+        converging |= {w for n in self.nodes.values() if n.type == NodeType.supervisor for w in n.workers}
+        for node_id, node in self.nodes.items():
+            target = node.retry.on_exhausted
+            if target is None:
+                continue
+            if node.type != NodeType.agent:
+                raise ValueError(
+                    f"Node '{node_id}': retry.on_exhausted is only supported on agent nodes "
+                    f"(it reroutes after the node's LLM call fails)"
+                )
+            if target not in self.nodes:
+                raise ValueError(
+                    f"Node '{node_id}' retry.on_exhausted target '{target}' is not defined in nodes"
+                )
+            if target == node_id:
+                raise ValueError(f"Node '{node_id}' retry.on_exhausted cannot target itself")
+            if node_id in converging:
+                raise ValueError(
+                    f"Node '{node_id}' is a parallel branch or supervisor worker and cannot "
+                    "declare retry.on_exhausted"
+                )

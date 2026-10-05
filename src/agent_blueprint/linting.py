@@ -82,6 +82,10 @@ def _unbounded_loops_for_graph(graph: GraphDef, *, location_prefix: str) -> list
                     adjacency[node_id].add(node.on_finish)
             else:
                 exits_to_end.add(node_id)  # supervisor finishes to END
+    for node_id, node in graph.nodes.items():
+        fallback = node.retry.on_exhausted
+        if fallback and fallback in adjacency:
+            adjacency[node_id].add(fallback)  # retry fallback is a real route
     for edge in graph.edges:
         if edge.from_node not in adjacency:
             continue
@@ -247,6 +251,9 @@ def _lint_unreachable_nodes(spec: BlueprintSpec) -> list[LintFinding]:
         for target in edge.get_targets():
             if target.target in spec.graph.nodes:
                 adjacency.setdefault(edge.from_node, set()).add(target.target)
+    for node_id, node in spec.graph.nodes.items():
+        if node.retry.on_exhausted:
+            adjacency.setdefault(node_id, set()).add(node.retry.on_exhausted)
 
     # Low-confidence escalation is a dynamic reroute: the generator injects the
     # escalation target into the router of every node that has an outgoing edge

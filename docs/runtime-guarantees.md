@@ -315,7 +315,30 @@ graph:
         on: [exception]
 ```
 
-`max_attempts` includes the first attempt. Every scheduled retry and exhausted retry emits a trace event, so mock, replay, and live runs expose the same retry lifecycle. Until fallback routing is added, exhausted retries fail deterministically.
+`max_attempts` includes the first attempt. Every scheduled retry and exhausted retry emits a trace event, so mock, replay, and live runs expose the same retry lifecycle. Node retry covers the node's LLM call (tool executions have their own [`tools.*.retry`](tools.md#per-tool-retry)). By default an exhausted retry fails the run deterministically.
+
+#### Fallback route: `retry.on_exhausted`
+
+Instead of failing the run, an agent node can reroute to another node once its LLM call is exhausted:
+
+```yaml
+graph:
+  nodes:
+    researcher:
+      agent: researcher
+      retry:
+        max_attempts: 2
+        on_exhausted: human_review   # any node in the same graph
+    human_review:
+      type: handoff
+      channel: slack
+```
+
+- The fallback fires only when the LLM call fails after the last attempt; it replaces that node's normal outgoing edge for that step. A run that succeeds never visits it.
+- Trace: `retry_scheduled` → `retry_exhausted` → `retry_fallback` (with the target).
+- The node's partial output is discarded (its updates never reach state); the fallback node sees the state from before the failed node ran.
+- Validation: only on `agent` nodes; the target must exist, cannot be the node itself, and the node cannot be a parallel branch or a supervisor worker. Inside a subgraph the target is a node of that subgraph; an outer node may target a subgraph node (it enters at the subgraph's entry).
+- Lint: a node reachable only via a fallback is not reported as unreachable, and a fallback counts as a route out of a loop for `unbounded-loop`.
 
 Real-life use case:
 

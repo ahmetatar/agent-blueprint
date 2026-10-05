@@ -66,7 +66,7 @@ def build_graph():
     # Add edges
 {% for edge in ir.edges %}
 {% if edge.is_conditional %}
-    def _route_{{ edge.from_node | safe_id }}(state: AgentState) -> str:
+    def _route_{{ edge.from_node | safe_id }}(state) -> str:
 {% if ir.policies and ir.policies.escalation.on_low_confidence %}
         if (
             state.get("__abp_escalation_target")
@@ -100,7 +100,7 @@ def build_graph():
     )
 {% else %}
 {% if ir.policies and ir.policies.escalation.on_low_confidence %}
-    def _route_{{ edge.from_node | safe_id }}(state: AgentState) -> str:
+    def _route_{{ edge.from_node | safe_id }}(state) -> str:
         if (
             state.get("__abp_escalation_target")
             and state.get("__abp_escalation_source") == "{{ edge.from_node }}"

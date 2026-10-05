@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent_blueprint.models.graph import RetryPolicyDef
+
 
 class ToolType(str, Enum):
     function = "function"
@@ -63,6 +65,8 @@ class ToolDef(BaseModel):
     idempotent: bool | None = None
     # Explicit waiver of the approval that `irreversible` tools otherwise imply.
     approval_waived: bool = False
+    # Retries the tool execution itself (after approval), not the LLM call.
+    retry: RetryPolicyDef | None = None
 
     # api tool fields
     method: HttpMethod | None = None
@@ -102,6 +106,17 @@ class ToolDef(BaseModel):
             raise ValueError("'approval_waived' is only valid for side_effect: irreversible")
         if self.approval_waived and self.requires_approval:
             raise ValueError("'approval_waived' conflicts with 'requires_approval: true'")
+        if (
+            self.retry is not None
+            and self.retry.max_attempts > 1
+            and self.side_effect in (SideEffect.write, SideEffect.irreversible)
+            and self.idempotent is not True
+        ):
+            raise ValueError(
+                f"unsafe-retry: tool retries (max_attempts={self.retry.max_attempts}) on a "
+                f"side_effect: {self.side_effect.value} tool require 'idempotent: true'; "
+                "a retried call may repeat an effect that already happened"
+            )
         return self
 
     @property

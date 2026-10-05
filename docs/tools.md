@@ -230,7 +230,26 @@ tools:
 
 - `side_effect: irreversible` **implies `requires_approval`**: the generated tool is gated exactly like an explicit `requires_approval: true` tool. To opt out deliberately, add `approval_waived: true` (only valid with `irreversible`, and not together with `requires_approval: true`).
 - `retrieval` tools are read-only; `side_effect: write | irreversible` is rejected.
-- `idempotent` is declarative metadata for now. It is the input that retry and fallback safety checks (roadmap items 2b and 3) will build on.
+- `idempotent: true` declares that repeating a call with the same arguments is safe. It is what allows a mutating tool to be retried (see below).
+
+### Per-tool retry
+
+`retry` re-runs the tool execution itself on exception, using the same shape as node-level `retry` (`max_attempts`, `backoff_seconds`). Node-level `retry` only retries the LLM call; it never re-runs tools.
+
+```yaml
+tools:
+  fetch_invoice:
+    type: api
+    url: https://billing.example.com/invoice
+    method: GET
+    side_effect: read
+    retry: { max_attempts: 3, backoff_seconds: 0.5 }
+```
+
+- Approval is checked once, before the first attempt; retries do not re-ask.
+- Each failed attempt emits `retry_scheduled` (with `tool`), and giving up emits `retry_exhausted` followed by `tool_failed`.
+- **Validation:** `retry.max_attempts > 1` on a `write` or `irreversible` tool is rejected unless the tool declares `idempotent: true` (`unsafe-retry`).
+- **Lint `unsafe-retry` (warning):** a retried non-GET `api` tool that declares no `side_effect` at all. Declare `side_effect` and `idempotent` so a retry cannot silently repeat a write.
 
 ### Tool usage limits
 

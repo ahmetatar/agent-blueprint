@@ -40,7 +40,7 @@ dev = [
     "pre-commit>=3.7",
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "ruff>=0.4",
+    "ruff>=0.4,<0.16",
     "mypy>=1.8",
     # editor server deps + httpx, so tests exercise the editor API (TestClient)
     "fastapi>=0.115",

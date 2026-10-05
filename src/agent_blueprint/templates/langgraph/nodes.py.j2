@@ -82,6 +82,8 @@ CONTEXT_POLICY_BY_NODE = {
     "{{ node.id }}": {
         "max_messages": {{ node.agent.memory.max_messages | to_python }},
         "max_tokens": {{ node.agent.memory.max_tokens | to_python }},
+        "max_tool_result_chars": {{ node.agent.memory.max_tool_result_chars | to_python }},
+        "keep_recent_tool_results": {{ node.agent.memory.keep_recent_tool_results | to_python }},
     },
 {% endfor %}
 }
@@ -146,6 +148,40 @@ def _is_system(msg: Any) -> bool:
     return isinstance(msg, SystemMessage) or getattr(msg, "type", None) == "system"
 
 
+def _compact_tool_results(
+    body: list,
+    max_chars: int | None,
+    keep_recent: int | None,
+) -> tuple[list, dict[int, int]]:
+    """Shrink bulky tool results in the LLM view; returns (messages, {id(copy): chars_saved})."""
+    import copy
+    import hashlib
+
+    tool_idx = [i for i, m in enumerate(body) if getattr(m, "type", None) == "tool"]
+    stale = set(tool_idx[:-keep_recent]) if keep_recent is not None else set()
+    out = list(body)
+    saved: dict[int, int] = {}
+    for i in tool_idx:
+        content = str(getattr(body[i], "content", "") or "")
+        if i in stale:
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+            new_content = f"[tool result compacted: {len(content)} chars, sha256:{digest}]"
+        elif max_chars is not None and len(content) > max_chars:
+            head_n = max_chars // 2
+            tail_n = max_chars - head_n
+            omitted = len(content) - max_chars
+            new_content = content[:head_n] + f"\n[... {omitted} chars omitted ...]\n" + content[-tail_n:]
+        else:
+            continue
+        if len(new_content) >= len(content):
+            continue
+        shrunk = copy.copy(body[i])
+        shrunk.content = new_content
+        out[i] = shrunk
+        saved[id(shrunk)] = len(content) - len(new_content)
+    return out, saved
+
+
 def _apply_context_policy(node_id: str, working: list) -> list:
     """Return the LLM-bound view of `working` under the node's memory limits.
 
@@ -158,10 +194,13 @@ def _apply_context_policy(node_id: str, working: list) -> list:
         return working
     max_messages = policy.get("max_messages")
     max_tokens = policy.get("max_tokens")
+    max_tool_chars = policy.get("max_tool_result_chars")
+    keep_recent = policy.get("keep_recent_tool_results")
     head_len = 0
     while head_len < len(working) and _is_system(working[head_len]):
         head_len += 1
     head, body = working[:head_len], working[head_len:]
+    body, compacted = _compact_tool_results(body, max_tool_chars, keep_recent)
     units: list[list] = []
     for msg in body:
         if getattr(msg, "type", None) == "tool" and units:
@@ -188,18 +227,31 @@ def _apply_context_policy(node_id: str, working: list) -> list:
         start = first_human
     kept = [m for u in units[start:] for m in u]
     dropped = len(body) - len(kept)
-    if dropped <= 0:
+    kept_compacted = [id(m) for m in kept if id(m) in compacted]
+    if dropped <= 0 and not kept_compacted:
         return working
-    emit_trace_event(
-        "context_trimmed",
-        node=node_id,
-        metadata={
-            "dropped_messages": dropped,
-            "kept_messages": len(kept) + len(head),
-            "max_messages": max_messages,
-            "max_tokens": max_tokens,
-        },
-    )
+    if dropped > 0:
+        emit_trace_event(
+            "context_trimmed",
+            node=node_id,
+            metadata={
+                "dropped_messages": dropped,
+                "kept_messages": len(kept) + len(head),
+                "max_messages": max_messages,
+                "max_tokens": max_tokens,
+            },
+        )
+    if kept_compacted:
+        emit_trace_event(
+            "context_compacted",
+            node=node_id,
+            metadata={
+                "compacted_results": len(kept_compacted),
+                "chars_saved": sum(compacted[i] for i in kept_compacted),
+                "max_tool_result_chars": max_tool_chars,
+                "keep_recent_tool_results": keep_recent,
+            },
+        )
     return head + kept
 
 

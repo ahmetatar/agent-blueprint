@@ -21,6 +21,12 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `idempotent`, `approval_waived`). `irreversible` implies the approval gate
   unless waived. See `docs/tools.md`.
 
+- Per-tool retry (`tools.*.retry`) around tool execution, with
+  `retry_scheduled` / `retry_exhausted` trace events carrying the tool name.
+  Retrying a `write`/`irreversible` tool requires `idempotent: true`; new
+  `unsafe-retry` lint warns on retried non-GET api tools with no declared
+  `side_effect`.
+
 ### Changed
 
 - **Breaking (fail-loud):** `agents.*.memory.type: summary` and `vector` were

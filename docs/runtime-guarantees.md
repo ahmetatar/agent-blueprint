@@ -70,6 +70,10 @@ Real-life use case:
 
 - a router keeps bouncing between two nodes because of a bad condition; the run terminates with a concrete step-limit error instead of hanging
 
+### Tool retry safety
+
+`tools.*.retry` retries the tool execution (approval is asked once). Retrying a `write` or `irreversible` tool that is not declared `idempotent: true` fails validation, so a retry cannot silently repeat a side effect. See [Tools](tools.md#per-tool-retry).
+
 ### 3. Tool approvals and human review
 
 ABP enforces both tool-level approvals and agent-level human review triggers.

@@ -58,7 +58,7 @@ Split into two steps:
 trimming and tool-output compaction without changing checkpointed state;
 `docs/memory.md` updated.
 
-## 2. Tool idempotency and side-effect metadata: `in progress`
+## 2. Tool idempotency and side-effect metadata: `done` (idempotency-key argument deferred)
 
 **Gap.** Tools have `requires_approval` but no notion of side effects or
 idempotency, so retry and approval cannot be reasoned about safely.
@@ -75,7 +75,7 @@ fallback routes, verification loops), so the safety checks are tied to those.
 - `irreversible` implies the approval gate unless explicitly waived; retrieval
   tools cannot be `write`/`irreversible`.
 
-### 2b. Per-tool retry and `unsafe-retry`: `todo`
+### 2b. Per-tool retry and `unsafe-retry`: `done`
 - `tools.*.retry` (max_attempts, backoff, on) enforced around tool execution.
 - Validator/lint `unsafe-retry`: retry on a `write`/`irreversible` tool that is
   not declared `idempotent: true` is an error.

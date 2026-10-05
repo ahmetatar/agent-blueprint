@@ -44,6 +44,7 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
     findings.extend(_lint_mutation_patterns(spec))
     findings.extend(_lint_parallel_branch_conflicts(spec))
     findings.extend(_lint_unbounded_loops(spec))
+    findings.extend(_lint_unsafe_tool_retries(spec))
     return findings
 
 
@@ -159,6 +160,33 @@ def _strongly_connected_components(adjacency: dict[str, set[str]]) -> list[set[s
                     pending.append(parent)
         components.append(component)
     return components
+
+
+def _lint_unsafe_tool_retries(spec: BlueprintSpec) -> list[LintFinding]:
+    """A retried tool whose side effects are undeclared may repeat a write.
+
+    Declared write/irreversible tools without `idempotent: true` are rejected at
+    validation time; this covers the undeclared case for tools that are
+    obviously mutating (non-GET api tools).
+    """
+    findings: list[LintFinding] = []
+    for name, tool in sorted(spec.tools.items()):
+        if tool.retry is None or tool.retry.max_attempts <= 1:
+            continue
+        if tool.side_effect is not None or tool.method is None or tool.method.value == "GET":
+            continue
+        findings.append(LintFinding(
+            severity=LintSeverity.warning,
+            code="unsafe-retry",
+            location=f"tools.{name}",
+            message=(
+                f"Tool '{name}' retries a {tool.method.value} call "
+                f"(max_attempts={tool.retry.max_attempts}) but declares no side_effect. "
+                "Declare 'side_effect' and 'idempotent' so a retry cannot silently repeat a write."
+            ),
+            autofixable=False,
+        ))
+    return findings
 
 
 def _lint_parallel_branch_conflicts(spec: BlueprintSpec) -> list[LintFinding]:

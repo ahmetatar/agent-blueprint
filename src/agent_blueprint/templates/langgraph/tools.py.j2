@@ -260,6 +260,57 @@ _ABP_RETRIEVERS = {
 
 {% endif %}
 
+{% set retry_tools = ir.all_tools.items() | selectattr("1.retry") | list %}
+{% if retry_tools %}
+TOOL_RETRY_POLICY = {
+{% for tool_name, tool_def in retry_tools %}
+    "{{ tool_name }}": {
+        "max_attempts": {{ tool_def.retry.max_attempts | to_python }},
+        "backoff_seconds": {{ tool_def.retry.backoff_seconds | to_python }},
+    },
+{% endfor %}
+}
+
+
+def _retry_tool_call(tool_name: str, call: Any) -> Any:
+    """Run the tool body with its retry policy (approval already granted, never re-asked)."""
+    from time import sleep
+
+    policy = TOOL_RETRY_POLICY[tool_name]
+    max_attempts = int(policy.get("max_attempts") or 1)
+    backoff_seconds = float(policy.get("backoff_seconds") or 0.0)
+    attempt = 1
+    while True:
+        try:
+            return call()
+        except Exception as exc:
+            if attempt >= max_attempts:
+                if max_attempts > 1:
+                    emit_trace_event(
+                        "retry_exhausted",
+                        tool=tool_name,
+                        error=str(exc),
+                        metadata={"attempt": attempt, "max_attempts": max_attempts, "condition": "exception"},
+                    )
+                raise
+            emit_trace_event(
+                "retry_scheduled",
+                tool=tool_name,
+                error=str(exc),
+                metadata={
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "max_attempts": max_attempts,
+                    "condition": "exception",
+                    "backoff_seconds": backoff_seconds,
+                },
+            )
+            if backoff_seconds > 0:
+                sleep(backoff_seconds)
+            attempt += 1
+
+
+{% endif %}
 {% for tool_name, tool_def in ir.all_tools.items() %}
 {% if tool_def.type.value == "function" %}
 {% if tool_def.impl %}
@@ -285,11 +336,19 @@ def _approved_{{ tool_name | safe_id }}(
         )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
+{% if tool_def.retry %}
+        result = _retry_tool_call("{{ tool_name }}", lambda: {{ p.alias }}(
+{% for param_name, param_def in tool_def.parameters.items() %}
+            {{ param_name }}={{ param_name }}{% if not loop.last %},{% endif %}
+{% endfor %}
+        ))
+{% else %}
         result = {{ p.alias }}(
 {% for param_name, param_def in tool_def.parameters.items() %}
             {{ param_name }}={{ param_name }}{% if not loop.last %},{% endif %}
 {% endfor %}
         )
+{% endif %}
         record_tool_output("{{ tool_name }}", {"result": result})
         return result
     except Exception as exc:
@@ -367,10 +426,21 @@ def {{ tool_name }}(
         headers = {}
 {% endif %}
         url = "{{ tool_def.url }}"
+{% if tool_def.retry %}
+        def _abp_http_call() -> str:
+            response = httpx.{{ tool_def.method.value.lower() }}(url, headers=headers)
+            response.raise_for_status()
+            return str(response.text)
+
+        body_text = _retry_tool_call("{{ tool_name }}", _abp_http_call)
+        record_tool_output("{{ tool_name }}", {"result": body_text})
+        return body_text
+{% else %}
         response = httpx.{{ tool_def.method.value.lower() }}(url, headers=headers)
         response.raise_for_status()
         record_tool_output("{{ tool_name }}", {"result": response.text})
         return response.text
+{% endif %}
     except Exception as exc:
         record_tool_output("{{ tool_name }}", {"error": str(exc)})
         emit_trace_event("tool_failed", tool="{{ tool_name }}", args=_abp_args, error=str(exc))
@@ -392,7 +462,14 @@ def {{ tool_name }}(query: str) -> str:
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
         retriever = _ABP_RETRIEVERS["{{ tool_def.retriever }}"]
+{% if tool_def.retry %}
+        result = _retry_tool_call(
+            "{{ tool_name }}",
+            lambda: retriever["impl"](query=query, top_k={{ tool_def.top_k }}, config=retriever["config"]),
+        )
+{% else %}
         result = retriever["impl"](query=query, top_k={{ tool_def.top_k }}, config=retriever["config"])
+{% endif %}
         formatted = _format_retrieval_result(result)
         record_tool_output("{{ tool_name }}", {"result": formatted})
         return formatted

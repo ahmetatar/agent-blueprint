@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MemoryBackend(str, Enum):
@@ -27,8 +27,8 @@ class AgentMemoryType(str, Enum):
 
 class AgentMemoryConfig(BaseModel):
     type: AgentMemoryType = AgentMemoryType.conversation_buffer
-    max_tokens: int | None = None
-    max_messages: int | None = None
+    max_tokens: int | None = Field(default=None, gt=0)
+    max_messages: int | None = Field(default=None, gt=0)
 
 
 class MemoryConfig(BaseModel):

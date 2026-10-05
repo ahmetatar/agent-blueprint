@@ -48,6 +48,7 @@ class TraceEventType(str, Enum):
     artifact_written = "artifact_written"
     retry_scheduled = "retry_scheduled"
     retry_exhausted = "retry_exhausted"
+    context_trimmed = "context_trimmed"
     parallel_started = "parallel_started"
     parallel_finished = "parallel_finished"
     subgraph_entered = "subgraph_entered"

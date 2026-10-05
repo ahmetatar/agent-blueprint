@@ -97,7 +97,7 @@ runtime; docs in `docs/tools.md` and `docs/runtime-guarantees.md`.
 - Extra retry conditions (e.g. output-contract violation, timeout).
 - Trace events for fallback taken.
 
-### 3b. Verification loop (self-check): `todo`
+### 3b. Verification loop (self-check): `done` (contract + custom-function checks; LLM/rubric judge deferred)
 - First-class `verify` block on agent nodes: after the agent produces output,
   run declared checks (output contract, state invariants, custom function, or
   an LLM/rubric judge) and, on failure, re-enter the agent with the failure

@@ -65,6 +65,16 @@ def _check_impl_imports(spec: BlueprintSpec) -> list[DoctorFinding]:
                 message=f"Could not import '{tool.impl}'",
             ))
 
+    for node_id, node in spec.graph.nodes.items():
+        for dotted in (node.verify.functions if node.verify else []):
+            if _resolve_impl_error(dotted):
+                findings.append(DoctorFinding(
+                    severity=DoctorSeverity.error,
+                    code="unresolved-impl-import",
+                    location=f"graph.nodes.{node_id}.verify.functions",
+                    message=f"Could not import '{dotted}'",
+                ))
+
     for retriever_name, retriever in spec.retrievers.items():
         if _resolve_impl_error(retriever.impl):
             findings.append(DoctorFinding(

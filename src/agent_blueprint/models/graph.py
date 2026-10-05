@@ -34,6 +34,23 @@ class NodeRetryPolicyDef(RetryPolicyDef):
     on_exhausted: str | None = None
 
 
+class VerifyDef(BaseModel):
+    """Bounded self-check loop: re-run an agent node with feedback until it passes."""
+
+    max_attempts: int = Field(default=2, ge=2)  # total attempts, including the first
+    output_contract: bool = False  # re-attempt on node output-contract failure
+    functions: list[str] = Field(default_factory=list)  # dotted `module.attr` check functions
+
+    @model_validator(mode="after")
+    def validate_checks(self) -> "VerifyDef":
+        if not self.output_contract and not self.functions:
+            raise ValueError("verify needs at least one check: 'output_contract' or 'functions'")
+        for path in self.functions:
+            if "." not in path:
+                raise ValueError(f"verify function '{path}' must be a dotted 'module.attr' path")
+        return self
+
+
 class HandoffChannel(str, Enum):
     slack = "slack"
     email = "email"
@@ -82,6 +99,7 @@ class NodeDef(BaseModel):
     input_map: dict[str, str] = Field(default_factory=dict)
     output_map: dict[str, str] = Field(default_factory=dict)
     retry: NodeRetryPolicyDef = Field(default_factory=NodeRetryPolicyDef)
+    verify: VerifyDef | None = None
     description: str | None = None
     action: str | None = None
     channel: HandoffChannel | None = None
@@ -122,6 +140,8 @@ class NodeDef(BaseModel):
                 raise ValueError("'workers' is only valid on supervisor nodes")
             if self.on_finish is not None:
                 raise ValueError("'on_finish' is only valid on supervisor nodes")
+        if self.verify is not None and self.type != NodeType.agent:
+            raise ValueError("'verify' is only supported on agent nodes")
         if self.type == NodeType.handoff and not self.channel:
             self.channel = HandoffChannel.console
         return self

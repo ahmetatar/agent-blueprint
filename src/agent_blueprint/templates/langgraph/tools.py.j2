@@ -281,7 +281,7 @@ def _approved_{{ tool_name | safe_id }}(
         _require_approval(
             "{{ tool_name }}",
             _abp_args,
-            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+            per_tool_requires_approval={{ tool_def.effective_requires_approval | to_python }},
         )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
@@ -319,7 +319,7 @@ def {{ tool_name }}(
         _require_approval(
             "{{ tool_name }}",
             _abp_args,
-            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+            per_tool_requires_approval={{ tool_def.effective_requires_approval | to_python }},
         )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
@@ -353,7 +353,7 @@ def {{ tool_name }}(
         _require_approval(
             "{{ tool_name }}",
             _abp_args,
-            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+            per_tool_requires_approval={{ tool_def.effective_requires_approval | to_python }},
         )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)
@@ -387,7 +387,7 @@ def {{ tool_name }}(query: str) -> str:
         _require_approval(
             "{{ tool_name }}",
             _abp_args,
-            per_tool_requires_approval={{ tool_def.requires_approval | to_python }},
+            per_tool_requires_approval={{ tool_def.effective_requires_approval | to_python }},
         )
         if tool_mode() in {"stub", "replay"}:
             return _maybe_stub_tool("{{ tool_name }}", _abp_args)

@@ -58,18 +58,28 @@ Split into two steps:
 trimming and tool-output compaction without changing checkpointed state;
 `docs/memory.md` updated.
 
-## 2. Tool idempotency and side-effect metadata: `todo`
+## 2. Tool idempotency and side-effect metadata: `in progress`
 
 **Gap.** Tools have `requires_approval` but no notion of side effects or
 idempotency, so retry and approval cannot be reasoned about safely.
 
-**Scope.**
-- `tools.*.side_effect: none | read | write | irreversible` and
-  `idempotent: bool` (optional idempotency-key argument).
-- Validator: retrying a node that calls a non-idempotent write tool is an
-  error/warning; `irreversible` implies approval unless explicitly waived.
-- New lint (`unsafe-retry`) built on this metadata.
-- Per-tool retry override (today retry is node-level only).
+**Finding.** Node-level `retry` today wraps only the LLM call
+(`_invoke_llm_with_retry`); tool executions are never re-run by it. An
+`unsafe-retry` lint on node retry would therefore be a false alarm. The real
+hazard appears once tools themselves are retried or re-entered (per-tool retry,
+fallback routes, verification loops), so the safety checks are tied to those.
+
+### 2a. Metadata and approval implication: `done`
+- `tools.*.side_effect: none | read | write | irreversible`, `idempotent: bool`,
+  `approval_waived: bool`.
+- `irreversible` implies the approval gate unless explicitly waived; retrieval
+  tools cannot be `write`/`irreversible`.
+
+### 2b. Per-tool retry and `unsafe-retry`: `todo`
+- `tools.*.retry` (max_attempts, backoff, on) enforced around tool execution.
+- Validator/lint `unsafe-retry`: retry on a `write`/`irreversible` tool that is
+  not declared `idempotent: true` is an error.
+- Optional idempotency-key argument.
 
 **Done when.** Retry + approval interplay is checked statically and enforced at
 runtime; docs in `docs/tools.md` and `docs/runtime-guarantees.md`.

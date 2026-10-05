@@ -13,6 +13,13 @@ class ToolType(str, Enum):
     mcp = "mcp"
 
 
+class SideEffect(str, Enum):
+    none = "none"
+    read = "read"
+    write = "write"
+    irreversible = "irreversible"
+
+
 class HttpMethod(str, Enum):
     GET = "GET"
     POST = "POST"
@@ -51,6 +58,12 @@ class ToolDef(BaseModel):
     returns: ParameterDef | None = None
     requires_approval: bool = False
 
+    # side-effect metadata (opt-in; undeclared tools keep today's behaviour)
+    side_effect: SideEffect | None = None
+    idempotent: bool | None = None
+    # Explicit waiver of the approval that `irreversible` tools otherwise imply.
+    approval_waived: bool = False
+
     # api tool fields
     method: HttpMethod | None = None
     url: str | None = None
@@ -80,4 +93,20 @@ class ToolDef(BaseModel):
             raise ValueError("mcp tools require 'server' and 'tool' fields")
         if self.impl and self.type != ToolType.function:
             raise ValueError("'impl' is only valid for function tools")
+        if self.type == ToolType.retrieval and self.side_effect in (
+            SideEffect.write,
+            SideEffect.irreversible,
+        ):
+            raise ValueError("retrieval tools are read-only; side_effect cannot be write or irreversible")
+        if self.approval_waived and self.side_effect != SideEffect.irreversible:
+            raise ValueError("'approval_waived' is only valid for side_effect: irreversible")
+        if self.approval_waived and self.requires_approval:
+            raise ValueError("'approval_waived' conflicts with 'requires_approval: true'")
         return self
+
+    @property
+    def effective_requires_approval(self) -> bool:
+        """Approval gate actually enforced: explicit flag, or implied by `irreversible`."""
+        if self.requires_approval:
+            return True
+        return self.side_effect == SideEffect.irreversible and not self.approval_waived

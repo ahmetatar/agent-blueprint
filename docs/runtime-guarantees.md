@@ -77,6 +77,7 @@ ABP enforces both tool-level approvals and agent-level human review triggers.
 Use cases covered today:
 
 - `requires_approval` on sensitive tools
+- `side_effect: irreversible` on a tool, which implies approval unless explicitly waived with `approval_waived: true` ([details](tools.md#side-effect-metadata))
 - `policies.approvals` with `mode: all` (every tool call needs approval) or
   `mode: selective` (only the tools listed in `policies.approvals.tools`)
 - `policies.approvals.on_violation: block` (default — unapproved calls raise) or

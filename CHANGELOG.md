@@ -17,6 +17,10 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   (head + tail) and stale ones stubbed in the LLM view only, with a
   `context_compacted` trace event. See `docs/memory.md`.
 
+- Tool side-effect metadata (`tools.*.side_effect: none|read|write|irreversible`,
+  `idempotent`, `approval_waived`). `irreversible` implies the approval gate
+  unless waived. See `docs/tools.md`.
+
 ### Changed
 
 - **Breaking (fail-loud):** `agents.*.memory.type: summary` and `vector` were

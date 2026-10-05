@@ -27,6 +27,14 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `unsafe-retry` lint warns on retried non-GET api tools with no declared
   `side_effect`.
 
+### Fixed
+
+- Low-confidence escalation (`policies.escalation.on_low_confidence`) never
+  rerouted on a real LangGraph run: the generated conditional-edge routers were
+  annotated with the state TypedDict, which makes LangGraph hide the node's
+  undeclared `__abp_escalation_*` signal keys from them. Routers are now
+  unannotated. Covered by new end-to-end tests on the real runtime.
+
 ### Changed
 
 - **Breaking (fail-loud):** `agents.*.memory.type: summary` and `vector` were

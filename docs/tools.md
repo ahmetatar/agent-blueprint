@@ -210,6 +210,28 @@ This is useful for actions like:
 - ticket closure
 - external writes
 
+### Side-effect metadata
+
+Declare what a tool does to the outside world. All fields are optional; tools that declare nothing behave exactly as before.
+
+```yaml
+tools:
+  lookup_order:
+    type: function
+    side_effect: read          # none | read | write | irreversible
+  update_ticket:
+    type: function
+    side_effect: write
+    idempotent: true           # safe to repeat with the same arguments
+  delete_account:
+    type: function
+    side_effect: irreversible  # implies approval (see below)
+```
+
+- `side_effect: irreversible` **implies `requires_approval`**: the generated tool is gated exactly like an explicit `requires_approval: true` tool. To opt out deliberately, add `approval_waived: true` (only valid with `irreversible`, and not together with `requires_approval: true`).
+- `retrieval` tools are read-only; `side_effect: write | irreversible` is rejected.
+- `idempotent` is declarative metadata for now. It is the input that retry and fallback safety checks (roadmap items 2b and 3) will build on.
+
 ### Tool usage limits
 
 Use `policies.tool_usage` when an agent should not be allowed to spam tools:

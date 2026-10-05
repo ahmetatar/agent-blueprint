@@ -12,6 +12,10 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `max_messages` / `max_tokens` now trim the LLM-bound context (never the
   checkpointed state), keeping system messages and tool-call/result pairs
   intact, with a `context_trimmed` trace event. See `docs/memory.md`.
+- Tool-output compaction (`agents.*.memory.max_tool_result_chars`,
+  `keep_recent_tool_results`): oversized tool results are truncated
+  (head + tail) and stale ones stubbed in the LLM view only, with a
+  `context_compacted` trace event. See `docs/memory.md`.
 
 ### Changed
 

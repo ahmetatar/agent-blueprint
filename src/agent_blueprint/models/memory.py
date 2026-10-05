@@ -29,6 +29,10 @@ class AgentMemoryConfig(BaseModel):
     type: AgentMemoryType = AgentMemoryType.conversation_buffer
     max_tokens: int | None = Field(default=None, gt=0)
     max_messages: int | None = Field(default=None, gt=0)
+    # Tool-output compaction (LLM view only): cap each tool result, and stub out
+    # results older than the most recent N.
+    max_tool_result_chars: int | None = Field(default=None, gt=0)
+    keep_recent_tool_results: int | None = Field(default=None, gt=0)
 
 
 class MemoryConfig(BaseModel):

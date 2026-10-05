@@ -105,4 +105,19 @@ Applied just before every LLM call of that agent (including each step of a tool 
 - `max_tokens` uses a deterministic ~4 characters/token estimate (no tokenizer dependency), so mock/replay runs are reproducible.
 - When messages are dropped, a `context_trimmed` trace event is emitted (`dropped_messages`, `kept_messages`, the configured limits; no content).
 
+### Tool-output compaction
+
+Tool results can dominate a long tool loop. Two optional limits shrink them in the LLM view only (the checkpointed `messages` keep the full result):
+
+```yaml
+memory:
+  max_tool_result_chars: 4000     # longer results keep head + tail with an "omitted" marker
+  keep_recent_tool_results: 3     # older results become a stub: size + sha256 prefix
+```
+
+- Compaction runs before the `max_messages` / `max_tokens` window, so a compacted result may keep a tool exchange that would otherwise be evicted.
+- The tool-call / tool-result pairing is preserved (only the content changes); a stub or marker is never used when it would be larger than the original.
+- A `context_compacted` trace event records `compacted_results`, `chars_saved` and the configured limits (sizes only, no content). It is emitted on each LLM call that compacts something, so a tool loop can emit it repeatedly.
+- Both values must be positive integers. LLM-based summarization of tool output is not implemented.
+
 `type: summary` and `type: vector` are **not implemented yet**: `abp generate` fails and `abp doctor` reports an error instead of silently ignoring them. `max_messages` / `max_tokens` must be positive integers.

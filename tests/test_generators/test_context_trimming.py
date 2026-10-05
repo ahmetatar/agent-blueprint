@@ -162,3 +162,86 @@ class TestRuntimeTrimming:
         # limit 2 would otherwise keep [tool, human] (orphaned ToolMessage)
         seen, _, _, _ = _run_node(tmp_path, monkeypatch, {"max_messages": 2}, build)
         assert [m.content for m in seen] == ["new question"]
+
+
+def _tool_turns(m, results: list[str]) -> list:
+    """Human, then one (assistant tool call, tool result) pair per result."""
+    ai_message = sys.modules["langchain_core.messages"].AIMessage
+    msgs: list = [m.HumanMessage("go")]
+    for i, content in enumerate(results):
+        msgs.append(ai_message("", tool_calls=[{"name": "t", "args": {}, "id": str(i)}]))
+        msgs.append(m.ToolMessage(content, str(i)))
+    return msgs
+
+
+class TestToolOutputCompaction:
+    @pytest.mark.parametrize("field", ["max_tool_result_chars", "keep_recent_tool_results"])
+    def test_non_positive_limits_rejected(self, field):
+        with pytest.raises(ValidationError):
+            BlueprintSpec.model_validate(_spec({field: 0}))
+
+    def test_memory_with_only_compaction_fields_renders_policy(self):
+        nodes_py = _generate({"max_tool_result_chars": 50})["nodes.py"]
+        assert '"max_tool_result_chars": 50' in nodes_py
+        assert "_compact_tool_results" in nodes_py
+
+    def test_oversized_result_truncated_head_and_tail_state_untouched(self, tmp_path, monkeypatch):
+        big = "A" * 100 + "Z" * 100
+        seen, events, state, _ = _run_node(
+            tmp_path,
+            monkeypatch,
+            {"max_tool_result_chars": 20},
+            lambda m: _tool_turns(m, [big]),
+        )
+        tool_view = [x for x in seen if getattr(x, "type", None) == "tool"][0]
+        assert tool_view.content.startswith("A" * 10)
+        assert tool_view.content.endswith("Z" * 10)
+        assert "180 chars omitted" in tool_view.content
+        # checkpointed message is the original object, still full size
+        assert [x for x in state["messages"] if getattr(x, "type", None) == "tool"][0].content == big
+        compacted = [e for e in events if e["event"] == "context_compacted"]
+        assert len(compacted) == 1
+        assert compacted[0]["metadata"]["compacted_results"] == 1
+        assert compacted[0]["metadata"]["chars_saved"] > 0
+        assert not [e for e in events if e["event"] == "context_trimmed"]
+        assert big not in str(events)  # hashes/sizes only, never content
+
+    def test_old_results_stubbed_recent_kept(self, tmp_path, monkeypatch):
+        results = ["first-" + "x" * 80, "second-" + "y" * 80, "third-" + "z" * 80]
+        seen, events, _, _ = _run_node(
+            tmp_path,
+            monkeypatch,
+            {"keep_recent_tool_results": 1},
+            lambda m: _tool_turns(m, results),
+        )
+        tool_view = [x.content for x in seen if getattr(x, "type", None) == "tool"]
+        assert tool_view[0].startswith("[tool result compacted: 86 chars, sha256:")
+        assert tool_view[1].startswith("[tool result compacted:")
+        assert tool_view[2] == results[2]
+        # tool-call/result pairing preserved: same message count and order
+        assert len(seen) == 7
+        event = [e for e in events if e["event"] == "context_compacted"][0]
+        assert event["metadata"]["compacted_results"] == 2
+
+    def test_stub_not_used_when_larger_than_content(self, tmp_path, monkeypatch):
+        seen, events, _, _ = _run_node(
+            tmp_path,
+            monkeypatch,
+            {"keep_recent_tool_results": 1},
+            lambda m: _tool_turns(m, ["ok", "fine"]),
+        )
+        assert [x.content for x in seen if getattr(x, "type", None) == "tool"] == ["ok", "fine"]
+        assert not [e for e in events if e["event"] == "context_compacted"]
+
+    def test_compaction_shrinks_budget_before_window_trim(self, tmp_path, monkeypatch):
+        # Without compaction the 400-char result (~100 tokens) would blow the
+        # 60-token budget and evict the whole tool exchange.
+        seen, events, _, _ = _run_node(
+            tmp_path,
+            monkeypatch,
+            {"max_tokens": 60, "max_tool_result_chars": 40},
+            lambda m: _tool_turns(m, ["q" * 400]),
+        )
+        assert len(seen) == 3
+        assert not [e for e in events if e["event"] == "context_trimmed"]
+        assert [e for e in events if e["event"] == "context_compacted"]

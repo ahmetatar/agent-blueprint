@@ -44,7 +44,7 @@ Split into two steps:
 - `vector`: a retrieval concern overlapping `retrievers`/RAG; implement via
   that plumbing or keep rejected.
 
-### 1c. Tool-output compaction: `todo`
+### 1c. Tool-output compaction: `done` (agent-level limits; per-tool overrides and `summarize` mode deferred)
 - Long-running tool loops grow the working list with bulky tool results. Add a
   per-agent (and optional per-tool) cap on tool-result size applied to the
   LLM-bound working list only (truncate / head+tail / summarize), never to the

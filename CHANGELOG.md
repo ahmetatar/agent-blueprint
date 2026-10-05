@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+### Added
+
+- Agent memory enforcement (`agents.*.memory`, `type: conversation_buffer`):
+  `max_messages` / `max_tokens` now trim the LLM-bound context (never the
+  checkpointed state), keeping system messages and tool-call/result pairs
+  intact, with a `context_trimmed` trace event. See `docs/memory.md`.
+
+### Changed
+
+- **Breaking (fail-loud):** `agents.*.memory.type: summary` and `vector` were
+  silently ignored; `abp generate` now fails and `abp doctor` reports an error
+  for the langgraph target. Use `conversation_buffer` or remove the block.
+  `max_messages` / `max_tokens` must be > 0.
+
 ## [0.4.0] - 2026-06-21
 
 First beta release. The YAML → IR → LangGraph → deploy pipeline and its

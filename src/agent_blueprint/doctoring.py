@@ -154,6 +154,19 @@ def _check_target_compatibility(
                     ),
                 ))
 
+    if target == TargetFramework.langgraph:
+        for node in ir.nodes:
+            if node.agent and node.agent.memory and node.agent.memory.type.value != "conversation_buffer":
+                findings.append(DoctorFinding(
+                    severity=DoctorSeverity.error,
+                    code="target-incompatible-feature",
+                    location=f"graph.nodes.{node.id}",
+                    message=(
+                        f"Agent memory type '{node.agent.memory.type.value}' on node '{node.id}' is not "
+                        "supported by the langgraph generator yet; generation will fail"
+                    ),
+                ))
+
     if target == TargetFramework.crewai:
         findings.append(DoctorFinding(
             severity=DoctorSeverity.error,

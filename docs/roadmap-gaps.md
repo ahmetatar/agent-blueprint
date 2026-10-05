@@ -31,7 +31,7 @@ channel, so checkpoints, replay and harness results stay intact.
 
 Split into two steps:
 
-### 1a. `conversation_buffer` trimming: `todo`
+### 1a. `conversation_buffer` trimming: `done`
 - Enforce `max_messages` / `max_tokens` on the working list just before the
   LLM call (keep system prompt; keep tool-call/tool-result pairs together).
 - `summary` and `vector` fail at compile/doctor with a clear error (no silent

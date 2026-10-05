@@ -192,6 +192,21 @@ class LangGraphGenerator(BaseGenerator):
                 "remove them from agents' tool lists."
             )
 
+        # Only conversation_buffer memory is enforced; summary/vector would be
+        # silently ignored, so refuse to generate instead.
+        unsupported_memory = sorted(
+            f"node {node.id} ({node.agent.memory.type.value})"
+            for node in ir.nodes
+            if node.agent and node.agent.memory
+            and node.agent.memory.type.value != "conversation_buffer"
+        )
+        if unsupported_memory:
+            raise GeneratorError(
+                "Agent memory types other than 'conversation_buffer' are not supported "
+                f"by the langgraph generator yet: {', '.join(unsupported_memory)}. "
+                "Use type: conversation_buffer or remove the agent memory block."
+            )
+
         files: dict[str, str] = {}
 
         for template_name, output_name in _TEMPLATES:

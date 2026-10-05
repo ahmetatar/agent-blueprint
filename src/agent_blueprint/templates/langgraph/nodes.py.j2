@@ -75,6 +75,17 @@ RETRY_POLICY_BY_NODE = {
     },
 {% endfor %}
 }
+{% set context_nodes = ir.nodes | selectattr("agent") | selectattr("agent.memory") | list %}
+{% if context_nodes %}
+CONTEXT_POLICY_BY_NODE = {
+{% for node in context_nodes %}
+    "{{ node.id }}": {
+        "max_messages": {{ node.agent.memory.max_messages | to_python }},
+        "max_tokens": {{ node.agent.memory.max_tokens | to_python }},
+    },
+{% endfor %}
+}
+{% endif %}
 STATE_REDUCERS = {
 {% for field_name, field_def in ir.state.fields.items() %}
 {% if field_def.type == "list[message]" %}
@@ -125,6 +136,74 @@ def _llm_trace_payload(response: Any) -> dict[str, Any]:
     return payload
 
 
+{% if context_nodes %}
+def _approx_tokens(msg: Any) -> int:
+    # Deterministic estimate (~4 chars/token); no tokenizer dependency.
+    return max(1, len(str(getattr(msg, "content", "") or "")) // 4)
+
+
+def _is_system(msg: Any) -> bool:
+    return isinstance(msg, SystemMessage) or getattr(msg, "type", None) == "system"
+
+
+def _apply_context_policy(node_id: str, working: list) -> list:
+    """Return the LLM-bound view of `working` under the node's memory limits.
+
+    Only the view is trimmed; `working` and the checkpointed state are untouched.
+    System messages are never dropped, and an assistant tool call stays together
+    with its tool results.
+    """
+    policy = CONTEXT_POLICY_BY_NODE.get(node_id)
+    if not policy:
+        return working
+    max_messages = policy.get("max_messages")
+    max_tokens = policy.get("max_tokens")
+    head_len = 0
+    while head_len < len(working) and _is_system(working[head_len]):
+        head_len += 1
+    head, body = working[:head_len], working[head_len:]
+    units: list[list] = []
+    for msg in body:
+        if getattr(msg, "type", None) == "tool" and units:
+            units[-1].append(msg)
+        else:
+            units.append([msg])
+    head_tokens = sum(_approx_tokens(m) for m in head)
+
+    def _over(us: list[list]) -> bool:
+        flat = [m for u in us for m in u]
+        if max_messages is not None and len(flat) > max_messages:
+            return True
+        return max_tokens is not None and head_tokens + sum(_approx_tokens(m) for m in flat) > max_tokens
+
+    start = 0
+    while len(units) - start > 1 and _over(units[start:]):
+        start += 1
+    # Never open the window on a non-human message when a human turn is still kept.
+    first_human = next(
+        (i for i in range(start, len(units)) if getattr(units[i][0], "type", None) == "human"),
+        None,
+    )
+    if first_human is not None:
+        start = first_human
+    kept = [m for u in units[start:] for m in u]
+    dropped = len(body) - len(kept)
+    if dropped <= 0:
+        return working
+    emit_trace_event(
+        "context_trimmed",
+        node=node_id,
+        metadata={
+            "dropped_messages": dropped,
+            "kept_messages": len(kept) + len(head),
+            "max_messages": max_messages,
+            "max_tokens": max_tokens,
+        },
+    )
+    return head + kept
+
+
+{% endif %}
 def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
     retry_policy = RETRY_POLICY_BY_NODE.get(node_id, {})
     max_attempts = int(retry_policy.get("max_attempts") or 1)
@@ -133,7 +212,7 @@ def _invoke_llm_with_retry(node_id: str, llm: Any, working: list) -> Any:
     attempt = 1
     while True:
         try:
-            return llm.invoke(working)
+            return llm.invoke({{ "_apply_context_policy(node_id, working)" if context_nodes else "working" }})
         except Exception as exc:
             if "exception" not in retry_on or attempt >= max_attempts:
                 emit_trace_event(

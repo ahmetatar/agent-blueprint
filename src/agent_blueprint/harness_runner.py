@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import ast
 import json
-import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -122,8 +120,6 @@ def run_harness_scenario(
     trace_store: Path | None = None,
     save_traces: str = "all",
     origin: str = "harness",
-    process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
-    extra_env: dict[str, str] | None = None,
     source_dir: Path | None = None,
 ) -> ScenarioResult:
     llm_mode = (scenario.llm_mode or ir.harness.defaults.llm_mode).value  # type: ignore[union-attr]
@@ -149,18 +145,13 @@ def run_harness_scenario(
             },
         }
 
-    runner = LocalRunner(
-        ir, thread_id=scenario.id, process_hook=process_hook, source_dir=source_dir
-    )
+    runner = LocalRunner(ir, thread_id=scenario.id, source_dir=source_dir)
     execution_mode = resolve_harness_trace_mode(llm_mode, tool_mode)
     captured = runner.run_capture(
         user_input=scenario_user_input(ir, scenario),
         install=install,
         keep_temp=False,
         extra_env={
-            # Caller additions (e.g. the editor's ABP_TRACE_STREAM_FILE) go
-            # first so they can never override harness semantics below.
-            **(extra_env or {}),
             "ABP_TRACE_MODE": execution_mode,
             "ABP_RUN_ID": scenario.id,
             "ABP_SCENARIO_ID": scenario.id,

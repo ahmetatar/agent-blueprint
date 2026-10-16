@@ -65,7 +65,7 @@ def package(
     from agent_blueprint.packagers.cli import CliPackager, dist_name_for
 
     # Collect user `impl` modules that live next to the blueprint (e.g. a
-    # function-tool impl `farm_impl.py`) so the packaged CLI can resolve them.
+    # function-tool impl `agent_impl.py`) so the packaged CLI can resolve them.
     from agent_blueprint.models.tools import ToolType
 
     impl_paths = [t.impl for t in spec.tools.values() if t.type == ToolType.function and t.impl]

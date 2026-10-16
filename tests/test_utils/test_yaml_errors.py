@@ -19,7 +19,7 @@ class TestYamlParseErrors:
         # 'description' is mis-indented relative to 'name' — a block-end parse error.
         bad = (
             "blueprint:\n"
-            "  name: growops\n"
+            "  name: my-agent\n"
             "    description: oops\n"
         )
         bp = _write(tmp_path, bad)
@@ -30,7 +30,7 @@ class TestYamlParseErrors:
         assert "line" in msg and "column" in msg
 
     def test_unterminated_flow_mapping_is_wrapped(self, tmp_path):
-        bp = _write(tmp_path, "blueprint: { name: growops\n")
+        bp = _write(tmp_path, "blueprint: { name: my-agent\n")
         with pytest.raises(BlueprintValidationError) as exc:
             load_blueprint_yaml(bp)
         assert "YAML syntax error" in str(exc.value)
@@ -38,9 +38,9 @@ class TestYamlParseErrors:
     def test_valid_yaml_still_loads(self, tmp_path):
         good = (
             "blueprint:\n"
-            "  name: growops\n"
+            "  name: my-agent\n"
             "  version: '1.0'\n"
         )
         bp = _write(tmp_path, good)
         raw = load_blueprint_yaml(bp)
-        assert raw["blueprint"]["name"] == "growops"
+        assert raw["blueprint"]["name"] == "my-agent"

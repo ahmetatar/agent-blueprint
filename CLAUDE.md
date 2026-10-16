@@ -19,7 +19,7 @@ ruff check .                    # lint (line-length 100)
 mypy src                        # strict mode — CI enforces it
 python -m build                 # package build (also a CI step)
 
-abp validate examples/basic-chatbot.yml                  # CLI smoke test
+abp validate tests/fixtures/basic_chatbot.yml           # CLI smoke test
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly: ruff, mypy src, pytest (with `--cov-fail-under=79` coverage floor), build, CLI smoke on Python 3.11 + 3.12. Conventional Commits enforced (commitizen + pr-title check).

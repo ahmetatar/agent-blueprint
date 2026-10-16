@@ -38,7 +38,7 @@ mypy src
 pytest
 python -m build
 abp --help
-abp validate examples/basic-chatbot.yml
+abp validate tests/fixtures/basic_chatbot.yml
 ```
 
 ## Commit Message Standard

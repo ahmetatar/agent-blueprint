@@ -133,10 +133,10 @@ class TestUserImplModules:
 
     def _spec_with_impl(self) -> dict:
         return {
-            "blueprint": {"name": "growops"},
+            "blueprint": {"name": "my-agent"},
             "state": {"fields": {"messages": {"type": "list[message]", "reducer": "append"}}},
             "agents": {"a": {"model": "gpt-4o", "tools": ["pt"]}},
-            "tools": {"pt": {"type": "function", "impl": "farm_impl.parse_telemetry"}},
+            "tools": {"pt": {"type": "function", "impl": "agent_impl.parse_payload"}},
             "graph": {
                 "entry_point": "a",
                 "nodes": {"a": {"agent": "a"}},
@@ -149,20 +149,20 @@ class TestUserImplModules:
         ir = compile_blueprint(spec)
         files = LangGraphGenerator().generate(ir)
         packaged = CliPackager().package(
-            files, ir, user_modules={"farm_impl": "def parse_telemetry(payload):\n    return {}\n"}
+            files, ir, user_modules={"agent_impl": "def parse_payload(payload):\n    return {}\n"}
         )
-        pkg = package_name_for("growops")
-        assert f"src/{pkg}/farm_impl.py" in packaged
+        pkg = package_name_for("my-agent")
+        assert f"src/{pkg}/agent_impl.py" in packaged
         tools = packaged[f"src/{pkg}/tools.py"]
-        assert "from .farm_impl import" in tools
-        assert "from farm_impl import" not in tools
+        assert "from .agent_impl import" in tools
+        assert "from agent_impl import" not in tools
 
     def test_without_user_modules_impl_import_stays_absolute(self):
         spec = BlueprintSpec.model_validate(self._spec_with_impl())
         ir = compile_blueprint(spec)
         files = LangGraphGenerator().generate(ir)
         packaged = CliPackager().package(files, ir)  # no user_modules
-        pkg = package_name_for("growops")
+        pkg = package_name_for("my-agent")
         tools = packaged[f"src/{pkg}/tools.py"]
-        assert "from farm_impl import" in tools
-        assert f"src/{pkg}/farm_impl.py" not in packaged
+        assert "from agent_impl import" in tools
+        assert f"src/{pkg}/agent_impl.py" not in packaged

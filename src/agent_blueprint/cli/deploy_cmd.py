@@ -187,7 +187,7 @@ def deploy(
             dest.write_text(content, encoding="utf-8")
 
         # Copy user `impl` modules that live next to the blueprint (e.g. a
-        # function-tool impl `farm_impl.py`) into the build context — the
+        # function-tool impl `agent_impl.py`) into the build context — the
         # generated tools.py imports them, and the Dockerfile COPYs the context.
         from agent_blueprint.models.tools import ToolType
 

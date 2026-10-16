@@ -23,7 +23,7 @@ def _represent_explicit_null(representer: RoundTripRepresenter, data: None) -> A
 yaml = YAML()
 yaml.preserve_quotes = True
 # Dump settings tuned so a load→dump round-trip of a conventionally formatted
-# blueprint (see examples/) is byte-identical — `abp fix` depends on untouched
+# blueprint is byte-identical — `abp fix` depends on untouched
 # regions staying untouched.
 yaml.indent(mapping=2, sequence=4, offset=2)
 yaml.width = 4096  # never re-wrap long scalars

@@ -60,6 +60,9 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `process_hook` / `extra_env` parameters were removed from
   `run_harness_scenario`, `run_eval_suite(s)`, `LocalRunner` and
   `BaseDeployer`. The SQLite checkpointer fix shipped with the editor is kept.
+- The `examples/` directory (the GrowOps demo and the scenario-ideas notes).
+  CI smoke tests now validate and lint `tests/fixtures/basic_chatbot.yml`, and
+  the GrowOps offline-harness CI step was dropped along with the demo.
 
 ## [0.4.0] - 2026-06-21
 

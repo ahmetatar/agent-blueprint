@@ -56,7 +56,7 @@ def _rewrite_local_imports(source: str, extra_modules: tuple[str, ...] = ()) -> 
 
     `extra_modules` are user `impl` modules copied into the package (e.g. a
     function-tool impl living next to the blueprint), so their absolute imports
-    (`from farm_impl import ...`) become package-relative too.
+    (`from agent_impl import ...`) become package-relative too.
     """
     modules = "|".join(re.escape(m) for m in (*_LOCAL_MODULES, *extra_modules))
     pattern = re.compile(rf"^from ({modules}) import ", flags=re.MULTILINE)

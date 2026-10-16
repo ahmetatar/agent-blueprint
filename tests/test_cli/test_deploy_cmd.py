@@ -286,7 +286,7 @@ state:
 tools:
   compute:
     type: function
-    impl: "farm_impl.compute_vpd"
+    impl: "agent_impl.compute_score"
     parameters:
       x: { type: number, required: true }
     returns: { type: number }
@@ -304,8 +304,8 @@ graph:
       to: END
 """
         path = _write_blueprint(tmp_path, content)
-        (tmp_path / "farm_impl.py").write_text(
-            "def compute_vpd(x):\n    return x\n", encoding="utf-8"
+        (tmp_path / "agent_impl.py").write_text(
+            "def compute_score(x):\n    return x\n", encoding="utf-8"
         )
         with (
             patch(
@@ -321,4 +321,4 @@ graph:
                 app, ["deploy", str(path), "--platform", "docker", "--dry-run"]
             )
         assert result.exit_code == 0
-        assert "farm_impl.py" in _flat(result)
+        assert "agent_impl.py" in _flat(result)

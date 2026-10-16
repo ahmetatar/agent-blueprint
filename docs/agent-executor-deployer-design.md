@@ -156,5 +156,3 @@ discipline as the OTel bridge in PR-7).
 - ABP positioning vs Google's stack: memory `google-agent-runtime-positioning`.
 - GCP Cloud Run deployer (`deployers/gcp.py`) is the closest existing analogue and is
   itself only "partial" — evolving it toward Substrate/`ax` is the natural path.
-- GrowOps demo currently deploys to Azure; an `ax`/Substrate variant is a candidate
-  acceptance demo for this target.

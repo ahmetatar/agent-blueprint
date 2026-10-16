@@ -1,9 +1,7 @@
 # Workflow Nodes: Parallel, Subgraph, Handoff, Supervisor
 
 Beyond `agent` and `function` nodes, blueprints support four workflow
-semantics. All are fully generated for the LangGraph target. See
-[examples/incident-response.yml](../examples/incident-response.yml) for a
-blueprint combining parallel, subgraph, and handoff.
+semantics. All are fully generated for the LangGraph target.
 
 ## Parallel
 

@@ -46,7 +46,6 @@ abp generate my-agent.agents.yaml --target langgraph
 - [The Operational Lifecycle](#the-operational-lifecycle)
 - [Blueprint Schema](#blueprint-schema)
 - [CLI Reference](#cli-reference)
-- [Examples](#examples)
 - [Generated Project Structure](#generated-project-structure)
 - [Generation Targets](#generation-targets)
 - [IDE Integration](#ide-integration-vs-code)
@@ -654,26 +653,6 @@ abp run my-agent.yml "hello" --sandbox --engine podman
 # after intentional changes, locally:
 #   abp gate my-agent.agents.yaml --update-baseline && git add .abp/gate-baseline.json
 ```
-
----
-
-## Examples
-
-The `examples/` directory contains ready-to-use blueprints:
-
-| Example | Demonstrates |
-|---|---|
-| [`basic-chatbot.yml`](examples/basic-chatbot.yml) | Single-agent chatbot — the simplest possible blueprint |
-| [`research-team.yml`](examples/research-team.yml) | Sequential pipeline: planner → researcher → writer |
-| [`incident-response.yml`](examples/incident-response.yml) | Parallel fan-out/join, subgraphs, and a Slack handoff node |
-| [`prd-factory.yml`](examples/prd-factory.yml) | Artifact-driven workflow with contracts and rubric evals |
-
-```bash
-abp inspect examples/incident-response.yml
-abp generate examples/incident-response.yml --target langgraph
-```
-
-> See [Reasoning Patterns](docs/reasoning.md) for advanced patterns: Chain-of-Thought, ReAct, Self-Reflection, and Extended Thinking.
 
 ---
 

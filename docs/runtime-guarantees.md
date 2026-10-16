@@ -442,6 +442,3 @@ During runtime, generated LangGraph code writes the artifact under `ABP_ARTIFACT
 or relative to the current working directory by default. Successful writes emit an
 `artifact_written` trace event with the artifact name, path, format, validation status, and
 metadata. Invalid artifact payloads fail before the file is written.
-
-See [examples/prd-factory.yml](../examples/prd-factory.yml) for a PRD-first workflow with a
-validated markdown artifact and harness scenario.

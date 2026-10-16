@@ -23,8 +23,8 @@ def _represent_explicit_null(representer: RoundTripRepresenter, data: None) -> A
 yaml = YAML()
 yaml.preserve_quotes = True
 # Dump settings tuned so a load→dump round-trip of a conventionally formatted
-# blueprint (see examples/) is byte-identical — the editor's targeted-mutation
-# write path and `abp fix` both depend on untouched regions staying untouched.
+# blueprint (see examples/) is byte-identical — `abp fix` depends on untouched
+# regions staying untouched.
 yaml.indent(mapping=2, sequence=4, offset=2)
 yaml.width = 4096  # never re-wrap long scalars
 yaml.representer.add_representer(type(None), _represent_explicit_null)
@@ -281,8 +281,8 @@ def _load_dotenv(blueprint_path: Path) -> None:
 def resolve_blueprint_data(data: Any, *, blueprint_path: Path) -> dict[str, Any]:
     """Resolve a loaded blueprint mapping into plain, validated-ready data.
 
-    Accepts either a plain dict or a ruamel document (e.g. a mutated
-    ``CommentedMap`` from the editor's targeted-ops path), resolves harness
+    Accepts either a plain dict or a ruamel document (``CommentedMap``),
+    resolves harness
     file references and ``${...}`` interpolation, and returns a plain dict
     ready for ``BlueprintSpec.model_validate``.
     """

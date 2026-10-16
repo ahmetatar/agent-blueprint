@@ -28,7 +28,7 @@ htmlcov/
 *-crewai/
 *-plain/
 
-# ABP runtime state next to blueprints (traces, gate baseline, editor layout)
+# ABP runtime state next to blueprints (traces, gate baseline)
 .abp/
 
 # Secrets
@@ -37,7 +37,3 @@ htmlcov/
 
 # Type checking
 .mypy_cache/
-
-# Editor frontend
-frontend/node_modules/
-src/agent_blueprint/editor/static/

@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,7 +32,6 @@ class LocalRunner:
         self,
         ir: AgentGraph,
         thread_id: str = "default",
-        process_hook: Callable[[subprocess.Popen[str]], None] | None = None,
         source_dir: Path | None = None,
     ) -> None:
         self._ir = ir
@@ -43,9 +41,6 @@ class LocalRunner:
         # invoke `abp run`/`abp test` from.
         self._source_dir = source_dir
         self._tempdir: Path | None = None
-        # Called with the child process right after spawn — lets a caller
-        # (e.g. the editor's task runner) terminate a run on cancellation.
-        self._process_hook = process_hook
 
     # ------------------------------------------------------------------
     # Public API
@@ -196,20 +191,14 @@ class LocalRunner:
         if user_input is not None:
             cmd.append(user_input)
 
-        # Popen (rather than subprocess.run) so the process handle can be
-        # exposed via process_hook before we block on completion.
-        proc = subprocess.Popen(
+        return subprocess.run(
             cmd,
             cwd=str(self._tempdir),
             env=env,
-            stdout=subprocess.PIPE if capture_output else None,
-            stderr=subprocess.PIPE if capture_output else None,
+            check=False,
+            capture_output=capture_output,
             text=True,
         )
-        if self._process_hook is not None:
-            self._process_hook(proc)
-        stdout, stderr = proc.communicate()
-        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
     def _build_env(
         self,

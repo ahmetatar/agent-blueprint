@@ -2905,8 +2905,10 @@ class TestLangGraphGenerator:
         ir = load_ir("memory_sqlite.yml")
         files = self.gen.generate(ir)
         graph_py = files["graph.py"]
-        assert "SqliteSaver" in graph_py
-        assert "from_conn_string" in graph_py
+        # SqliteSaver(conn) is the persistent constructor; from_conn_string is a
+        # short-lived context manager and must not be used here.
+        assert "SqliteSaver(sqlite3.connect(" in graph_py
+        assert "from_conn_string" not in graph_py
         assert "SQLITE_DB_PATH" in graph_py
 
     def test_memory_redis_uses_redissaver(self):

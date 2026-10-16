@@ -48,6 +48,19 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   for the langgraph target. Use `conversation_buffer` or remove the block.
   `max_messages` / `max_tokens` must be > 0.
 
+### Removed
+
+- **Breaking:** the `abp editor` command, the `editor` install extra
+  (`pip install 'agent-blueprint[editor]'`), and its embedded web frontend.
+  Building the package no longer requires Node.js. Edit blueprint YAML
+  directly and use `abp validate` / `abp lint` / `abp inspect` instead.
+- **Breaking:** editor-only hooks in generated projects and the Python API:
+  the `ABP_TRACE_STREAM_FILE`, `ABP_TRACE_CONTENT` and `ABP_CHECKPOINT_DB`
+  environment variables are no longer read by generated code, and the
+  `process_hook` / `extra_env` parameters were removed from
+  `run_harness_scenario`, `run_eval_suite(s)`, `LocalRunner` and
+  `BaseDeployer`. The SQLite checkpointer fix shipped with the editor is kept.
+
 ## [0.4.0] - 2026-06-21
 
 First beta release. The YAML → IR → LangGraph → deploy pipeline and its

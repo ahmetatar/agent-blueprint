@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
+[![CI](https://github.com/ahmetatar/agent-blueprint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ahmetatar/agent-blueprint/actions/workflows/ci.yml)
 
 **Declarative AI agent orchestration with runtime guarantees.**
 

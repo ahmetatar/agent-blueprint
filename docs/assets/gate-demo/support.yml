@@ -1,0 +1,92 @@
+blueprint:
+  name: support
+  version: "1.0"
+
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+    route: { type: string }
+    confidence: { type: float }
+
+agents:
+  router:
+    model: openai/gpt-4o
+    system_prompt: "Classify the ticket. Reply as JSON: {route, confidence}."
+  billing:
+    model: openai/gpt-4o
+    system_prompt: "You resolve billing issues."
+    tools: [issue_refund]
+  tech:
+    model: openai/gpt-4o
+    system_prompt: "You resolve technical issues."
+  human:
+    model: openai/gpt-4o
+    system_prompt: "Hand the ticket to a human agent."
+
+tools:
+  issue_refund:
+    type: function
+    impl: refunds.issue_refund
+    description: "Refund an invoice"
+    parameters:
+      invoice_id: { type: string, required: true }
+
+contracts:
+  nodes:
+    router:
+      produces: [route, confidence]
+      output_contract: triage
+  outputs:
+    triage:
+      type: object
+      required: [route, confidence]
+      properties:
+        route: { type: string }
+        confidence: { type: number }
+
+graph:
+  entry_point: router
+  nodes:
+    router: { agent: router }
+    billing: { agent: billing }
+    tech: { agent: tech }
+    human: { agent: human }
+  edges:
+    - from: router
+      to:
+        - target: billing
+          condition: "state.route == 'billing' and state.confidence >= 0.8"
+        - target: tech
+          condition: "state.route == 'tech' and state.confidence >= 0.8"
+        - default: human
+    - { from: billing, to: END }
+    - { from: tech, to: END }
+    - { from: human, to: END }
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+    fixtures:
+      llm_outputs: { "*": [{ content: "Handing off to a human." }] }
+  scenarios:
+    - id: refund_request
+      input: { message: "Please refund invoice 123" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "billing", "confidence": 0.86}' }]
+          billing:
+            - { tool_calls: [{ name: issue_refund, args: { invoice_id: "123" } }] }
+            - { content: "Refund issued." }
+        tool_outputs: { issue_refund: { status: refunded } }
+      expected:
+        route: billing
+        tools_called: [issue_refund]
+    - id: login_bug
+      input: { message: "I can't log in" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "tech", "confidence": 0.93}' }]
+          tech: [{ content: "Try resetting your password." }]
+      expected:
+        route: tech

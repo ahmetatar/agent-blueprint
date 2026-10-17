@@ -11,6 +11,11 @@
 
 **Declarative AI agent orchestration with runtime guarantees.**
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ahmetatar/agent-blueprint/main/docs/assets/gate-demo.gif" alt="abp gate catching a routing regression: two harness scenarios pass, a one-line threshold change makes refund_request route to the wrong node, and the gate fails with exit 1" width="820"/>
+</p>
+<p align="center"><sub>A one-line routing change, caught before merge — fully offline (mocked LLM, stubbed tools, no API key). Source: <a href="docs/assets/gate-demo/"><code>docs/assets/gate-demo/</code></a></sub></p>
+
 `agent-blueprint` (CLI: `abp`) turns AI agent systems into versionable, testable, deployable infrastructure. You describe agents, tools, workflow graph, contracts, and policies in a single validated YAML blueprint — `abp` compiles it into a runnable [LangGraph](https://github.com/langchain-ai/langgraph) project and gives you the operational toolchain around it: linting, deterministic tests, eval suites, regression gates, sandboxed runs, OpenTelemetry export, and cloud deployment.
 
 What makes ABP different is not less boilerplate — it is that **everything you declare is enforced at runtime**. Most agent frameworks let you *describe* guardrails; ABP *compiles them into the generated code*, so a contract in YAML and the behavior in production cannot drift apart:

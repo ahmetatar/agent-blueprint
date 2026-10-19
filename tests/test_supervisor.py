@@ -381,22 +381,10 @@ GUARANTEE_HELPERS = {
     "human_in_the_loop": "_require_human_review",
     "low_confidence_escalation": "_apply_low_confidence_escalation",
 }
-_SUPERVISOR_GAPS = {"human_in_the_loop"}
 
 
 class TestSupervisorGuaranteeParity:
-    @pytest.mark.parametrize(
-        "guarantee",
-        [
-            pytest.param(
-                g,
-                marks=pytest.mark.xfail(strict=True, reason="supervisor gap")
-                if g in _SUPERVISOR_GAPS
-                else (),
-            )
-            for g in GUARANTEE_HELPERS
-        ],
-    )
+    @pytest.mark.parametrize("guarantee", list(GUARANTEE_HELPERS))
     def test_supervisor_enforces_what_agent_enforces(self, guarantee):
         nodes_py = generate(_guarded_team_spec())["nodes.py"]
         helper = GUARANTEE_HELPERS[guarantee]
@@ -508,3 +496,39 @@ class TestSupervisorGuaranteesRuntime:
         assert result.passed, (result.failures, result.stderr)
         started = [e["node"] for e in _events(result, "node_started")]
         assert started[-1] == "review"
+
+    def test_human_review_blocks_supervisor_tool_call(self, tmp_path, monkeypatch):
+        _require_langgraph()
+        monkeypatch.setenv("ABP_HITL_MODE", "deny")
+        (tmp_path / "lookup_impl.py").write_text("def lookup(record_id):\n    return 'ok'\n")
+        raw = _supervisor_with_tool_spec()
+        raw["agents"]["boss"]["human_in_the_loop"] = {
+            "enabled": True,
+            "trigger": "before_tool_call",
+            "tools": ["lookup"],
+        }
+        raw["harness"] = {
+            "scenarios": [
+                {
+                    "id": "review",
+                    "input": {"message": "find record 7"},
+                    "fixtures": {
+                        "llm_outputs": {
+                            "coordinator": [
+                                {"tool_calls": [{"name": "lookup", "args": {"record_id": "7"}}]},
+                                {"content": "Done."},
+                            ]
+                        }
+                    },
+                }
+            ]
+        }
+        ir = compile_blueprint(BlueprintSpec.model_validate(raw))
+        result = run_harness_scenario(
+            ir, ir.harness.scenarios[0], install=False, source_dir=tmp_path
+        )
+        assert not result.passed
+        # Human review events are reported on stderr, not in the trace.
+        assert '"event": "human_review_requested"' in result.stderr
+        assert '"node": "coordinator"' in result.stderr
+        assert "Human review required for node 'coordinator'" in result.stderr

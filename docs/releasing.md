@@ -4,7 +4,7 @@ This project publishes to Python package indexes through GitHub Releases.
 
 Official product tagline for release copy, package metadata, and public docs:
 
-> Declarative, framework-agnostic AI agent orchestration via YAML.
+> Declarative AI agent orchestration with runtime guarantees.
 
 ## Tag Standard
 

@@ -303,6 +303,8 @@ class TestSupervisorToolPolicies:
         result = run_harness_scenario(
             ir, ir.harness.scenarios[0], install=False, source_dir=tmp_path
         )
+        # The violation stops the run instead of being fed back to the model.
+        assert not result.passed
         assert result.trace_manifest is not None, result.stderr
         violations = [
             e for e in result.trace_manifest["trace"] if e.get("event") == "policy_violation"

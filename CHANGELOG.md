@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Fixed
 
+- **Behavior change (fail-loud):** tool-usage policy violations
+  (`max_calls_per_node`, `max_calls_per_run`, `require_explicit_arguments`)
+  now stop the run, as documented. Both ReAct loops used to catch the error
+  and feed it back to the model as a `Tool error:` message, so a model that
+  kept calling the tool looped until another limit hit. The generated
+  `tools.py` raises `ToolPolicyViolation`, which agent and supervisor nodes
+  re-raise.
 - Supervisor nodes silently skipped node guarantees that agent nodes
   enforce. They now apply `contracts.state.immutable_fields` /
   `forbids_mutation` and invariants on every return, and `output_contract`,

@@ -125,6 +125,10 @@ def reset_tool_policy_state() -> None:
     _TOOL_CALL_COUNTS_PER_NODE.clear()
 
 
+class ToolPolicyViolation(RuntimeError):
+    """A tool-usage policy was violated; the ReAct loops re-raise it to stop the run."""
+
+
 def _policy_violation(
     kind: str,
     message: str,
@@ -144,7 +148,7 @@ def _policy_violation(
         error=message,
         metadata=payload,
     )
-    raise RuntimeError(message)
+    raise ToolPolicyViolation(message)
 
 
 def _enforce_explicit_arguments(tool_name: str, args: dict[str, Any], node_id: str | None) -> None:

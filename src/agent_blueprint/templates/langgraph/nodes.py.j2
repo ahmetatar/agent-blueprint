@@ -38,7 +38,7 @@ from _abp_trace import (
     set_current_node,
 )
 from state import AgentState
-from tools import TOOLS, TOOLS_BY_NAME, validate_tool_arguments
+from tools import TOOLS, TOOLS_BY_NAME, ToolPolicyViolation, validate_tool_arguments
 {% if ir.nodes | selectattr("node_def.type.value", "equalto", "supervisor") | list %}
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END
@@ -1340,7 +1340,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                         _require_human_review("{{ node.id }}", hitl, "before_tool_call", tool_name=tc["name"])
                         content = str(fn.invoke(tc.get("args", {})))
                         _require_human_review("{{ node.id }}", hitl, "after_tool_call", tool_name=tc["name"])
-                    except PermissionError:
+                    except (PermissionError, ToolPolicyViolation):
                         raise
                     except Exception as exc:
                         content = f"Tool error: {exc}"
@@ -1459,7 +1459,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
                     _require_human_review("{{ node.id }}", hitl, "before_tool_call", tool_name=tc["name"])
                     content = str(fn.invoke(tc.get("args", {})))
                     _require_human_review("{{ node.id }}", hitl, "after_tool_call", tool_name=tc["name"])
-                except PermissionError:
+                except (PermissionError, ToolPolicyViolation):
                     raise
                 except Exception as exc:
                     content = f"Tool error: {exc}"

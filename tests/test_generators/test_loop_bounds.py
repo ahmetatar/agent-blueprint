@@ -76,3 +76,100 @@ class TestToolPolicyStopsRun:
         violations = _events(result, "policy_violation")
         assert len(violations) == 1
         assert violations[0]["metadata"]["policy_kind"] == "max_calls_per_node"
+
+
+def _with_turns(raw: dict, *, max_turns: int | None = None, on_max_turns: str | None = None):
+    agent = raw["agents"]["worker"]
+    if max_turns is not None:
+        agent["max_turns"] = max_turns
+    if on_max_turns is not None:
+        agent["on_max_turns"] = on_max_turns
+    return raw
+
+
+def _generate_nodes(raw: dict) -> str:
+    from agent_blueprint.generators.langgraph import LangGraphGenerator
+
+    return LangGraphGenerator().generate(compile_blueprint(BlueprintSpec.model_validate(raw)))[
+        "nodes.py"
+    ]
+
+
+class TestMaxTurnsModel:
+    def test_must_be_positive(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            BlueprintSpec.model_validate(_with_turns(_looping_spec(), max_turns=0))
+
+    def test_unset_generates_no_turn_limit(self):
+        nodes_py = _generate_nodes(_looping_spec())
+        assert "MAX_TURNS_BY_NODE" not in nodes_py
+        assert "_max_turns_reached" not in nodes_py
+
+    def test_settings_default_applies_to_tool_agents(self):
+        raw = _looping_spec()
+        raw["settings"] = {"default_max_turns": 4}
+        nodes_py = _generate_nodes(raw)
+        assert '"worker": {\n        "max_turns": 4,\n        "on_exhausted": "fail",' in nodes_py
+
+    def test_agent_value_overrides_settings_default(self):
+        raw = _with_turns(_looping_spec(), max_turns=2, on_max_turns="finish")
+        raw["settings"] = {"default_max_turns": 9}
+        nodes_py = _generate_nodes(raw)
+        assert '"max_turns": 2,' in nodes_py
+        assert '"on_exhausted": "finish",' in nodes_py
+
+
+class TestMaxTurnsRuntime:
+    def test_fail_stops_the_run_deterministically(self, tmp_path):
+        result = _run(tmp_path, _with_turns(_looping_spec(), max_turns=3))
+        assert not result.passed
+        assert len(_events(result, "tool_called")) == 2
+        exhausted = _events(result, "max_turns_exhausted")
+        assert len(exhausted) == 1
+        assert exhausted[0]["node"] == "worker"
+        assert exhausted[0]["metadata"] == {"max_turns": 3, "turns": 3, "on_exhausted": "fail"}
+        assert "max_turns=3" in result.stderr
+
+    def test_finish_ends_the_node_and_continues(self, tmp_path):
+        result = _run(tmp_path, _with_turns(_looping_spec(), max_turns=3, on_max_turns="finish"))
+        assert result.passed, (result.failures, result.stderr)
+        assert len(_events(result, "tool_called")) == 2
+        assert _events(result, "max_turns_exhausted")[0]["metadata"]["on_exhausted"] == "finish"
+        assert [e["node"] for e in _events(result, "node_finished")] == ["worker"]
+
+    def test_supervisor_tool_loop_is_bounded(self, tmp_path):
+        _require_langgraph()
+        (tmp_path / "lookup_impl.py").write_text("def lookup(record_id):\n    return 'ok'\n")
+        raw = _looping_spec()
+        raw["agents"]["helper"] = {"model": "gpt-4o"}
+        raw["agents"]["worker"]["max_turns"] = 2
+        raw["graph"] = {
+            "entry_point": "lead",
+            "nodes": {
+                "lead": {"type": "supervisor", "agent": "worker", "workers": ["aide"]},
+                "aide": {"agent": "helper", "description": "Helper"},
+            },
+            "edges": [],
+        }
+        call = {"tool_calls": [{"name": "lookup", "args": {"record_id": "1"}}]}
+        raw["harness"] = {
+            "scenarios": [
+                {
+                    "id": "loop",
+                    "input": {"message": "go"},
+                    "fixtures": {
+                        "llm_outputs": {"lead": [call] * 5 + [{"content": "Done."}]},
+                        "tool_outputs": {"lookup": "ok"},
+                    },
+                }
+            ]
+        }
+        ir = compile_blueprint(BlueprintSpec.model_validate(raw))
+        result = run_harness_scenario(
+            ir, ir.harness.scenarios[0], install=False, source_dir=tmp_path
+        )
+        assert not result.passed
+        assert len(_events(result, "tool_called")) == 1
+        assert _events(result, "max_turns_exhausted")[0]["node"] == "lead"

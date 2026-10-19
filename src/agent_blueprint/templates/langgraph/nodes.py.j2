@@ -91,6 +91,61 @@ VERIFY_POLICY_BY_NODE = {
 {% endfor %}
 }
 {% endif %}
+{% set turns = namespace(ids=[]) %}
+{% for node in ir.nodes if node.agent and node.tool_defs %}
+{% if (node.agent.max_turns or ir.settings.default_max_turns) is not none %}
+{% set turns.ids = turns.ids + [node.id] %}
+{% endif %}
+{% endfor %}
+{% if turns.ids %}
+MAX_TURNS_BY_NODE = {
+{% for node in ir.nodes if node.id in turns.ids %}
+    "{{ node.id }}": {
+        "max_turns": {{ (node.agent.max_turns or ir.settings.default_max_turns) | to_python }},
+        "on_exhausted": "{{ node.agent.on_max_turns.value }}",
+    },
+{% endfor %}
+}
+
+
+class MaxTurnsExceeded(RuntimeError):
+    """A node's tool loop used all of its max_turns while the model still asked for tools."""
+
+
+def _max_turns_reached(node_id: str, turns: int) -> bool:
+    policy = MAX_TURNS_BY_NODE[node_id]
+    if turns < policy["max_turns"]:
+        return False
+    message = (
+        f"Node '{node_id}' reached max_turns={policy['max_turns']} "
+        "while the model still requested tools"
+    )
+    fail = policy["on_exhausted"] == "fail"
+    emit_trace_event(
+        "max_turns_exhausted",
+        node=node_id,
+        error=message if fail else None,
+        metadata={
+            "max_turns": policy["max_turns"],
+            "turns": turns,
+            "on_exhausted": policy["on_exhausted"],
+        },
+    )
+    if fail:
+        clear_current_node()
+        raise MaxTurnsExceeded(message)
+    return True
+
+
+def _skip_pending_tool_calls(response: Any, working: list, new_messages: list) -> None:
+    # Every tool call needs a tool result, or the next LLM call on this history fails.
+    for tc in getattr(response, "tool_calls", None) or []:
+        skipped = ToolMessage(content="Skipped: max_turns reached.", tool_call_id=tc["id"])
+        working.append(skipped)
+        new_messages.append(skipped)
+
+
+{% endif %}
 {% set context_nodes = ir.nodes | selectattr("agent") | selectattr("agent.memory") | list %}
 {% if context_nodes %}
 CONTEXT_POLICY_BY_NODE = {
@@ -1307,6 +1362,9 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
     validated_artifact_outputs: dict[str, Any] = {}
     # Worker the supervisor delegates to; None means it answers and finishes.
     target: str | None = None
+{% if node.id in turns.ids %}
+    turns = 0
+{% endif %}
     while True:
         response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
@@ -1330,6 +1388,12 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                 new_messages.append(ack)
             break
         if tool_calls:
+{% if node.id in turns.ids %}
+            turns += 1
+            if _max_turns_reached("{{ node.id }}", turns):
+                _skip_pending_tool_calls(response, working, new_messages)
+                break
+{% endif %}
             for tc in tool_calls:
                 fn = tool_map.get(tc["name"])
                 if fn is None:
@@ -1440,6 +1504,9 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     validated_artifact_outputs: dict[str, Any] = {}
 {% if node.tool_defs %}
     # ReAct loop: invoke LLM, execute any tool calls, repeat until plain response
+{% if node.id in turns.ids %}
+    turns = 0
+{% endif %}
     while True:
         response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
@@ -1449,6 +1516,12 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         if not getattr(response, "tool_calls", None):
             _require_human_review("{{ node.id }}", hitl, "before_response")
             break
+{% if node.id in turns.ids %}
+        turns += 1
+        if _max_turns_reached("{{ node.id }}", turns):
+            _skip_pending_tool_calls(response, working, new_messages)
+            break
+{% endif %}
         for tc in response.tool_calls:
             fn = tool_map.get(tc["name"])
             if fn is None:

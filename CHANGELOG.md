@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-19
+
+Runtime-guarantee depth and a narrower scope. Agent memory trimming, tool
+side-effect metadata, per-tool retry, retry fallback and a bounded
+self-check loop (`verify`) are now enforced in generated code. The `abp
+editor` and the `examples/` directory were removed, `abp deploy` and `abp
+package` are marked experimental (see `docs/scope.md`), and generated
+projects now run on real LangGraph in CI. Contains breaking changes — see
+**Changed** and **Removed**.
+
 ### Added
 
 - Agent memory enforcement (`agents.*.memory`, `type: conversation_buffer`):
@@ -52,6 +62,11 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   silently ignored; `abp generate` now fails and `abp doctor` reports an error
   for the langgraph target. Use `conversation_buffer` or remove the block.
   `max_messages` / `max_tokens` must be > 0.
+- `abp deploy` and `abp package` are marked **experimental** (frozen: bug
+  fixes only) in `--help` and the docs. New `docs/scope.md` lists core,
+  experimental and not-implemented surfaces.
+- Product tagline is now "Declarative AI agent orchestration with runtime
+  guarantees" (package metadata, CLI help, logo).
 
 ### Removed
 
@@ -67,7 +82,9 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   `BaseDeployer`. The SQLite checkpointer fix shipped with the editor is kept.
 - The `examples/` directory (the GrowOps demo and the scenario-ideas notes).
   CI smoke tests now validate and lint `tests/fixtures/basic_chatbot.yml`, and
-  the GrowOps offline-harness CI step was dropped along with the demo.
+  the GrowOps offline-harness CI step was dropped along with the demo. A new
+  `e2e` CI job runs an offline harness fixture
+  (`tests/fixtures/e2e_offline.yml`) on real LangGraph instead.
 
 ## [0.4.0] - 2026-06-21
 

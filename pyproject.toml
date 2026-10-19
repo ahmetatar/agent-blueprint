@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-blueprint"
-version = "0.4.0"
+version = "0.5.0"
 description = "Declarative AI agent orchestration with runtime guarantees: YAML blueprints compiled to LangGraph, with lint, deterministic tests and CI gates"
 readme = "README.md"
 license = "MIT"
@@ -60,7 +60,7 @@ testpaths = ["tests"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.4.0"
+version = "0.5.0"
 version_provider = "pep621"
 tag_format = "v$version"
 version_scheme = "pep440"

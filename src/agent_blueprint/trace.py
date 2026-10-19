@@ -57,6 +57,11 @@ class TraceEventType(str, Enum):
     parallel_finished = "parallel_finished"
     subgraph_entered = "subgraph_entered"
     subgraph_exited = "subgraph_exited"
+    handoff_requested = "handoff_requested"
+    handoff_failed = "handoff_failed"
+    agent_handoff = "agent_handoff"
+    supervisor_iterations_exhausted = "supervisor_iterations_exhausted"
+    max_turns_exhausted = "max_turns_exhausted"
     run_finished = "run_finished"
 
 

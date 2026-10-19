@@ -310,3 +310,103 @@ class TestSupervisorToolPolicies:
         assert violations, result.trace_manifest["trace"]
         assert violations[0]["node"] == "coordinator"
         assert violations[0]["tool"] == "lookup"
+
+
+def _guarded_team_spec() -> dict:
+    """A team where the supervisor and one worker declare every node guarantee."""
+    raw = _supervisor_with_tool_spec()
+    raw["agents"]["res"]["tools"] = ["lookup"]
+    hitl = {"enabled": True, "trigger": "before_tool_call", "tools": ["lookup"]}
+    raw["agents"]["boss"]["human_in_the_loop"] = hitl
+    raw["agents"]["res"]["human_in_the_loop"] = hitl
+    raw["state"]["fields"].update(
+        {
+            "summary": {"type": "string"},
+            "confidence": {"type": "float"},
+            "ticket_id": {"type": "string"},
+            "notes": {"type": "string"},
+        }
+    )
+    node_contract = {
+        "requires": ["messages"],
+        "produces": ["summary", "confidence"],
+        "output_contract": "report",
+        "forbids_mutation": ["notes"],
+    }
+    raw["contracts"] = {
+        "state": {"immutable_fields": ["ticket_id"], "invariants": ["state.confidence != 2"]},
+        "nodes": {"coordinator": dict(node_contract), "research": dict(node_contract)},
+        "outputs": {
+            "report": {
+                "type": "object",
+                "required": ["summary", "confidence"],
+                "properties": {"summary": {"type": "string"}, "confidence": {"type": "number"}},
+            }
+        },
+    }
+    raw["artifacts"] = {
+        "coord_report": {
+            "format": "json", "producer": "coordinator", "contract": "report",
+            "path": "artifacts/coord.json",
+        },
+        "research_report": {
+            "format": "json", "producer": "research", "contract": "report",
+            "path": "artifacts/research.json",
+        },
+    }
+    raw["policies"]["escalation"] = {"on_low_confidence": "writer", "confidence_threshold": 0.5}
+    return raw
+
+
+def _node_calls(nodes_py: str, name: str) -> set[str]:
+    fn = next(
+        n for n in ast.parse(nodes_py).body if isinstance(n, ast.FunctionDef) and n.name == name
+    )
+    return {
+        n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+
+
+# Every runtime guarantee an agent node enforces, keyed by the helper that
+# enforces it. A supervisor declaring the same feature must enforce it too.
+GUARANTEE_HELPERS = {
+    "requires": "_require_state_fields",
+    "tool_arguments": "validate_tool_arguments",
+    "budgets": "register_llm_budget_usage",
+    "invariants": "_check_state_invariants",
+    "immutable_fields": "_ensure_fields_not_mutated",
+    "produces": "_require_produced_fields",
+    "output_contract": "_validate_node_output_contract",
+    "artifacts": "_write_node_artifacts",
+    "human_in_the_loop": "_require_human_review",
+    "low_confidence_escalation": "_apply_low_confidence_escalation",
+}
+_SUPERVISOR_GAPS = {
+    "invariants",
+    "immutable_fields",
+    "produces",
+    "output_contract",
+    "artifacts",
+    "human_in_the_loop",
+    "low_confidence_escalation",
+}
+
+
+class TestSupervisorGuaranteeParity:
+    @pytest.mark.parametrize(
+        "guarantee",
+        [
+            pytest.param(
+                g,
+                marks=pytest.mark.xfail(strict=True, reason="supervisor gap")
+                if g in _SUPERVISOR_GAPS
+                else (),
+            )
+            for g in GUARANTEE_HELPERS
+        ],
+    )
+    def test_supervisor_enforces_what_agent_enforces(self, guarantee):
+        nodes_py = generate(_guarded_team_spec())["nodes.py"]
+        helper = GUARANTEE_HELPERS[guarantee]
+        assert helper in _node_calls(nodes_py, "node_research")
+        assert helper in _node_calls(nodes_py, "node_coordinator")

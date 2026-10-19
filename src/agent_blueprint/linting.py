@@ -45,6 +45,7 @@ def lint_blueprint(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
     findings.extend(_lint_parallel_branch_conflicts(spec))
     findings.extend(_lint_unbounded_loops(spec))
     findings.extend(_lint_unsafe_tool_retries(spec))
+    findings.extend(_lint_unbounded_tool_loops(spec, ir))
     return findings
 
 
@@ -187,6 +188,42 @@ def _lint_unsafe_tool_retries(spec: BlueprintSpec) -> list[LintFinding]:
                 f"Tool '{name}' retries a {tool.method.value} call "
                 f"(max_attempts={tool.retry.max_attempts}) but declares no side_effect. "
                 "Declare 'side_effect' and 'idempotent' so a retry cannot silently repeat a write."
+            ),
+            autofixable=False,
+        ))
+    return findings
+
+
+def _lint_unbounded_tool_loops(spec: BlueprintSpec, ir: AgentGraph) -> list[LintFinding]:
+    """A tool-using node whose ReAct loop nothing bounds can call tools forever.
+
+    Any of max_turns (agent or settings default), a tool-call limit, or a
+    token/cost budget stops the loop; max_graph_steps does not, because the
+    loop runs inside a single graph step.
+    """
+    policies = spec.policies
+    if spec.settings.default_max_turns is not None or (
+        policies is not None
+        and (
+            policies.tool_usage.max_calls_per_node is not None
+            or policies.tool_usage.max_calls_per_run is not None
+            or policies.budgets.max_tokens_per_run is not None
+            or policies.budgets.max_cost_usd is not None
+        )
+    ):
+        return []
+    findings: list[LintFinding] = []
+    for node in ir.nodes:
+        if node.agent is None or not node.tool_defs or node.agent.max_turns is not None:
+            continue
+        findings.append(LintFinding(
+            severity=LintSeverity.warning,
+            code="unbounded-tool-loop",
+            location=f"graph.nodes.{node.id}",
+            message=(
+                f"Node '{node.id}' runs a tool loop with no bound: set "
+                "agents.<id>.max_turns or settings.default_max_turns, a "
+                "policies.tool_usage call limit, or a token/cost budget."
             ),
             autofixable=False,
         ))

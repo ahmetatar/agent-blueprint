@@ -52,6 +52,11 @@ class RagConfig(BaseModel):
     )
 
 
+class MaxTurnsAction(str, Enum):
+    fail = "fail"  # stop the run with an error
+    finish = "finish"  # stop the tool loop and finish the node with what it has
+
+
 class OutputFieldDef(BaseModel):
     type: str
     enum: list[str] | None = None
@@ -74,6 +79,9 @@ class AgentDef(BaseModel):
     human_in_the_loop: HumanInTheLoopConfig | None = None
     reasoning: ReasoningConfig | None = None
     rag: RagConfig | None = None
+    # LLM calls allowed in one node invocation's tool loop (None: settings.default_max_turns)
+    max_turns: int | None = Field(default=None, ge=1)
+    on_max_turns: MaxTurnsAction = MaxTurnsAction.fail
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

@@ -38,7 +38,7 @@ from _abp_trace import (
     set_current_node,
 )
 from state import AgentState
-from tools import TOOLS, TOOLS_BY_NAME, validate_tool_arguments
+from tools import TOOLS, TOOLS_BY_NAME, ToolPolicyViolation, validate_tool_arguments
 {% if ir.nodes | selectattr("node_def.type.value", "equalto", "supervisor") | list %}
 from langchain_core.tools import StructuredTool
 from langgraph.graph import END
@@ -91,6 +91,61 @@ VERIFY_POLICY_BY_NODE = {
 {% endfor %}
 }
 {% endif %}
+{% set turns = namespace(ids=[]) %}
+{% for node in ir.nodes if node.agent and node.tool_defs %}
+{% if (node.agent.max_turns or ir.settings.default_max_turns) is not none %}
+{% set turns.ids = turns.ids + [node.id] %}
+{% endif %}
+{% endfor %}
+{% if turns.ids %}
+MAX_TURNS_BY_NODE = {
+{% for node in ir.nodes if node.id in turns.ids %}
+    "{{ node.id }}": {
+        "max_turns": {{ (node.agent.max_turns or ir.settings.default_max_turns) | to_python }},
+        "on_exhausted": "{{ node.agent.on_max_turns.value }}",
+    },
+{% endfor %}
+}
+
+
+class MaxTurnsExceeded(RuntimeError):
+    """A node's tool loop used all of its max_turns while the model still asked for tools."""
+
+
+def _max_turns_reached(node_id: str, turns: int) -> bool:
+    policy = MAX_TURNS_BY_NODE[node_id]
+    if turns < policy["max_turns"]:
+        return False
+    message = (
+        f"Node '{node_id}' reached max_turns={policy['max_turns']} "
+        "while the model still requested tools"
+    )
+    fail = policy["on_exhausted"] == "fail"
+    emit_trace_event(
+        "max_turns_exhausted",
+        node=node_id,
+        error=message if fail else None,
+        metadata={
+            "max_turns": policy["max_turns"],
+            "turns": turns,
+            "on_exhausted": policy["on_exhausted"],
+        },
+    )
+    if fail:
+        clear_current_node()
+        raise MaxTurnsExceeded(message)
+    return True
+
+
+def _skip_pending_tool_calls(response: Any, working: list, new_messages: list) -> None:
+    # Every tool call needs a tool result, or the next LLM call on this history fails.
+    for tc in getattr(response, "tool_calls", None) or []:
+        skipped = ToolMessage(content="Skipped: max_turns reached.", tool_call_id=tc["id"])
+        working.append(skipped)
+        new_messages.append(skipped)
+
+
+{% endif %}
 {% set context_nodes = ir.nodes | selectattr("agent") | selectattr("agent.memory") | list %}
 {% if context_nodes %}
 CONTEXT_POLICY_BY_NODE = {
@@ -119,6 +174,97 @@ STATE_INVARIANTS = [
 {% endfor %}
 ]
 
+{# Shared by agent and supervisor nodes so their guarantees cannot drift.
+   Callers append a comment tag after the call to trim the trailing newline.
+   `final` is true when the node returns its answer, false when a supervisor
+   delegates to a worker (only state-integrity checks apply then). #}
+{% macro hitl_config(node) %}
+{% if node.agent.human_in_the_loop %}
+    hitl = {
+        "enabled": {{ node.agent.human_in_the_loop.enabled | to_python }},
+        "trigger": "{{ node.agent.human_in_the_loop.trigger.value }}",
+        "tools": {{ node.agent.human_in_the_loop.tools | to_python }},
+        "message": {{ node.agent.human_in_the_loop.message | to_python }},
+    }
+{% else %}
+    hitl = None
+{% endif %}
+{% endmacro %}
+{% macro node_guarantees(node, final) %}
+{% if final %}
+{% if node.contract and node.contract.output_contract and ir.contracts %}
+    validated_output = _validate_node_output_contract(
+        "{{ node.id }}",
+        state,
+        new_messages,
+        {{ ir.contracts.outputs[node.contract.output_contract].model_dump(by_alias=True) | to_python }},
+        contract_kind="output_contract",
+        required=True,
+    )
+{% if node.contract.produces and node.contract.produces | length == 1 %}
+    if validated_output is not None:
+        updates["{{ node.contract.produces[0] }}"] = validated_output
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+{% else %}
+    if isinstance(validated_output, dict):
+        updates.update(validated_output)
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+    elif validated_output is not None:
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+{% endif %}
+{% endif %}
+{% endif %}
+{% if ir.contracts and ir.contracts.state.immutable_fields %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ ir.contracts.state.immutable_fields | to_python }},
+        contract_kind="immutable_fields",
+    )
+{% endif %}
+{% if node.contract and node.contract.forbids_mutation %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ node.contract.forbids_mutation | to_python }},
+        contract_kind="forbids_mutation",
+    )
+{% endif %}
+{% if final %}
+{% if node.contract and node.contract.produces %}
+    _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
+{% endif %}
+{% endif %}
+{% if ir.compiled_invariants %}
+    _check_state_invariants("{{ node.id }}", state, updates)
+{% endif %}
+{% if final %}
+    _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
+    escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
+{% endif %}
+{% endmacro %}
+{% macro rag_context(node) %}
+{% if node.agent.rag and node.agent.rag.enabled and node.agent.rag.mode.value != "tool_only" %}
+    rag_query = _last_user_message_content(working)
+    if rag_query:
+        try:
+            rag_context = str(TOOLS_BY_NAME["{{ node.agent.rag.retrieval_tool }}"].invoke({"query": rag_query}))
+        except Exception as exc:
+            rag_context = f"Retrieval error: {exc}"
+{% if node.agent.rag.max_context_chars is not none %}
+        rag_context = rag_context[:{{ node.agent.rag.max_context_chars }}]
+{% endif %}
+        rag_message = SystemMessage(
+            content="""{{ node.agent.rag.context_prompt | escape_string }}""" + "\n\n" + rag_context
+        )
+        if working and isinstance(working[0], SystemMessage):
+            working = [working[0], rag_message] + working[1:]
+        else:
+            working = [rag_message] + working
+{% endif %}
+{% endmacro %}
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
 {% endmacro %}
@@ -1168,6 +1314,7 @@ def _deliver_handoff_email(payload: dict[str, Any]) -> None:
 {% set finish_goto = '"' ~ finish_target ~ '"' if finish_target else "END" %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
     """Supervisor: {{ node.description }}"""
+{{ hitl_config(node) }}{# macro output ends with a newline #}
     set_current_node("{{ node.id }}")
 {% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
     emit_trace_event(
@@ -1210,7 +1357,14 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
     if not any(isinstance(m, SystemMessage) for m in working):
         working = [SystemMessage(content=system_prompt)] + working
 {% endif %}
+{{ rag_context(node) }}{# macro output ends with a newline #}
     new_messages: list = []
+    validated_artifact_outputs: dict[str, Any] = {}
+    # Worker the supervisor delegates to; None means it answers and finishes.
+    target: str | None = None
+{% if node.id in turns.ids %}
+    turns = 0
+{% endif %}
     while True:
         response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
@@ -1232,25 +1386,14 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                 ack = ToolMessage(content=content, tool_call_id=tc["id"])
                 working.append(ack)
                 new_messages.append(ack)
-            updates["{{ messages_key }}"] = new_messages
-            emit_trace_event(
-                "agent_handoff",
-                node="{{ node.id }}",
-                route=target,
-                tool=transfer_call["name"],
-                metadata={"iteration": iteration},
-            )
-            emit_trace_event(
-                "node_finished",
-                node="{{ node.id }}",
-                route=target,
-                input_state=state,
-                output_state=updates,
-                metadata={"handoff": True, "iteration": iteration},
-            )
-            clear_current_node()
-            return Command(goto=target, update=updates)
+            break
         if tool_calls:
+{% if node.id in turns.ids %}
+            turns += 1
+            if _max_turns_reached("{{ node.id }}", turns):
+                _skip_pending_tool_calls(response, working, new_messages)
+                break
+{% endif %}
             for tc in tool_calls:
                 fn = tool_map.get(tc["name"])
                 if fn is None:
@@ -1258,8 +1401,10 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                 else:
                     try:
                         validate_tool_arguments(tc["name"], tc.get("args", {}))
+                        _require_human_review("{{ node.id }}", hitl, "before_tool_call", tool_name=tc["name"])
                         content = str(fn.invoke(tc.get("args", {})))
-                    except PermissionError:
+                        _require_human_review("{{ node.id }}", hitl, "after_tool_call", tool_name=tc["name"])
+                    except (PermissionError, ToolPolicyViolation):
                         raise
                     except Exception as exc:
                         content = f"Tool error: {exc}"
@@ -1267,33 +1412,60 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                 working.append(tool_msg)
                 new_messages.append(tool_msg)
             continue
+        _require_human_review("{{ node.id }}", hitl, "before_response")
         break
     updates["{{ messages_key }}"] = new_messages
+    if target is not None:
+        # Delegating, not answering: only the state-integrity checks apply.
+{% set integrity_checks = node_guarantees(node, false) %}
+{% if integrity_checks %}
+{{ integrity_checks | indent(4, true) }}{# macro output ends with a newline #}
+{% endif %}
+        emit_trace_event(
+            "agent_handoff",
+            node="{{ node.id }}",
+            route=target,
+            tool=transfer_call["name"],
+            metadata={"iteration": iteration},
+        )
+        emit_trace_event(
+            "node_finished",
+            node="{{ node.id }}",
+            route=target,
+            input_state=state,
+            output_state=updates,
+            metadata={"handoff": True, "iteration": iteration},
+        )
+        clear_current_node()
+        return Command(goto=target, update=updates)
+{{ node_guarantees(node, true) }}{# macro output ends with a newline #}
+    # Low-confidence escalation reroutes the finish; the signal keys are only
+    # meant for conditional-edge routers, which a Command does not use.
+    updates.pop("__abp_escalation_target", None)
+    updates.pop("__abp_escalation_source", None)
     emit_trace_event(
         "node_finished",
         node="{{ node.id }}",
-        route={{ finish_target | to_python }},
+{% if finish_target %}
+        route=escalation_target if escalation_target is not None else {{ finish_target | to_python }},
+{% else %}
+        route=escalation_target,
+{% endif %}
         input_state=state,
         output_state=updates,
-        metadata={"handoff": False, "iteration": iteration},
+        metadata={"handoff": False, "iteration": iteration, "escalated": escalation_target is not None},
     )
     clear_current_node()
-    return Command(goto={{ finish_goto }}, update=updates)
+    return Command(
+        goto=escalation_target if escalation_target is not None else {{ finish_goto }},
+        update=updates,
+    )
 
 {% elif node.agent %}
 {% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """{{ node.description }}"""
-{% if node.agent.human_in_the_loop %}
-    hitl = {
-        "enabled": {{ node.agent.human_in_the_loop.enabled | to_python }},
-        "trigger": "{{ node.agent.human_in_the_loop.trigger.value }}",
-        "tools": {{ node.agent.human_in_the_loop.tools | to_python }},
-        "message": {{ node.agent.human_in_the_loop.message | to_python }},
-    }
-{% else %}
-    hitl = None
-{% endif %}
+{{ hitl_config(node) }}{# macro output ends with a newline #}
     set_current_node("{{ node.id }}")
 {% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
     emit_trace_event(
@@ -1326,29 +1498,15 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     if not any(isinstance(m, SystemMessage) for m in working):
         working = [SystemMessage(content=system_prompt)] + working
 {% endif %}
-{% if node.agent.rag and node.agent.rag.enabled and node.agent.rag.mode.value != "tool_only" %}
-    rag_query = _last_user_message_content(working)
-    if rag_query:
-        try:
-            rag_context = str(TOOLS_BY_NAME["{{ node.agent.rag.retrieval_tool }}"].invoke({"query": rag_query}))
-        except Exception as exc:
-            rag_context = f"Retrieval error: {exc}"
-{% if node.agent.rag.max_context_chars is not none %}
-        rag_context = rag_context[:{{ node.agent.rag.max_context_chars }}]
-{% endif %}
-        rag_message = SystemMessage(
-            content="""{{ node.agent.rag.context_prompt | escape_string }}""" + "\n\n" + rag_context
-        )
-        if working and isinstance(working[0], SystemMessage):
-            working = [working[0], rag_message] + working[1:]
-        else:
-            working = [rag_message] + working
-{% endif %}
+{{ rag_context(node) }}{# macro output ends with a newline #}
     new_messages: list = []
     updates: dict = {}
     validated_artifact_outputs: dict[str, Any] = {}
 {% if node.tool_defs %}
     # ReAct loop: invoke LLM, execute any tool calls, repeat until plain response
+{% if node.id in turns.ids %}
+    turns = 0
+{% endif %}
     while True:
         response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
@@ -1358,6 +1516,12 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
         if not getattr(response, "tool_calls", None):
             _require_human_review("{{ node.id }}", hitl, "before_response")
             break
+{% if node.id in turns.ids %}
+        turns += 1
+        if _max_turns_reached("{{ node.id }}", turns):
+            _skip_pending_tool_calls(response, working, new_messages)
+            break
+{% endif %}
         for tc in response.tool_calls:
             fn = tool_map.get(tc["name"])
             if fn is None:
@@ -1368,7 +1532,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
                     _require_human_review("{{ node.id }}", hitl, "before_tool_call", tool_name=tc["name"])
                     content = str(fn.invoke(tc.get("args", {})))
                     _require_human_review("{{ node.id }}", hitl, "after_tool_call", tool_name=tc["name"])
-                except PermissionError:
+                except (PermissionError, ToolPolicyViolation):
                     raise
                 except Exception as exc:
                     content = f"Tool error: {exc}"
@@ -1383,53 +1547,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     new_messages.append(response)
 {% endif %}
     updates["{{ messages_key }}"] = new_messages
-{% if node.contract and node.contract.output_contract and ir.contracts %}
-    validated_output = _validate_node_output_contract(
-        "{{ node.id }}",
-        state,
-        new_messages,
-        {{ ir.contracts.outputs[node.contract.output_contract].model_dump(by_alias=True) | to_python }},
-        contract_kind="output_contract",
-        required=True,
-    )
-{% if node.contract.produces and node.contract.produces | length == 1 %}
-    if validated_output is not None:
-        updates["{{ node.contract.produces[0] }}"] = validated_output
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-{% else %}
-    if isinstance(validated_output, dict):
-        updates.update(validated_output)
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-    elif validated_output is not None:
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-{% endif %}
-{% endif %}
-{% if ir.contracts and ir.contracts.state.immutable_fields %}
-    _ensure_fields_not_mutated(
-        "{{ node.id }}",
-        state,
-        updates,
-        {{ ir.contracts.state.immutable_fields | to_python }},
-        contract_kind="immutable_fields",
-    )
-{% endif %}
-{% if node.contract and node.contract.forbids_mutation %}
-    _ensure_fields_not_mutated(
-        "{{ node.id }}",
-        state,
-        updates,
-        {{ node.contract.forbids_mutation | to_python }},
-        contract_kind="forbids_mutation",
-    )
-{% endif %}
-{% if node.contract and node.contract.produces %}
-    _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
-{% endif %}
-{% if ir.compiled_invariants %}
-    _check_state_invariants("{{ node.id }}", state, updates)
-{% endif %}
-    _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
-    escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
+{{ node_guarantees(node, true) }}{# macro output ends with a newline #}
     emit_trace_event(
         "node_finished",
         node="{{ node.id }}",

@@ -83,6 +83,24 @@ declared in YAML, so ABP's guarantees hold:
   transfer tool name, so harness `route` assertions and the eval flywheel see
   dynamic routing exactly like static routing.
 
+A supervisor enforces the same node guarantees as an agent node. Which ones
+apply depends on whether it delegates or answers:
+
+| Guarantee | On delegation (`transfer_to_*`) | On answer (finish) |
+|---|---|---|
+| `contracts.nodes.<id>.requires` | ✅ (checked on entry) | ✅ |
+| `contracts.state.immutable_fields`, `forbids_mutation` | ✅ | ✅ |
+| `contracts.state.invariants` | ✅ | ✅ |
+| `output_contract`, `produces`, `artifacts` | — (no answer yet) | ✅ |
+| `policies.escalation.on_low_confidence` | — | ✅ reroutes the finish to the escalation target |
+| `human_in_the_loop` | `before_tool_call` / `after_tool_call` on regular tools | `before_response` |
+| tool policies, budgets, retry, RAG context | ✅ | ✅ |
+
+Transfers are delegation, not tool effects, so `human_in_the_loop` and tool
+policies do not gate them. `verify` and `retry.on_exhausted` are rejected on
+supervisor nodes at validation time. When `max_iterations` is exhausted the
+supervisor finishes without answering, so the answer-only checks do not run.
+
 Supervisors work inside subgraphs (workers and `on_finish` are namespaced
 with the rest of the subgraph).
 
@@ -97,6 +115,12 @@ state condition. Two safety nets apply:
   loop — in the main graph and inside every subgraph;
 - at runtime, `settings.max_graph_steps` (default 25) bounds total steps via
   LangGraph's `recursion_limit`.
+
+A tool-using agent or supervisor also loops *inside* one step (model → tools
+→ model). `max_graph_steps` does not see that loop; bound it with
+`agents.<id>.max_turns` or `settings.default_max_turns`, see
+[Runtime Guarantees](runtime-guarantees.md#tool-loop-bounds-max_turns). The
+`unbounded-tool-loop` lint warning flags tool loops that nothing bounds.
 
 ## Subgraph
 

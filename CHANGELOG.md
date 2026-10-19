@@ -6,6 +6,35 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+### Fixed
+
+- **Behavior change (fail-loud):** tool-usage policy violations
+  (`max_calls_per_node`, `max_calls_per_run`, `require_explicit_arguments`)
+  now stop the run, as documented. Both ReAct loops used to catch the error
+  and feed it back to the model as a `Tool error:` message, so a model that
+  kept calling the tool looped until another limit hit. The generated
+  `tools.py` raises `ToolPolicyViolation`, which agent and supervisor nodes
+  re-raise.
+- Supervisor nodes silently skipped node guarantees that agent nodes
+  enforce. They now apply `contracts.state.immutable_fields` /
+  `forbids_mutation` and invariants on every return, and `output_contract`,
+  `produces`, artifacts, low-confidence escalation (rerouting the finish) and
+  `before_response` review when they answer. Regular supervisor tool calls
+  honour `human_in_the_loop`, and `agents.*.rag` context is injected. See
+  `docs/workflow-nodes.md`.
+
+### Added
+
+- `agents.<id>.max_turns` / `settings.default_max_turns` cap the LLM calls in
+  an agent or supervisor tool loop. At the limit a `max_turns_exhausted`
+  trace event is emitted and `on_max_turns` either fails the run (default) or
+  finishes the node. Unset keeps the previous behaviour. See
+  `docs/runtime-guarantees.md`.
+- `unbounded-tool-loop` lint warning for tool-using nodes that nothing
+  bounds (no `max_turns`, tool-call limit, or token/cost budget).
+- `abp doctor` warns (`target-partial-feature`) about plain `type: function`
+  nodes, which generate a stub that returns no state updates.
+
 ### Changed
 
 - Scope refined: `abp package` and `abp deploy --platform docker|podman` are

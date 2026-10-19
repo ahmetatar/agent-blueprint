@@ -177,6 +177,21 @@ def _check_target_compatibility(
                     ),
                 ))
 
+    if target == TargetFramework.langgraph:
+        for node in ir.nodes:
+            if node.node_def.type.value == "function" and not node.node_def.metadata.get(
+                "abp_subgraph_adapter"
+            ):
+                findings.append(DoctorFinding(
+                    severity=DoctorSeverity.warning,
+                    code="target-partial-feature",
+                    location=f"graph.nodes.{node.id}",
+                    message=(
+                        f"Function node '{node.id}' generates a stub that returns no state "
+                        "updates; implement it in the generated nodes.py or use an agent node"
+                    ),
+                ))
+
     if target == TargetFramework.crewai:
         findings.append(DoctorFinding(
             severity=DoctorSeverity.error,

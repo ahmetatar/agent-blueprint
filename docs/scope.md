@@ -39,6 +39,6 @@ Everything else is kept working but frozen until there is demand for it.
 |---|---|---|
 | MCP tool generation (`mcp_servers`) | Not implemented | `abp generate` fails with the tool names; `abp doctor` reports it. See [mcp-servers.md](mcp-servers.md). |
 | `agents.*.memory.type: summary \| vector` | Not implemented | Fails at generation; use `conversation_buffer` |
-| Plain `type: function` nodes | Not implemented | Generate a stub that returns `{}`; not flagged by lint or doctor yet |
+| Plain `type: function` nodes | Not implemented | Generate a stub that returns `{}`; `abp doctor` warns (`target-partial-feature`) |
 
 Proposals that are not implemented live in [proposals/](proposals/).

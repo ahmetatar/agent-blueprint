@@ -22,10 +22,11 @@ What makes ABP different is not less boilerplate — it is that **everything you
 
 | You declare | The generated runtime does |
 |---|---|
-| `contracts.state.invariants` | Re-checks every invariant after each agent node; violations emit a `contract_failed` trace event, then raise |
+| `contracts.state.invariants` | Re-checks every invariant after each agent and supervisor node; violations emit a `contract_failed` trace event, then raise |
 | `contracts.nodes.*.output_contract` | Validates the node's structured output against your JSON-schema-style contract |
 | `policies.approvals` | Gates the listed tool calls behind human approval — `block` raises, `warn` continues but records a `policy_violation` event |
-| `policies.tool_usage` | Counts and caps tool calls per node and per run; unknown tools fail instead of silently passing through |
+| `policies.tool_usage` | Counts and caps tool calls per node and per run; a violation stops the run, and unknown tools fail instead of silently passing through |
+| `agents.*.max_turns` | Caps the LLM calls in a node's tool loop; at the limit it emits `max_turns_exhausted` and fails or finishes the node |
 | `policies.budgets` | Meters real token usage and provider-priced cost on every LLM call — crossing `max_tokens_per_run` / `max_cost_usd` aborts the run mid-flight; `max_latency_seconds` is verified at completion. All violations emit `policy_violation` events |
 | `policies.escalation` | Reroutes the workflow to your declared review/handoff node the moment confidence drops below the threshold — mid-run, not post-hoc |
 | `graph.nodes.*.retry` | Retries with backoff and emits retry trace events; exhausted retries fail deterministically |

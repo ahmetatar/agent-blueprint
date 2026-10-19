@@ -37,6 +37,7 @@ class BlueprintSettings(BaseModel):
     max_retries: int = 3
     timeout_seconds: int = 300
     max_graph_steps: int = 25
+    default_max_turns: int | None = Field(default=None, ge=1)
     ollama_base_url: str = "http://localhost:11434"
 
 

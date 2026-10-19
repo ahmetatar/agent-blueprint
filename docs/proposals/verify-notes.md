@@ -79,3 +79,15 @@ fast"): once `max_calls_per_node` is hit, every further call is a violation
 that is fed back to the model, and nothing ends the loop if the model keeps
 calling. Approval violations are unaffected (they raise `PermissionError`,
 which is re-raised). To be resolved together with `max_turns`.
+
+## Resolution (phase B)
+
+- Supervisor parity: every guarantee in the table above is now enforced on
+  supervisors (`tests/test_supervisor.py::TestSupervisorGuaranteeParity`,
+  runtime cases in `TestSupervisorGuaranteesRuntime`). See
+  `docs/workflow-nodes.md` for which checks run on delegation vs. answer.
+- Tool-usage violations raise `ToolPolicyViolation`, which both ReAct loops
+  re-raise, so the run stops.
+- Inner loops can be bounded with `max_turns` / `settings.default_max_turns`;
+  the `unbounded-tool-loop` lint warns when nothing bounds them.
+- Plain function nodes still generate a stub, but `abp doctor` now warns.

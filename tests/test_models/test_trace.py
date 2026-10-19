@@ -1,6 +1,8 @@
 """Tests for trace schema and normalization helpers."""
 
+import re
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -8,6 +10,7 @@ from pydantic import ValidationError
 from agent_blueprint.trace import (
     TRACE_SCHEMA_VERSION,
     TraceEvent,
+    TraceEventType,
     TraceManifest,
     TraceRunMetadata,
     diff_trace_manifests,
@@ -143,3 +146,12 @@ class TestTraceNormalization:
         assert "--- golden" in diff
         assert "lookup_invoice" in diff
         assert "issue_refund" in diff
+
+
+def test_every_emitted_event_is_registered():
+    templates = Path(__file__).parents[2] / "src" / "agent_blueprint" / "templates"
+    emitted: set[str] = set()
+    for path in templates.rglob("*.j2"):
+        emitted |= set(re.findall(r'emit_trace_event\(\s*"([a-z_]+)"', path.read_text()))
+    assert emitted, "no emit_trace_event calls found"
+    assert emitted <= {e.value for e in TraceEventType}

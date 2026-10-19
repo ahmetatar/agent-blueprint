@@ -70,6 +70,9 @@ def _load_generated_nodes_module(
         "}",
         "TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS.get('assistant', [])}",
         "",
+        "class ToolPolicyViolation(RuntimeError):",
+        "    pass",
+        "",
         "def validate_tool_arguments(tool_name, args):",
         *(
             [f"    {line}" for line in tool_validation_body]

@@ -173,3 +173,42 @@ class TestMaxTurnsRuntime:
         assert not result.passed
         assert len(_events(result, "tool_called")) == 1
         assert _events(result, "max_turns_exhausted")[0]["node"] == "lead"
+
+
+def _tool_loop_findings(raw: dict) -> list:
+    from agent_blueprint.linting import lint_blueprint
+
+    spec = BlueprintSpec.model_validate(raw)
+    return [f for f in lint_blueprint(spec, compile_blueprint(spec)) if f.code == "unbounded-tool-loop"]
+
+
+class TestUnboundedToolLoopLint:
+    def test_warns_when_nothing_bounds_the_loop(self):
+        findings = _tool_loop_findings(_looping_spec())
+        assert [(f.severity.value, f.location) for f in findings] == [
+            ("warning", "graph.nodes.worker")
+        ]
+
+    @pytest.mark.parametrize(
+        "bound",
+        [
+            {"agent": {"max_turns": 5}},
+            {"settings": {"default_max_turns": 5}},
+            {"policies": {"tool_usage": {"max_calls_per_node": 3}}},
+            {"policies": {"tool_usage": {"max_calls_per_run": 3}}},
+            {"policies": {"budgets": {"max_tokens_per_run": 1000}}},
+            {"policies": {"budgets": {"max_cost_usd": 0.5}}},
+        ],
+    )
+    def test_any_bound_silences_it(self, bound):
+        raw = _looping_spec(**bound.get("policies", {}))
+        raw["agents"]["worker"].update(bound.get("agent", {}))
+        if "settings" in bound:
+            raw["settings"] = bound["settings"]
+        assert _tool_loop_findings(raw) == []
+
+    def test_agents_without_tools_are_not_flagged(self):
+        raw = _looping_spec()
+        raw["agents"]["worker"]["tools"] = []
+        del raw["tools"]
+        assert _tool_loop_findings(raw) == []

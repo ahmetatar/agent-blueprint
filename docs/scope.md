@@ -20,8 +20,9 @@ Everything else is kept working but frozen until there is demand for it.
 | `abp lint`, `abp fix`, `abp doctor`, `abp inspect` | Core | |
 | `abp generate`, `abp run` (incl. `--sandbox`) | Core | LangGraph target |
 | `abp test`, `abp eval`, `abp gate`, `abp traces` | Core | |
-| `abp deploy` | Experimental | Docker/Podman (local), AWS App Runner, Azure Container Apps, GCP Cloud Run. Tested against recorded CLI calls, not live clouds. See [deploy.md](deploy.md). |
-| `abp package` | Experimental | pipx-installable CLI packaging. See [cli-packaging.md](cli-packaging.md). |
+| `abp package` | Core | pipx-installable CLI; the packaged agent keeps every runtime guarantee. CI builds, installs and runs it offline. See [cli-packaging.md](cli-packaging.md). |
+| `abp deploy --platform docker\|podman` | Core | Local container run of the deploy image. See [deploy.md](deploy.md). |
+| `abp deploy --platform aws\|azure\|gcp` | Experimental | AWS App Runner, Azure Container Apps, GCP Cloud Run. Tested against recorded CLI calls, not live clouds. |
 | `abp github` | Convenience | Opens the repository in a browser. |
 
 ## Generator targets

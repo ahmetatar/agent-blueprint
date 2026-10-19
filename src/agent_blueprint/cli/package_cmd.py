@@ -27,7 +27,7 @@ def package(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be packaged"),
 ) -> None:
-    """[Experimental] Package a blueprint as a pip/pipx-installable command-line tool.
+    """Package a blueprint as a pip/pipx-installable command-line tool.
 
     Generates the agent, restructures it into a src-layout Python package
     with a console-script entry point, and writes a pyproject.toml — so the

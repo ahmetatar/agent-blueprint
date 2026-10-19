@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+### Changed
+
+- Scope refined: `abp package` and `abp deploy --platform docker|podman` are
+  core again; only the cloud deployers (`aws`, `azure`, `gcp`) stay
+  experimental. A new CI step packages a fixture, installs it in a clean venv
+  and runs the resulting command offline.
+
 ## [0.5.0] - 2026-10-19
 
 Runtime-guarantee depth and a narrower scope. Agent memory trimming, tool

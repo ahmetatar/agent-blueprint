@@ -1,7 +1,8 @@
 # Deployment
 
-> **Experimental.** `abp deploy` is frozen: bug fixes are accepted, new features
-> are not. See [scope.md](scope.md).
+> **Cloud platforms are experimental.** `docker` and `podman` are core. The
+> `azure`, `aws` and `gcp` deployers are frozen (bug fixes only) and are tested
+> against recorded CLI calls, not live clouds. See [scope.md](scope.md).
 
 Deploy to a cloud platform with `abp deploy`. Requires Docker and the relevant CLI (`az` / `aws` / `gcloud`) to be installed and authenticated.
 

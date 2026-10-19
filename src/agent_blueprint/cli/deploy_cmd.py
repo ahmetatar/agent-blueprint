@@ -45,8 +45,10 @@ def deploy(
         None, "--env", help="Extra env vars as KEY=VALUE (repeatable)"
     ),
 ) -> None:
-    """[Experimental] Generate a blueprint and deploy it to a cloud platform.
+    """Generate a blueprint and deploy it as a container (cloud platforms are experimental).
 
+    docker / podman run the image locally. azure / aws / gcp are experimental:
+    they are tested against recorded CLI calls, not live clouds.
     Requires Docker and the platform CLI (az / aws / gcloud) to be installed
     and authenticated. Secret values are read from environment variables
     declared in the blueprint (model_providers, tools auth, etc.).

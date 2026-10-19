@@ -391,6 +391,14 @@ class TestSupervisorGuaranteeParity:
         assert helper in _node_calls(nodes_py, "node_research")
         assert helper in _node_calls(nodes_py, "node_coordinator")
 
+    def test_supervisor_injects_rag_context(self):
+        raw = _team_spec()
+        raw["retrievers"] = {"docs": {"impl": "kb.search", "description": "Docs"}}
+        raw["tools"] = {"search_kb": {"type": "retrieval", "retriever": "docs", "description": "KB"}}
+        raw["agents"]["boss"]["rag"] = {"tool": "search_kb", "mode": "context_only"}
+        nodes_py = generate(raw)["nodes.py"]
+        assert "_last_user_message_content" in _node_calls(nodes_py, "node_coordinator")
+
 
 def _require_langgraph() -> None:
     probe = subprocess.run([sys.executable, "-c", "import langgraph.graph"], capture_output=True)

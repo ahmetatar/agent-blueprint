@@ -190,6 +190,26 @@ STATE_INVARIANTS = [
     escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
 {% endif %}
 {% endmacro %}
+{% macro rag_context(node) %}
+{% if node.agent.rag and node.agent.rag.enabled and node.agent.rag.mode.value != "tool_only" %}
+    rag_query = _last_user_message_content(working)
+    if rag_query:
+        try:
+            rag_context = str(TOOLS_BY_NAME["{{ node.agent.rag.retrieval_tool }}"].invoke({"query": rag_query}))
+        except Exception as exc:
+            rag_context = f"Retrieval error: {exc}"
+{% if node.agent.rag.max_context_chars is not none %}
+        rag_context = rag_context[:{{ node.agent.rag.max_context_chars }}]
+{% endif %}
+        rag_message = SystemMessage(
+            content="""{{ node.agent.rag.context_prompt | escape_string }}""" + "\n\n" + rag_context
+        )
+        if working and isinstance(working[0], SystemMessage):
+            working = [working[0], rag_message] + working[1:]
+        else:
+            working = [rag_message] + working
+{% endif %}
+{% endmacro %}
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
 {% endmacro %}
@@ -1282,6 +1302,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
     if not any(isinstance(m, SystemMessage) for m in working):
         working = [SystemMessage(content=system_prompt)] + working
 {% endif %}
+{{ rag_context(node) }}{# macro output ends with a newline #}
     new_messages: list = []
     validated_artifact_outputs: dict[str, Any] = {}
     # Worker the supervisor delegates to; None means it answers and finishes.
@@ -1413,24 +1434,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     if not any(isinstance(m, SystemMessage) for m in working):
         working = [SystemMessage(content=system_prompt)] + working
 {% endif %}
-{% if node.agent.rag and node.agent.rag.enabled and node.agent.rag.mode.value != "tool_only" %}
-    rag_query = _last_user_message_content(working)
-    if rag_query:
-        try:
-            rag_context = str(TOOLS_BY_NAME["{{ node.agent.rag.retrieval_tool }}"].invoke({"query": rag_query}))
-        except Exception as exc:
-            rag_context = f"Retrieval error: {exc}"
-{% if node.agent.rag.max_context_chars is not none %}
-        rag_context = rag_context[:{{ node.agent.rag.max_context_chars }}]
-{% endif %}
-        rag_message = SystemMessage(
-            content="""{{ node.agent.rag.context_prompt | escape_string }}""" + "\n\n" + rag_context
-        )
-        if working and isinstance(working[0], SystemMessage):
-            working = [working[0], rag_message] + working[1:]
-        else:
-            working = [rag_message] + working
-{% endif %}
+{{ rag_context(node) }}{# macro output ends with a newline #}
     new_messages: list = []
     updates: dict = {}
     validated_artifact_outputs: dict[str, Any] = {}

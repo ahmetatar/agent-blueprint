@@ -45,7 +45,7 @@ def deploy(
         None, "--env", help="Extra env vars as KEY=VALUE (repeatable)"
     ),
 ) -> None:
-    """Generate a blueprint and deploy it to a cloud platform.
+    """[Experimental] Generate a blueprint and deploy it to a cloud platform.
 
     Requires Docker and the platform CLI (az / aws / gcloud) to be installed
     and authenticated. Secret values are read from environment variables

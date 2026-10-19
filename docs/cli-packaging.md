@@ -1,8 +1,5 @@
 # CLI Packaging
 
-> **Experimental.** `abp package` is frozen: bug fixes are accepted, new features
-> are not. See [scope.md](scope.md).
-
 `abp package` turns a blueprint into a **pip/pipx-installable command-line
 tool** — the local-machine counterpart of `abp deploy` (which exposes the same
 agent over HTTP). No trigger code to write: the command *is* the trigger.

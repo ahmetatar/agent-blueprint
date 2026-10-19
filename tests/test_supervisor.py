@@ -381,15 +381,7 @@ GUARANTEE_HELPERS = {
     "human_in_the_loop": "_require_human_review",
     "low_confidence_escalation": "_apply_low_confidence_escalation",
 }
-_SUPERVISOR_GAPS = {
-    "invariants",
-    "immutable_fields",
-    "produces",
-    "output_contract",
-    "artifacts",
-    "human_in_the_loop",
-    "low_confidence_escalation",
-}
+_SUPERVISOR_GAPS = {"human_in_the_loop"}
 
 
 class TestSupervisorGuaranteeParity:
@@ -410,3 +402,109 @@ class TestSupervisorGuaranteeParity:
         helper = GUARANTEE_HELPERS[guarantee]
         assert helper in _node_calls(nodes_py, "node_research")
         assert helper in _node_calls(nodes_py, "node_coordinator")
+
+
+def _require_langgraph() -> None:
+    probe = subprocess.run([sys.executable, "-c", "import langgraph.graph"], capture_output=True)
+    if probe.returncode != 0:
+        pytest.skip("langgraph is not installed")
+
+
+def _contracted_supervisor_spec() -> dict:
+    """Supervisor that must answer with a report and escalates low confidence."""
+    raw = _team_spec()
+    raw["state"]["fields"].update(
+        {"summary": {"type": "string"}, "confidence": {"type": "float"}}
+    )
+    raw["agents"]["rev"] = {"model": "gpt-4o", "system_prompt": "Review."}
+    raw["graph"]["nodes"]["review"] = {"agent": "rev"}
+    raw["graph"]["edges"].append({"from": "review", "to": "END"})
+    raw["contracts"] = {
+        "state": {"invariants": ["state.confidence == null or state.confidence <= 1"]},
+        "nodes": {
+            "coordinator": {"produces": ["summary", "confidence"], "output_contract": "report"}
+        },
+        "outputs": {
+            "report": {
+                "type": "object",
+                "required": ["summary", "confidence"],
+                "properties": {"summary": {"type": "string"}, "confidence": {"type": "number"}},
+            }
+        },
+    }
+    raw["artifacts"] = {
+        "team_report": {
+            "format": "json",
+            "producer": "coordinator",
+            "contract": "report",
+            "path": "artifacts/report.json",
+        }
+    }
+    raw["policies"] = {"escalation": {"on_low_confidence": "review", "confidence_threshold": 0.5}}
+    return raw
+
+
+def _run_supervisor_scenario(tmp_path, final_answer: str, expected: dict | None = None):
+    _require_langgraph()
+    raw = _contracted_supervisor_spec()
+    raw["harness"] = {
+        "scenarios": [
+            {
+                "id": "s",
+                "input": {"message": "Summarise the findings"},
+                "fixtures": {
+                    "llm_outputs": {
+                        "coordinator": [
+                            {"tool_calls": [{"name": "transfer_to_research", "args": {}}]},
+                            {"content": final_answer},
+                        ],
+                        "research": [{"content": "Found three issues."}],
+                        "review": [{"content": "Reviewed by a human."}],
+                    }
+                },
+                "expected": expected or {},
+            }
+        ]
+    }
+    ir = compile_blueprint(BlueprintSpec.model_validate(raw))
+    return run_harness_scenario(ir, ir.harness.scenarios[0], install=False, source_dir=tmp_path)
+
+
+def _events(result, name: str) -> list[dict]:
+    assert result.trace_manifest is not None, result.stderr
+    return [e for e in result.trace_manifest["trace"] if e.get("event") == name]
+
+
+class TestSupervisorGuaranteesRuntime:
+    """Supervisor guarantees on the real LangGraph runtime (skipped without it)."""
+
+    def test_valid_answer_produces_fields_and_artifact(self, tmp_path):
+        result = _run_supervisor_scenario(
+            tmp_path,
+            '{"summary": "three issues", "confidence": 0.9}',
+            {
+                "route": "coordinator",
+                "state_assertions": ["state.summary == 'three issues'"],
+                "artifacts": ["team_report"],
+            },
+        )
+        assert result.passed, (result.failures, result.stderr)
+
+    def test_invalid_answer_fails_output_contract(self, tmp_path):
+        result = _run_supervisor_scenario(tmp_path, "no structured answer")
+        assert not result.passed
+        failed = _events(result, "contract_failed")
+        assert failed and failed[0]["node"] == "coordinator"
+
+    def test_invariant_violation_fails_the_run(self, tmp_path):
+        result = _run_supervisor_scenario(tmp_path, '{"summary": "x", "confidence": 7}')
+        assert not result.passed
+        assert any(e["node"] == "coordinator" for e in _events(result, "contract_failed"))
+
+    def test_low_confidence_escalates_instead_of_finishing(self, tmp_path):
+        result = _run_supervisor_scenario(
+            tmp_path, '{"summary": "unsure", "confidence": 0.2}', {"route": "review"}
+        )
+        assert result.passed, (result.failures, result.stderr)
+        started = [e["node"] for e in _events(result, "node_started")]
+        assert started[-1] == "review"

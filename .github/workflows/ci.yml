@@ -85,4 +85,5 @@ jobs:
       - name: Real-runtime tests
         run: |
           pytest tests/test_generators/test_router_signals.py \
-            "tests/test_supervisor.py::TestSupervisorToolPolicies" -v
+            "tests/test_supervisor.py::TestSupervisorToolPolicies" \
+            "tests/test_supervisor.py::TestSupervisorGuaranteesRuntime" -v

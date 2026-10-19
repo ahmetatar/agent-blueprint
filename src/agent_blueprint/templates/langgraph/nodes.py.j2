@@ -1282,6 +1282,9 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
         working = [SystemMessage(content=system_prompt)] + working
 {% endif %}
     new_messages: list = []
+    validated_artifact_outputs: dict[str, Any] = {}
+    # Worker the supervisor delegates to; None means it answers and finishes.
+    target: str | None = None
     while True:
         response = _invoke_llm_with_retry("{{ node.id }}", llm, working)
         register_llm_budget_usage("{{ node.id }}", response)
@@ -1303,24 +1306,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
                 ack = ToolMessage(content=content, tool_call_id=tc["id"])
                 working.append(ack)
                 new_messages.append(ack)
-            updates["{{ messages_key }}"] = new_messages
-            emit_trace_event(
-                "agent_handoff",
-                node="{{ node.id }}",
-                route=target,
-                tool=transfer_call["name"],
-                metadata={"iteration": iteration},
-            )
-            emit_trace_event(
-                "node_finished",
-                node="{{ node.id }}",
-                route=target,
-                input_state=state,
-                output_state=updates,
-                metadata={"handoff": True, "iteration": iteration},
-            )
-            clear_current_node()
-            return Command(goto=target, update=updates)
+            break
         if tool_calls:
             for tc in tool_calls:
                 fn = tool_map.get(tc["name"])
@@ -1340,16 +1326,51 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
             continue
         break
     updates["{{ messages_key }}"] = new_messages
+    if target is not None:
+        # Delegating, not answering: only the state-integrity checks apply.
+{% set integrity_checks = node_guarantees(node, false) %}
+{% if integrity_checks %}
+{{ integrity_checks | indent(4, true) }}{# macro output ends with a newline #}
+{% endif %}
+        emit_trace_event(
+            "agent_handoff",
+            node="{{ node.id }}",
+            route=target,
+            tool=transfer_call["name"],
+            metadata={"iteration": iteration},
+        )
+        emit_trace_event(
+            "node_finished",
+            node="{{ node.id }}",
+            route=target,
+            input_state=state,
+            output_state=updates,
+            metadata={"handoff": True, "iteration": iteration},
+        )
+        clear_current_node()
+        return Command(goto=target, update=updates)
+{{ node_guarantees(node, true) }}{# macro output ends with a newline #}
+    # Low-confidence escalation reroutes the finish; the signal keys are only
+    # meant for conditional-edge routers, which a Command does not use.
+    updates.pop("__abp_escalation_target", None)
+    updates.pop("__abp_escalation_source", None)
     emit_trace_event(
         "node_finished",
         node="{{ node.id }}",
-        route={{ finish_target | to_python }},
+{% if finish_target %}
+        route=escalation_target if escalation_target is not None else {{ finish_target | to_python }},
+{% else %}
+        route=escalation_target,
+{% endif %}
         input_state=state,
         output_state=updates,
-        metadata={"handoff": False, "iteration": iteration},
+        metadata={"handoff": False, "iteration": iteration, "escalated": escalation_target is not None},
     )
     clear_current_node()
-    return Command(goto={{ finish_goto }}, update=updates)
+    return Command(
+        goto=escalation_target if escalation_target is not None else {{ finish_goto }},
+        update=updates,
+    )
 
 {% elif node.agent %}
 {% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}

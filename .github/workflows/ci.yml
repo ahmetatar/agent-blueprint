@@ -44,3 +44,31 @@ jobs:
           abp --help
           abp validate tests/fixtures/basic_chatbot.yml
           abp lint tests/fixtures/basic_chatbot.yml
+
+  e2e:
+    # Runs generated projects on the real LangGraph runtime, fully offline
+    # (mocked LLM, stubbed tools, no API keys). The `test` job never installs
+    # LangGraph, so this is the only place generated code actually executes.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Offline harness on real LangGraph
+        run: abp test tests/fixtures/e2e_offline.yml --install --save-traces none
+
+      - name: Real-runtime tests
+        run: |
+          pytest tests/test_generators/test_router_signals.py \
+            "tests/test_supervisor.py::TestSupervisorToolPolicies" -v

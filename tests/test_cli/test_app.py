@@ -25,7 +25,7 @@ def test_root_help_shows_welcome_banner():
     output = normalize_ws(result.output)
 
     assert result.exit_code == 0
-    assert "Declarative, framework-agnostic AI agent orchestration via YAML" in output
+    assert "Declarative AI agent orchestration with runtime guarantees" in output
     assert "█████╗ ██████╗" in result.output
 
 
@@ -34,7 +34,7 @@ def test_no_args_shows_welcome_banner():
     output = normalize_ws(result.output)
 
     assert result.exit_code == 0
-    assert "Declarative, framework-agnostic AI agent orchestration via YAML" in output
+    assert "Declarative AI agent orchestration with runtime guarantees" in output
     assert "Usage:" in result.output
 
 
@@ -43,5 +43,5 @@ def test_subcommand_help_does_not_repeat_root_banner():
     output = strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert "Declarative, framework-agnostic AI agent orchestration via YAML" not in output
+    assert "Declarative AI agent orchestration with runtime guarantees" not in output
     assert "--template" in output

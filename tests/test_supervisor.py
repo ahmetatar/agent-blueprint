@@ -1,11 +1,14 @@
 """Tests for supervisor routing — models, compiler, lint, and generation."""
 
 import ast
+import subprocess
+import sys
 
 import pytest
 from pydantic import ValidationError
 
 from agent_blueprint.generators.langgraph import LangGraphGenerator
+from agent_blueprint.harness_runner import run_harness_scenario
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.linting import lint_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
@@ -241,3 +244,69 @@ class TestSupervisorGeneration:
         # workers are plain agent nodes returning dicts, not Commands
         assert "def node_research(state: AgentState) -> dict:" in nodes_py
         assert "def node_writer(state: AgentState) -> dict:" in nodes_py
+
+
+def _supervisor_with_tool_spec() -> dict:
+    raw = _team_spec()
+    raw["agents"]["boss"]["tools"] = ["lookup"]
+    raw["tools"] = {
+        "lookup": {
+            "type": "function",
+            "impl": "lookup_impl.lookup",
+            "description": "Look up a record",
+            "parameters": {"record_id": {"type": "string", "required": True}},
+        }
+    }
+    raw["policies"] = {"tool_usage": {"require_explicit_arguments": True}}
+    return raw
+
+
+def _supervisor_function(nodes_py: str) -> ast.FunctionDef:
+    tree = ast.parse(nodes_py)
+    return next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "node_coordinator"
+    )
+
+
+class TestSupervisorToolPolicies:
+    def test_regular_tool_calls_are_validated(self):
+        fn = _supervisor_function(generate(_supervisor_with_tool_spec())["nodes.py"])
+        called = {
+            n.func.id for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        assert "validate_tool_arguments" in called
+
+    def test_policy_violation_recorded_on_real_langgraph(self, tmp_path):
+        # Subprocess run of the generated project; skipped where langgraph is absent.
+        probe = subprocess.run([sys.executable, "-c", "import langgraph.graph"], capture_output=True)
+        if probe.returncode != 0:
+            pytest.skip("langgraph is not installed")
+        (tmp_path / "lookup_impl.py").write_text("def lookup(record_id):\n    return 'ok'\n")
+        raw = _supervisor_with_tool_spec()
+        raw["harness"] = {
+            "scenarios": [
+                {
+                    "id": "bad_args",
+                    "input": {"message": "find record 7"},
+                    "fixtures": {
+                        "llm_outputs": {
+                            "coordinator": [
+                                {"tool_calls": [{"name": "lookup", "args": {"bogus": 1}}]},
+                                {"content": "Done."},
+                            ]
+                        }
+                    },
+                }
+            ]
+        }
+        ir = compile_blueprint(BlueprintSpec.model_validate(raw))
+        result = run_harness_scenario(
+            ir, ir.harness.scenarios[0], install=False, source_dir=tmp_path
+        )
+        assert result.trace_manifest is not None, result.stderr
+        violations = [
+            e for e in result.trace_manifest["trace"] if e.get("event") == "policy_violation"
+        ]
+        assert violations, result.trace_manifest["trace"]
+        assert violations[0]["node"] == "coordinator"
+        assert violations[0]["tool"] == "lookup"

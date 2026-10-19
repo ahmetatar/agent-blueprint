@@ -40,6 +40,11 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
   annotated with the state TypedDict, which makes LangGraph hide the node's
   undeclared `__abp_escalation_*` signal keys from them. Routers are now
   unannotated. Covered by new end-to-end tests on the real runtime.
+- Package metadata: the license is now an SPDX expression (`license = "MIT"`,
+  PEP 639) with the redundant license classifier removed — the old combination
+  made PyPI reject uploads with `400 Bad Request`. The core dependency is now
+  `typer>=0.12` (the `typer[all]` extra no longer exists and triggered an
+  install warning).
 
 ### Changed
 

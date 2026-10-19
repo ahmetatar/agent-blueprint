@@ -2,6 +2,8 @@
 
 import ast
 
+from agent_blueprint.cli.generate import TargetFramework
+from agent_blueprint.doctoring import DoctorSeverity, doctor_blueprint
 from agent_blueprint.generators.langgraph import LangGraphGenerator
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.linting import lint_blueprint
@@ -204,3 +206,21 @@ class TestGeneratedHandoffRuntime:
         monkeypatch.delenv("ABP_HANDOFF_WEBHOOK_URL", raising=False)
         with pytest.raises(RuntimeError, match="ABP_HANDOFF_WEBHOOK_URL"):
             ns["_deliver_handoff_webhook"]({"message": "x"})
+
+
+def test_doctor_warns_about_stub_function_nodes():
+    raw = {
+        "blueprint": {"name": "fn"},
+        "agents": {"a": {"model": "gpt-4o"}},
+        "graph": {
+            "entry_point": "a",
+            "nodes": {"a": {"agent": "a"}, "tidy": {"type": "function", "action": "tidy_up"}},
+            "edges": [{"from": "a", "to": "tidy"}, {"from": "tidy", "to": "END"}],
+        },
+    }
+    spec = BlueprintSpec.model_validate(raw)
+    findings = doctor_blueprint(spec, compile_blueprint(spec), target=TargetFramework.langgraph)
+    stub = [f for f in findings if f.location == "graph.nodes.tidy"]
+    assert len(stub) == 1
+    assert stub[0].severity == DoctorSeverity.warning
+    assert stub[0].code == "target-partial-feature"

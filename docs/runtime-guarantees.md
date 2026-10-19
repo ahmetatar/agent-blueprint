@@ -285,9 +285,13 @@ agents:
     on_max_turns: fail       # fail (default) | finish
 ```
 
-- `max_turns` counts LLM calls in one invocation of the node. If the model
-  still asks for tools on the last allowed call, the node emits
+- `max_turns` counts LLM calls in one invocation of the node, because model
+  calls are what drive cost and latency. Tool executions are capped
+  separately by `policies.tool_usage.max_calls_per_node`. If the model still
+  asks for tools on the last allowed call, the node emits
   `max_turns_exhausted` (`metadata.max_turns`, `turns`, `on_exhausted`).
+  Example: `max_turns: 3` allows three model calls, so at most two rounds of
+  tool execution.
 - `on_max_turns: fail` raises `MaxTurnsExceeded` and stops the run.
 - `on_max_turns: finish` answers the pending tool calls with a "skipped"
   tool message and finishes the node with what it has. Node contracts still

@@ -119,6 +119,77 @@ STATE_INVARIANTS = [
 {% endfor %}
 ]
 
+{# Shared by agent and supervisor nodes so their guarantees cannot drift.
+   Callers append a comment tag after the call to trim the trailing newline.
+   `final` is true when the node returns its answer, false when a supervisor
+   delegates to a worker (only state-integrity checks apply then). #}
+{% macro hitl_config(node) %}
+{% if node.agent.human_in_the_loop %}
+    hitl = {
+        "enabled": {{ node.agent.human_in_the_loop.enabled | to_python }},
+        "trigger": "{{ node.agent.human_in_the_loop.trigger.value }}",
+        "tools": {{ node.agent.human_in_the_loop.tools | to_python }},
+        "message": {{ node.agent.human_in_the_loop.message | to_python }},
+    }
+{% else %}
+    hitl = None
+{% endif %}
+{% endmacro %}
+{% macro node_guarantees(node, final) %}
+{% if final %}
+{% if node.contract and node.contract.output_contract and ir.contracts %}
+    validated_output = _validate_node_output_contract(
+        "{{ node.id }}",
+        state,
+        new_messages,
+        {{ ir.contracts.outputs[node.contract.output_contract].model_dump(by_alias=True) | to_python }},
+        contract_kind="output_contract",
+        required=True,
+    )
+{% if node.contract.produces and node.contract.produces | length == 1 %}
+    if validated_output is not None:
+        updates["{{ node.contract.produces[0] }}"] = validated_output
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+{% else %}
+    if isinstance(validated_output, dict):
+        updates.update(validated_output)
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+    elif validated_output is not None:
+        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
+{% endif %}
+{% endif %}
+{% endif %}
+{% if ir.contracts and ir.contracts.state.immutable_fields %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ ir.contracts.state.immutable_fields | to_python }},
+        contract_kind="immutable_fields",
+    )
+{% endif %}
+{% if node.contract and node.contract.forbids_mutation %}
+    _ensure_fields_not_mutated(
+        "{{ node.id }}",
+        state,
+        updates,
+        {{ node.contract.forbids_mutation | to_python }},
+        contract_kind="forbids_mutation",
+    )
+{% endif %}
+{% if final %}
+{% if node.contract and node.contract.produces %}
+    _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
+{% endif %}
+{% endif %}
+{% if ir.compiled_invariants %}
+    _check_state_invariants("{{ node.id }}", state, updates)
+{% endif %}
+{% if final %}
+    _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
+    escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
+{% endif %}
+{% endmacro %}
 {% macro make_llm(node, temperature) %}
 llm = build_llm("{{ node.id }}", lambda: {{ llm_class(node) }}({{ llm_call_args(node, temperature) }}))
 {% endmacro %}
@@ -1284,16 +1355,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> Command:
 {% set messages_key = node.node_def.metadata.get("abp_state_key_map", {}).get("messages", "messages") %}
 def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     """{{ node.description }}"""
-{% if node.agent.human_in_the_loop %}
-    hitl = {
-        "enabled": {{ node.agent.human_in_the_loop.enabled | to_python }},
-        "trigger": "{{ node.agent.human_in_the_loop.trigger.value }}",
-        "tools": {{ node.agent.human_in_the_loop.tools | to_python }},
-        "message": {{ node.agent.human_in_the_loop.message | to_python }},
-    }
-{% else %}
-    hitl = None
-{% endif %}
+{{ hitl_config(node) }}{# macro output ends with a newline #}
     set_current_node("{{ node.id }}")
 {% for p in ir.nodes if p.node_def.type.value == "parallel" and p.node_def.join == node.id %}
     emit_trace_event(
@@ -1383,53 +1445,7 @@ def node_{{ node.id | safe_id }}(state: AgentState) -> dict:
     new_messages.append(response)
 {% endif %}
     updates["{{ messages_key }}"] = new_messages
-{% if node.contract and node.contract.output_contract and ir.contracts %}
-    validated_output = _validate_node_output_contract(
-        "{{ node.id }}",
-        state,
-        new_messages,
-        {{ ir.contracts.outputs[node.contract.output_contract].model_dump(by_alias=True) | to_python }},
-        contract_kind="output_contract",
-        required=True,
-    )
-{% if node.contract.produces and node.contract.produces | length == 1 %}
-    if validated_output is not None:
-        updates["{{ node.contract.produces[0] }}"] = validated_output
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-{% else %}
-    if isinstance(validated_output, dict):
-        updates.update(validated_output)
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-    elif validated_output is not None:
-        validated_artifact_outputs["{{ node.contract.output_contract }}"] = validated_output
-{% endif %}
-{% endif %}
-{% if ir.contracts and ir.contracts.state.immutable_fields %}
-    _ensure_fields_not_mutated(
-        "{{ node.id }}",
-        state,
-        updates,
-        {{ ir.contracts.state.immutable_fields | to_python }},
-        contract_kind="immutable_fields",
-    )
-{% endif %}
-{% if node.contract and node.contract.forbids_mutation %}
-    _ensure_fields_not_mutated(
-        "{{ node.id }}",
-        state,
-        updates,
-        {{ node.contract.forbids_mutation | to_python }},
-        contract_kind="forbids_mutation",
-    )
-{% endif %}
-{% if node.contract and node.contract.produces %}
-    _require_produced_fields("{{ node.id }}", state, updates, {{ node.contract.produces | to_python }})
-{% endif %}
-{% if ir.compiled_invariants %}
-    _check_state_invariants("{{ node.id }}", state, updates)
-{% endif %}
-    _write_node_artifacts("{{ node.id }}", state, updates, new_messages, validated_artifact_outputs)
-    escalation_target = _apply_low_confidence_escalation("{{ node.id }}", updates)
+{{ node_guarantees(node, true) }}{# macro output ends with a newline #}
     emit_trace_event(
         "node_finished",
         node="{{ node.id }}",

@@ -1,0 +1,14 @@
+{
+  "llm_outputs": {
+    "router": [{"content": "{\"route\": \"billing\", \"confidence\": 0.9}"}],
+    "billing_lead": [
+      {"tool_calls": [{"name": "transfer_to_refund_desk", "args": {}}]},
+      {"content": "Refund handled."}
+    ],
+    "refund_desk": [
+      {"tool_calls": [{"name": "lookup_invoice", "args": {"invoice_id": "123"}}]},
+      {"content": "Invoice 123 refunded."}
+    ]
+  },
+  "tool_outputs": {"lookup_invoice": {"status": "paid"}}
+}

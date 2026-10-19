@@ -68,6 +68,20 @@ jobs:
       - name: Offline harness on real LangGraph
         run: abp test tests/fixtures/e2e_offline.yml --install --save-traces none
 
+      - name: Packaged CLI smoke
+        # Package the fixture, install it into a clean venv and run the
+        # resulting console script offline (mocked LLM, stubbed tools).
+        run: |
+          abp package tests/fixtures/e2e_offline.yml -o "$RUNNER_TEMP/e2e-cli"
+          python -m venv "$RUNNER_TEMP/pkg-venv"
+          "$RUNNER_TEMP/pkg-venv/bin/pip" install -q "$RUNNER_TEMP/e2e-cli"
+          cd "$RUNNER_TEMP"
+          out=$(ABP_LLM_MODE=mock ABP_TOOL_MODE=stub \
+            ABP_HARNESS_FIXTURES="$(cat "$GITHUB_WORKSPACE/tests/fixtures/e2e_offline_cli_fixtures.json")" \
+            "$RUNNER_TEMP/pkg-venv/bin/e2e-offline" "Please refund invoice 123")
+          echo "$out"
+          test "$out" = "Refund handled."
+
       - name: Real-runtime tests
         run: |
           pytest tests/test_generators/test_router_signals.py \

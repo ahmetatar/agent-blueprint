@@ -1,0 +1,109 @@
+# End-to-end fixture for CI: runs the generated LangGraph project offline
+# (mocked LLM, stubbed tools). Covers contracts, conditional routing, a
+# supervisor delegating to workers, tool-usage policies and invariants.
+blueprint:
+  name: e2e-offline
+  version: "1.0"
+
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+    route: { type: string }
+    confidence: { type: float }
+
+agents:
+  router:
+    model: openai/gpt-4o
+    system_prompt: "Classify the ticket. Reply as JSON: {route, confidence}."
+  lead:
+    model: openai/gpt-4o
+    system_prompt: "Coordinate billing work. Delegate to a specialist."
+  refunds:
+    model: openai/gpt-4o
+    system_prompt: "You issue refunds."
+    tools: [lookup_invoice]
+  fallback:
+    model: openai/gpt-4o
+    system_prompt: "Hand the ticket to a human agent."
+
+tools:
+  lookup_invoice:
+    type: api
+    method: GET
+    url: "https://billing.example.com/invoices/{invoice_id}"
+    description: "Fetch an invoice"
+    side_effect: read
+    parameters:
+      invoice_id: { type: string, required: true }
+
+contracts:
+  nodes:
+    router:
+      produces: [route, confidence]
+      output_contract: triage
+  outputs:
+    triage:
+      type: object
+      required: [route, confidence]
+      properties:
+        route: { type: string }
+        confidence: { type: number }
+  state:
+    invariants:
+      - "state.confidence == null or state.confidence <= 1"
+
+policies:
+  tool_usage:
+    max_calls_per_node: 2
+    require_explicit_arguments: true
+    on_unknown_tool: fail
+
+graph:
+  entry_point: router
+  nodes:
+    router: { agent: router }
+    billing_lead:
+      type: supervisor
+      agent: lead
+      workers: [refund_desk]
+      max_iterations: 3
+    refund_desk: { agent: refunds, description: "Refund specialist" }
+    human: { agent: fallback }
+  edges:
+    - from: router
+      to:
+        - target: billing_lead
+          condition: "state.route == 'billing' and state.confidence >= 0.8"
+        - default: human
+    - { from: human, to: END }
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+  scenarios:
+    - id: refund_via_supervisor
+      input: { message: "Please refund invoice 123" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "billing", "confidence": 0.9}' }]
+          billing_lead:
+            - { tool_calls: [{ name: transfer_to_refund_desk, args: {} }] }
+            - { content: "Refund handled." }
+          refund_desk:
+            - { tool_calls: [{ name: lookup_invoice, args: { invoice_id: "123" } }] }
+            - { content: "Invoice 123 refunded." }
+        tool_outputs: { lookup_invoice: { status: paid } }
+      expected:
+        route: billing_lead
+        tools_called: [lookup_invoice]
+        state_assertions:
+          - "state.route == 'billing'"
+    - id: low_confidence_to_human
+      input: { message: "Something is off" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "billing", "confidence": 0.4}' }]
+          human: [{ content: "A human will follow up." }]
+      expected:
+        route: human

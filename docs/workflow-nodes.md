@@ -83,6 +83,24 @@ declared in YAML, so ABP's guarantees hold:
   transfer tool name, so harness `route` assertions and the eval flywheel see
   dynamic routing exactly like static routing.
 
+A supervisor enforces the same node guarantees as an agent node. Which ones
+apply depends on whether it delegates or answers:
+
+| Guarantee | On delegation (`transfer_to_*`) | On answer (finish) |
+|---|---|---|
+| `contracts.nodes.<id>.requires` | ✅ (checked on entry) | ✅ |
+| `contracts.state.immutable_fields`, `forbids_mutation` | ✅ | ✅ |
+| `contracts.state.invariants` | ✅ | ✅ |
+| `output_contract`, `produces`, `artifacts` | — (no answer yet) | ✅ |
+| `policies.escalation.on_low_confidence` | — | ✅ reroutes the finish to the escalation target |
+| `human_in_the_loop` | `before_tool_call` / `after_tool_call` on regular tools | `before_response` |
+| tool policies, budgets, retry, RAG context | ✅ | ✅ |
+
+Transfers are delegation, not tool effects, so `human_in_the_loop` and tool
+policies do not gate them. `verify` and `retry.on_exhausted` are rejected on
+supervisor nodes at validation time. When `max_iterations` is exhausted the
+supervisor finishes without answering, so the answer-only checks do not run.
+
 Supervisors work inside subgraphs (workers and `on_finish` are namespaced
 with the rest of the subgraph).
 

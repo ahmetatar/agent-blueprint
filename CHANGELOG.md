@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+### Fixed
+
+- Supervisor nodes silently skipped node guarantees that agent nodes
+  enforce. They now apply `contracts.state.immutable_fields` /
+  `forbids_mutation` and invariants on every return, and `output_contract`,
+  `produces`, artifacts, low-confidence escalation (rerouting the finish) and
+  `before_response` review when they answer. Regular supervisor tool calls
+  honour `human_in_the_loop`, and `agents.*.rag` context is injected. See
+  `docs/workflow-nodes.md`.
+
+### Added
+
+- `abp doctor` warns (`target-partial-feature`) about plain `type: function`
+  nodes, which generate a stub that returns no state updates.
+
 ### Changed
 
 - Scope refined: `abp package` and `abp deploy --platform docker|podman` are

@@ -153,6 +153,7 @@ Important runtime events already available:
 - `approval_denied`
 - `contract_failed`
 - `policy_violation`
+- `max_turns_exhausted`
 - `run_finished`
 
 Example:
@@ -258,13 +259,44 @@ policies:
 
 What this gives you:
 
-- runaway ReAct loops fail fast
+- runaway ReAct loops fail fast: a violation emits `policy_violation` and
+  stops the run (it is not returned to the model as a tool error)
 - unknown tool names do not quietly degrade into text responses
 - malformed tool calls become policy violations instead of random Python errors
 
 Real-life use case:
 
 - a research agent should not call web search ten times because the model keeps retrying with slightly different phrasing
+
+### Tool loop bounds (`max_turns`)
+
+An agent or supervisor with tools runs a ReAct loop inside a single graph
+step: call the model, run the requested tools, call the model again.
+`settings.max_graph_steps` cannot stop that loop. `max_turns` can:
+
+```yaml
+settings:
+  default_max_turns: 10      # every tool-using agent, unless overridden
+
+agents:
+  researcher:
+    tools: [web_search]
+    max_turns: 4             # at most 4 LLM calls per node invocation
+    on_max_turns: fail       # fail (default) | finish
+```
+
+- `max_turns` counts LLM calls in one invocation of the node. If the model
+  still asks for tools on the last allowed call, the node emits
+  `max_turns_exhausted` (`metadata.max_turns`, `turns`, `on_exhausted`).
+- `on_max_turns: fail` raises `MaxTurnsExceeded` and stops the run.
+- `on_max_turns: finish` answers the pending tool calls with a "skipped"
+  tool message and finishes the node with what it has. Node contracts still
+  apply, so a required `output_contract` fails if the model never answered.
+- `verify` re-runs a node; each attempt gets its own turn counter.
+- Unset (the default) keeps the previous, unbounded behaviour. The
+  `unbounded-tool-loop` lint warning flags tool-using nodes that have no
+  `max_turns`, no `policies.tool_usage` call limit and no token or cost
+  budget.
 
 ### 7. Budgets
 

@@ -116,6 +116,12 @@ state condition. Two safety nets apply:
 - at runtime, `settings.max_graph_steps` (default 25) bounds total steps via
   LangGraph's `recursion_limit`.
 
+A tool-using agent or supervisor also loops *inside* one step (model → tools
+→ model). `max_graph_steps` does not see that loop; bound it with
+`agents.<id>.max_turns` or `settings.default_max_turns`, see
+[Runtime Guarantees](runtime-guarantees.md#tool-loop-bounds-max_turns). The
+`unbounded-tool-loop` lint warning flags tool loops that nothing bounds.
+
 ## Subgraph
 
 ```yaml

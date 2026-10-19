@@ -25,6 +25,13 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `agents.<id>.max_turns` / `settings.default_max_turns` cap the LLM calls in
+  an agent or supervisor tool loop. At the limit a `max_turns_exhausted`
+  trace event is emitted and `on_max_turns` either fails the run (default) or
+  finishes the node. Unset keeps the previous behaviour. See
+  `docs/runtime-guarantees.md`.
+- `unbounded-tool-loop` lint warning for tool-using nodes that nothing
+  bounds (no `max_turns`, tool-call limit, or token/cost budget).
 - `abp doctor` warns (`target-partial-feature`) about plain `type: function`
   nodes, which generate a stub that returns no state updates.
 

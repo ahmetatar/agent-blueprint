@@ -3,6 +3,8 @@
 ABP's value is the blueprint spec, the runtime guarantees compiled from it, and
 the test and gate tooling around them. Development effort goes to that core.
 Everything else is kept working but frozen until there is demand for it.
+Every capability starts as a blueprint declaration; ABP has no spec-less path
+(see [ADR 0001](adr/0001-blueprint-is-the-source-of-truth.md)).
 
 ## Tiers
 

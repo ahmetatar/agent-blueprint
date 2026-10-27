@@ -80,6 +80,7 @@ RETRY_POLICY_BY_NODE = {
 }
 {% set fallback_nodes = ir.nodes | selectattr("node_def.retry.on_exhausted") | list %}
 {% set verify_nodes = ir.nodes | selectattr("node_def.verify") | list %}
+{% set state_only_nodes = ir.nodes | selectattr("contract") | rejectattr("contract.append_to_messages") | list %}
 {% if verify_nodes %}
 VERIFY_POLICY_BY_NODE = {
 {% for node in verify_nodes %}
@@ -534,6 +535,24 @@ def _with_verification(node_id: str, messages_key: str, fn: Any) -> Any:
         raise error
 
     wrapper.__name__ = getattr(fn, "__name__", node_id)
+    return wrapper
+
+
+{% endif %}
+{% if state_only_nodes %}
+def _without_messages(messages_key: str, fn: Any) -> Any:
+    """Keep a node's validated output in state only (`append_to_messages: false`).
+
+    Outermost wrapper, so verification still sees the reply. Later nodes never get
+    the raw contract payload as the conversation's last assistant turn.
+    """
+    def wrapper(state: AgentState) -> Any:
+        updates = fn(state)
+        if isinstance(updates, dict):
+            updates.pop(messages_key, None)
+        return updates
+
+    wrapper.__name__ = getattr(fn, "__name__", "node")
     return wrapper
 
 
@@ -1708,5 +1727,11 @@ node_{{ node.id | safe_id }} = _with_verification(
 
 node_{{ node.id | safe_id }} = _with_retry_fallback(
     "{{ node.id }}", "{{ node.node_def.retry.on_exhausted }}", node_{{ node.id | safe_id }}
+)
+{% endfor %}
+{% for node in state_only_nodes %}
+
+node_{{ node.id | safe_id }} = _without_messages(
+    "{{ node.node_def.metadata.get('abp_state_key_map', {}).get('messages', 'messages') }}", node_{{ node.id | safe_id }}
 )
 {% endfor %}

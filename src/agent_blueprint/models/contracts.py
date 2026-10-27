@@ -30,6 +30,9 @@ class NodeContractDef(BaseModel):
     produces: list[str] = Field(default_factory=list)
     forbids_mutation: list[str] = Field(default_factory=list)
     output_contract: str | None = None
+    # False keeps the validated output in state only: the node's reply is not
+    # appended to the conversation that later nodes see.
+    append_to_messages: bool = True
 
 
 class ContractsDef(BaseModel):

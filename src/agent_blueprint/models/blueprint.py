@@ -9,7 +9,7 @@ from agent_blueprint.models.artifacts import ArtifactDef
 from agent_blueprint.models.contracts import ContractsDef
 from agent_blueprint.models.deploy import DeployConfig
 from agent_blueprint.models.evals import EvalsDef
-from agent_blueprint.models.graph import GraphDef
+from agent_blueprint.models.graph import GraphDef, NodeType
 from agent_blueprint.models.harness import HarnessDef
 from agent_blueprint.models.mcp import McpServerDef
 from agent_blueprint.models.memory import MemoryConfig
@@ -198,6 +198,16 @@ class BlueprintSpec(BaseModel):
                         f"contracts.nodes.{node_name}.output_contract references undefined "
                         f"output contract '{node_contract.output_contract}'"
                     )
+
+                if not node_contract.append_to_messages:
+                    where = f"contracts.nodes.{node_name}.append_to_messages: false"
+                    if self.graph.nodes[node_name].type != NodeType.agent:
+                        raise ValueError(f"{where} is only supported on agent nodes")
+                    if not (node_contract.output_contract and node_contract.produces):
+                        raise ValueError(
+                            f"{where} requires output_contract and produces, "
+                            "otherwise the node's output would be discarded"
+                        )
 
         for artifact_name, artifact in self.artifacts.items():
             if artifact.producer not in self.graph.nodes:

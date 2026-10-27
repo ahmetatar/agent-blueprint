@@ -237,6 +237,34 @@ Real-life use case:
 - a triage router must always emit both a route decision and a confidence score
 - a request ID must never be overwritten by later nodes
 
+#### Keeping a router's output out of the conversation
+
+By default an agent node's reply is appended to `messages`, including the raw
+JSON of a node with an `output_contract`. The next agent then sees that JSON as
+the conversation's last assistant turn. Many models, small local ones in
+particular, read that as "the assistant already answered" and return an empty
+reply.
+
+Set `append_to_messages: false` on a classifier or router node to keep its
+validated output in state only:
+
+```yaml
+contracts:
+  nodes:
+    triage:
+      produces: [intent, confidence]
+      output_contract: triage_result
+      append_to_messages: false
+```
+
+- The reply is still validated against the output contract, written to the
+  `produces` fields, recorded in the trace and checked by `verify`; it just
+  never reaches `messages`.
+- Only agent nodes with both `output_contract` and `produces` accept it,
+  otherwise the node's output would be discarded.
+- Leave it on (the default) when the node's reply is meant for the user, such
+  as a final structured answer that `abp run` prints.
+
 ### 6. Tool usage policies
 
 ABP now enforces the main tool controls:

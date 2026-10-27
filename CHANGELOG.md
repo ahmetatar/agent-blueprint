@@ -25,6 +25,12 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ### Added
 
+- `contracts.nodes.<id>.append_to_messages: false` keeps a node's validated
+  output in state only, out of the conversation. A triage/router node's raw
+  JSON otherwise becomes the last assistant turn that the next agent sees,
+  and local models (verified with `qwen3:1.7b` and `llama3.2:3b` on Ollama)
+  answer it with an empty reply. Only agent nodes with `output_contract` and
+  `produces` accept it. See `docs/runtime-guarantees.md`.
 - `agents.<id>.max_turns` / `settings.default_max_turns` cap the LLM calls in
   an agent or supervisor tool loop. At the limit a `max_turns_exhausted`
   trace event is emitted and `on_max_turns` either fails the run (default) or

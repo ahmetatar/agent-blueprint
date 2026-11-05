@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and this project aims to follow Semanti
 
 ## [Unreleased]
 
+### Security
+
+- **Breaking:** the deployed `/invoke` endpoint now authenticates callers and
+  owns conversation routing. Previously any caller could pass any `thread_id`
+  and load or append to another user's conversation, and requests without one
+  all shared the `"default"` thread. The server now verifies a JWT
+  (`deploy.auth`: `jwks_url` or `secret_env`, `exp` required, `iss`/`aud`
+  checked when configured) and derives `thread_id = "<user>:<conversation_id>"`
+  itself; `conversation_id` is a server-issued UUIDv4 returned in every
+  response. A per-user rate limit (`deploy.rate_limit.requests_per_minute`,
+  default 60, per replica) returns 429. See `docs/deploy.md`.
+
+  Migration: add `deploy.auth` to the blueprint (`abp deploy` refuses to
+  build without it), send `Authorization: Bearer <JWT>`, replace `thread_id`
+  in request bodies with the `conversation_id` the first response returns
+  (a body containing `thread_id` is rejected with 400). To keep an
+  unauthenticated endpoint behind your own gateway, set
+  `deploy.auth.mode: none`; conversation ids are then the only protection.
+
 ### Fixed
 
 - **Behavior change (fail-loud):** tool-usage policy violations

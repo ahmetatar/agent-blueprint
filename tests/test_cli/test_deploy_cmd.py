@@ -11,7 +11,7 @@ from agent_blueprint.deployers.base import DeployResult
 
 runner = CliRunner()
 
-_BASE_BLUEPRINT = """\
+_AGENT = """\
 blueprint:
   name: "deploy-test"
 state:
@@ -36,6 +36,12 @@ graph:
     - from: assistant
       to: END
 """
+
+# The deployed server authenticates callers by default (deploy.auth). Tests about
+# platform resolution and the deploy flow opt out so they need no JWT setup;
+# the auth requirement itself is covered in TestDeployAuth.
+_NO_AUTH = "deploy:\n  auth:\n    mode: none\n"
+_BASE_BLUEPRINT = _AGENT + _NO_AUTH
 
 
 def _write_blueprint(tmp_path: Path, content: str = _BASE_BLUEPRINT) -> Path:
@@ -90,7 +96,6 @@ class TestDeployValidation:
 class TestDeployPlatformResolution:
     def test_platform_read_from_blueprint_deploy_section(self, tmp_path):
         content = _BASE_BLUEPRINT + (
-            "deploy:\n"
             "  platform: docker\n"
             "  docker:\n"
             "    host_port: 9999\n"
@@ -112,7 +117,7 @@ class TestDeployPlatformResolution:
         assert "http://localhost:9999" in _flat(result)
 
     def test_cli_platform_overrides_blueprint(self, tmp_path):
-        content = _BASE_BLUEPRINT + "deploy:\n  platform: azure\n"
+        content = _BASE_BLUEPRINT + "  platform: azure\n"
         path = _write_blueprint(tmp_path, content)
         # CLI says podman even though blueprint says azure (and azure has no config)
         with (
@@ -302,7 +307,7 @@ graph:
   edges:
     - from: assistant
       to: END
-"""
+""" + _NO_AUTH
         path = _write_blueprint(tmp_path, content)
         (tmp_path / "agent_impl.py").write_text(
             "def compute_score(x):\n    return x\n", encoding="utf-8"
@@ -322,3 +327,53 @@ graph:
             )
         assert result.exit_code == 0
         assert "agent_impl.py" in _flat(result)
+
+
+class TestDeployAuth:
+    def test_unconfigured_auth_exits_before_any_build(self, tmp_path):
+        # No deploy section at all: the server would demand a JWT it cannot verify.
+        path = _write_blueprint(tmp_path, _AGENT)
+        with (
+            patch(
+                "agent_blueprint.deployers.docker.DockerDeployer.check_prerequisites",
+                return_value=[],
+            ) as prereqs,
+            patch("agent_blueprint.deployers.docker.DockerDeployer.deploy") as deploy,
+        ):
+            result = runner.invoke(app, ["deploy", str(path), "--platform", "docker"])
+        assert result.exit_code == 1
+        assert "deploy.auth is not configured" in _flat(result)
+        assert not prereqs.called
+        assert not deploy.called
+
+    def test_jwt_secret_is_injected_and_auth_module_packaged(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+        monkeypatch.setenv("SHOPCO_JWT_SECRET", "x" * 40)
+        content = _AGENT + "deploy:\n  auth:\n    secret_env: SHOPCO_JWT_SECRET\n"
+        path = _write_blueprint(tmp_path, content)
+        captured: dict = {}
+
+        def fake_deploy(self, code_dir, secrets, *, image_tag, dry_run=False):
+            captured["files"] = sorted(p.name for p in Path(code_dir).iterdir())
+            captured["secrets"] = secrets
+            captured["requirements"] = (Path(code_dir) / "requirements_deploy.txt").read_text()
+            return DeployResult(success=True, url="http://localhost:8080")
+
+        with (
+            patch(
+                "agent_blueprint.deployers.docker.DockerDeployer.check_prerequisites",
+                return_value=[],
+            ),
+            patch("agent_blueprint.deployers.docker.DockerDeployer.deploy", fake_deploy),
+        ):
+            result = runner.invoke(app, ["deploy", str(path), "--platform", "docker"])
+
+        assert result.exit_code == 0
+        assert "_abp_auth.py" in captured["files"]
+        assert captured["secrets"] == {
+            "OPENAI_API_KEY": "sk-from-env",
+            "SHOPCO_JWT_SECRET": "x" * 40,
+        }
+        assert "pyjwt[crypto]" in captured["requirements"]
+        assert "Authorization: Bearer" in _flat(result)
+        assert "thread_id" not in _flat(result)

@@ -2,7 +2,7 @@
 
 > This page covers the top-level `memory:` block (checkpointing). For per-agent context limits (`agents.*.memory`), see [Agent context limits](#agent-context-limits).
 
-Configures LangGraph checkpointing — how conversation state and turn history are persisted across invocations. The `thread_id` passed to `run()` identifies the conversation; the checkpointer stores state per thread.
+Configures LangGraph checkpointing — how conversation state and turn history are persisted across invocations. The `thread_id` passed to `run()` identifies the conversation; the checkpointer stores state per thread. The deployed HTTP server does not let clients choose it: it derives `thread_id` from the authenticated user and a server-issued conversation id (see [Deploy](deploy.md#authentication-and-conversation-ownership)).
 
 ## Configuration
 

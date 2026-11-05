@@ -47,6 +47,9 @@ def collect_required_secrets(
                 if env_var:
                     secrets.add(env_var)
 
+    if spec.deploy and spec.deploy.auth.mode == "jwt" and spec.deploy.auth.secret_env:
+        secrets.add(spec.deploy.auth.secret_env)
+
     if ir is not None:
         for node in ir.nodes:
             # Only agent nodes call an LLM; non-agent nodes (tool/join/subgraph

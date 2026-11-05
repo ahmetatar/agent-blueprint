@@ -4,11 +4,15 @@ import ast
 from pathlib import Path
 
 from agent_blueprint.deployers.packager import DeployPackager
+from agent_blueprint.models.deploy import DeployAuthConfig, DeployConfig
 from agent_blueprint.ir.compiler import compile_blueprint
 from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.utils.yaml_loader import load_blueprint_yaml
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+# Packaging now requires deploy.auth to be configured (see test_deploy_server.py).
+_JWT = DeployConfig(auth=DeployAuthConfig(secret_env="ABP_JWT_SECRET"))
 
 
 def load_ir(name: str):
@@ -20,51 +24,51 @@ def load_ir(name: str):
 class TestDeployPackager:
     def test_creates_dockerfile(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         assert (tmp_path / "Dockerfile").exists()
 
     def test_creates_dockerignore(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         assert (tmp_path / ".dockerignore").exists()
 
     def test_creates_server_py(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         assert (tmp_path / "server.py").exists()
 
     def test_creates_requirements_deploy(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         assert (tmp_path / "requirements_deploy.txt").exists()
 
     def test_server_py_is_valid_python(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         ast.parse((tmp_path / "server.py").read_text())
 
     def test_server_py_contains_blueprint_name(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         content = (tmp_path / "server.py").read_text()
         assert "basic-chatbot" in content
 
     def test_server_py_has_invoke_and_health_endpoints(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         content = (tmp_path / "server.py").read_text()
         assert "/invoke" in content
         assert "/health" in content
 
     def test_dockerfile_exposes_8080(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         content = (tmp_path / "Dockerfile").read_text()
         assert "8080" in content
 
     def test_requirements_deploy_includes_base(self, tmp_path):
         ir = load_ir("basic_chatbot.yml")
-        DeployPackager().package(tmp_path, ir)
+        DeployPackager().package(tmp_path, ir, _JWT)
         content = (tmp_path / "requirements_deploy.txt").read_text()
         assert "-r requirements.txt" in content
         assert "fastapi" in content

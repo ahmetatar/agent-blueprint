@@ -125,3 +125,18 @@ class TestResolveSecrets:
         resolved, missing = resolve_secrets({"PRESENT_KEY", "ABSENT_KEY"})
         assert "PRESENT_KEY" in resolved
         assert "ABSENT_KEY" in missing
+
+
+class TestDeployAuthSecret:
+    def _spec(self, deploy: dict) -> BlueprintSpec:
+        raw = load_blueprint_yaml(FIXTURES / "basic_chatbot.yml")
+        raw["deploy"] = deploy
+        return BlueprintSpec.model_validate(raw)
+
+    def test_jwt_secret_env_is_required(self):
+        spec = self._spec({"auth": {"secret_env": "SHOPCO_JWT_SECRET"}})
+        assert "SHOPCO_JWT_SECRET" in collect_required_secrets(spec)
+
+    def test_jwks_needs_no_secret(self):
+        spec = self._spec({"auth": {"jwks_url": "https://idp/jwks", "audience": "api"}})
+        assert collect_required_secrets(spec) == collect_required_secrets(load("basic_chatbot.yml"))

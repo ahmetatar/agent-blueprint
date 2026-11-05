@@ -1,3 +1,6 @@
 -r requirements.txt
 fastapi>=0.110
 uvicorn>=0.29
+{% if auth.mode == "jwt" %}
+pyjwt[crypto]>=2.8
+{% endif %}

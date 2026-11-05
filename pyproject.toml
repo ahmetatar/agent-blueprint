@@ -37,6 +37,11 @@ dev = [
     "build>=1.2",
     "commitizen>=3.27",
     "opentelemetry-sdk>=1.25",  # exercises the generated _abp_otel bridge in tests
+    # exercise the generated deploy server (server.py + _abp_auth.py) in tests
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "pyjwt[crypto]>=2.8",
+    "uvicorn>=0.29",
     "pre-commit>=3.7",
     "pytest>=7.0",
     "pytest-cov>=4.0",

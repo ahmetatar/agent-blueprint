@@ -15,6 +15,7 @@ from agent_blueprint.models.blueprint import BlueprintSpec
 from agent_blueprint.models.deploy import (
     AWSDeployConfig,
     AzureDeployConfig,
+    DeployConfig,
     DockerDeployConfig,
     GCPDeployConfig,
 )
@@ -93,6 +94,15 @@ def deploy(
             f"Add a [cyan]deploy.{resolved_platform}[/] section."
         )
         raise typer.Exit(1)
+
+    # Fail before any build or cloud call if the server could not authenticate callers.
+    from agent_blueprint.deployers.packager import check_auth_configured
+
+    try:
+        check_auth_configured(deploy_cfg or DeployConfig())
+    except GeneratorError as e:
+        err_console.print(f"[bold red]Deploy auth error:[/] {e}")
+        raise typer.Exit(1) from e
 
     # 4. Compile IR
     from agent_blueprint.ir.compiler import compile_blueprint
@@ -208,7 +218,7 @@ def deploy(
                 copied.add(root)
 
         # Add Dockerfile + server.py
-        DeployPackager().package(tmpdir, ir)
+        DeployPackager().package(tmpdir, ir, deploy_cfg)
 
         if dry_run:
             console.print(Panel(
@@ -231,7 +241,9 @@ def deploy(
         if result.url:
             lines.append(f"  Endpoint   [link={result.url}]{result.url}[/link]")
             lines.append(f"\n  [dim]POST {result.url}/invoke[/dim]")
-            lines.append("  [dim]  {\"input\": \"Hello\", \"thread_id\": \"default\"}[/dim]")
+            if deploy_cfg is None or deploy_cfg.auth.mode == "jwt":
+                lines.append("  [dim]  Authorization: Bearer <JWT>[/dim]")
+            lines.append("  [dim]  {\"input\": \"Hello\"}  → returns a conversation_id to send back[/dim]")
         console.print(Panel(
             "\n".join(lines),
             title=f"[bold green]Deployed[/] — {bp_name}",

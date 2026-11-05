@@ -34,6 +34,27 @@ What makes ABP different is not less boilerplate — it is that **everything you
 
 And because every enforcement emits a structured trace event, the same declarations are **observable** (OpenTelemetry export), **testable** (`abp test` asserts on routes, state, and artifacts), and **gateable** (`abp gate` fails the PR when behavior regresses against the baseline).
 
+### The blueprint is the review unit
+
+> [!IMPORTANT]
+> **When agents write the code, humans review the design.**
+> A multi-agent system generated as thousands of lines of Python can't really be reviewed. A blueprint can. ABP keeps that blueprint honest: anything it declares is enforced at runtime.
+
+As more code is written by agents, what's worth learning is the *mental model* of what they produce, not the syntax they produce it in. Reviewing generated code means rebuilding the design from its implementation. Reviewing a blueprint means reading the design directly:
+
+| The questions every reviewer asks | In generated code | In the blueprint |
+|---|---|---|
+| Is this loop bounded? | Inferred from edges spread across `graph.py` | `max_iterations`, `max_turns`, plus the `unbounded-loop` lint |
+| Who approves this tool call? | Wrapper logic inside `nodes.py` | `policies.approvals` |
+| What must this node return? | Validation code, if anyone wrote it | `contracts.nodes.*.output_contract` |
+| Where does control go when confidence drops? | Router functions and state flags | `policies.escalation` |
+| What does this change actually change? | A 3,000-line diff | A 5-line YAML diff |
+
+That turns the blueprint into the **contract between the human and the agent**. The agent can generate, refactor, and regenerate the implementation as often as it likes. The human reviews the part that carries the decisions. The schema is deliberately narrow, which also limits how much an agent can get wrong.
+
+> [!NOTE]
+> **The whole point is that the YAML can't lie.** A short blueprint whose guarantees aren't enforced is worse than reading the code, because it gives you false confidence. That's why every declaration compiles to runtime enforcement, emits a trace event, and is pinned by `abp test` and `abp gate`. Keep the scope in mind too: the blueprint describes **structure and guarantees**. Whether the agents *behave well* is answered by evals and traces. Blueprint + evals + traces is the full picture. See [ADR 0001](docs/adr/0001-blueprint-is-the-source-of-truth.md).
+
 If you are building a one-off demo, handwritten code is fine. If you are building agent systems that need consistency, auditability, and repeatable delivery — in CI, across a team — ABP is the stronger foundation.
 
 ```bash

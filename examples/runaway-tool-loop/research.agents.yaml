@@ -1,0 +1,67 @@
+# Bounded tool loop
+#
+# A research agent whose model keeps asking for "one more search". Without a
+# bound, a ReAct loop like this runs until your budget is gone. Here
+# `max_turns: 3` caps it at three model calls (= at most two rounds of tool
+# execution) and `on_max_turns: finish` ends the node cleanly instead of
+# crashing. Run it offline (mocked LLM, stubbed tools, no API key):
+#
+#   abp test examples/runaway-tool-loop/research.agents.yaml
+#
+# Switch `on_max_turns` to `fail` to see the run stop with MaxTurnsExceeded.
+
+blueprint:
+  name: bounded-research
+  version: "1.0"
+  description: "Research agent whose tool loop is capped at runtime"
+
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+
+agents:
+  researcher:
+    model: openai/gpt-4o
+    system_prompt: "Answer the question. Use web_search when you need sources."
+    tools: [web_search]
+    max_turns: 3
+    on_max_turns: finish
+
+tools:
+  web_search:
+    type: function
+    description: "Search the web"
+    side_effect: read
+    parameters:
+      query: { type: string, required: true }
+
+graph:
+  entry_point: researcher
+  nodes:
+    researcher: { agent: researcher }
+  edges:
+    - { from: researcher, to: END }
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+  scenarios:
+    # The mocked model asks for a search on every turn, five times in a row.
+    # Only the first two searches ever execute; the third request is
+    # answered with a "skipped" message and the node finishes.
+    - id: model_never_stops_searching
+      input: { message: "What changed in the latest LangGraph release?" }
+      fixtures:
+        llm_outputs:
+          researcher:
+            - { tool_calls: [{ name: web_search, args: { query: "langgraph release" } }] }
+            - { tool_calls: [{ name: web_search, args: { query: "langgraph changelog" } }] }
+            - { tool_calls: [{ name: web_search, args: { query: "langgraph release notes" } }] }
+            - { tool_calls: [{ name: web_search, args: { query: "langgraph github" } }] }
+            - { tool_calls: [{ name: web_search, args: { query: "langgraph news" } }] }
+        tool_outputs:
+          web_search: { results: ["(stubbed result)"] }
+      expected:
+        route: researcher
+        tools_called: [web_search, web_search]

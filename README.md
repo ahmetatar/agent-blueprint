@@ -153,6 +153,10 @@ abp --help
 
 ## Quick Start
 
+> [!TIP]
+> Want to see a guarantee fire before writing anything? The [`examples/`](examples/) run fully offline:
+> `abp test --install examples/runaway-tool-loop/research.agents.yaml` shows a tool loop capped by `max_turns`.
+
 ### 1. Create a blueprint
 
 ```bash

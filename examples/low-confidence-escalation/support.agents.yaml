@@ -1,0 +1,94 @@
+# Low-confidence escalation
+#
+# A router classifies support tickets. Confident answers route automatically;
+# anything below 0.75 confidence is rerouted to human review mid-run, not
+# post-hoc. Run it offline (mocked LLM, no API key):
+#
+#   abp test examples/low-confidence-escalation/support.agents.yaml
+
+blueprint:
+  name: support-escalation
+  version: "1.0"
+  description: "Ticket router that hands ambiguous tickets to a human reviewer"
+
+state:
+  fields:
+    messages: { type: "list[message]", reducer: append }
+    route: { type: string }
+    confidence: { type: float }
+
+agents:
+  router:
+    model: openai/gpt-4o
+    system_prompt: "Classify the ticket. Reply as JSON: {route, confidence}."
+  billing:
+    model: openai/gpt-4o
+    system_prompt: "You resolve billing issues."
+  tech:
+    model: openai/gpt-4o
+    system_prompt: "You resolve technical issues."
+  human_review:
+    model: openai/gpt-4o
+    system_prompt: "Summarize the ticket for a human reviewer."
+
+contracts:
+  nodes:
+    router:
+      produces: [route, confidence]
+      output_contract: triage
+  outputs:
+    triage:
+      type: object
+      required: [route, confidence]
+      properties:
+        route: { type: string }
+        confidence: { type: number }
+
+policies:
+  escalation:
+    on_low_confidence: human_review
+    confidence_threshold: 0.75
+
+graph:
+  entry_point: router
+  nodes:
+    router: { agent: router }
+    billing: { agent: billing }
+    tech: { agent: tech }
+    human_review: { agent: human_review }
+  edges:
+    - from: router
+      to:
+        - target: billing
+          condition: "state.route == 'billing'"
+        - target: tech
+          condition: "state.route == 'tech'"
+        - default: human_review
+    - { from: billing, to: END }
+    - { from: tech, to: END }
+    - { from: human_review, to: END }
+
+harness:
+  defaults:
+    llm_mode: mock
+    tool_mode: stub
+    fixtures:
+      llm_outputs: { "*": [{ content: "Done." }] }
+  scenarios:
+    - id: confident_billing_ticket
+      input: { message: "I was charged twice for invoice 123" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "billing", "confidence": 0.94}' }]
+      expected:
+        route: billing
+
+    # The router still says "billing", but only with 0.42 confidence.
+    # The escalation policy overrides the edge and sends it to a human.
+    - id: ambiguous_ticket_escalates
+      input: { message: "something is wrong with my account??" }
+      fixtures:
+        llm_outputs:
+          router: [{ content: '{"route": "billing", "confidence": 0.42}' }]
+      expected:
+        route: human_review

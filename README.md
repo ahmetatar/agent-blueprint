@@ -1,48 +1,132 @@
-<p align="center">
-  <img src="logo.svg" alt="agent-blueprint" width="820"/>
-</p>
+<div align="center">
 
 # agent-blueprint
 
-[![PyPI version](https://img.shields.io/pypi/v/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
+### Declarative AI agent orchestration with runtime guarantees.
+
+Describe your agent system in one YAML blueprint.<br/>
+Get a runnable LangGraph project where **every contract, policy and budget you declared is enforced at runtime**,<br/>
+and comes with tests, a CI gate and traces.
+
+[![PyPI version](https://img.shields.io/pypi/v/agent-blueprint?color=2563eb)](https://pypi.org/project/agent-blueprint/)
 [![Python 3.11+](https://img.shields.io/pypi/pyversions/agent-blueprint)](https://pypi.org/project/agent-blueprint/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/ahmetatar/agent-blueprint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ahmetatar/agent-blueprint/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Declarative AI agent orchestration with runtime guarantees.**
+[**Quick start**](#quick-start) · [**Why ABP**](#why-abp) · [**How it works**](#how-it-works) · [**Schema**](#blueprint-schema) · [**CLI**](#cli-reference) · [**Docs**](docs/)
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/ahmetatar/agent-blueprint/main/docs/assets/gate-demo.gif" alt="abp gate catching a routing regression: two harness scenarios pass, a one-line threshold change makes refund_request route to the wrong node, and the gate fails with exit 1" width="820"/>
-</p>
-<p align="center"><sub>A one-line routing change, caught before merge — fully offline (mocked LLM, stubbed tools, no API key). Source: <a href="docs/assets/gate-demo/"><code>docs/assets/gate-demo/</code></a></sub></p>
+<br/>
 
-`agent-blueprint` (CLI: `abp`) turns AI agent systems into versionable, testable, deployable infrastructure. You describe agents, tools, workflow graph, contracts, and policies in a single validated YAML blueprint — `abp` compiles it into a runnable [LangGraph](https://github.com/langchain-ai/langgraph) project and gives you the operational toolchain around it: linting, deterministic tests, eval suites, regression gates, sandboxed runs, OpenTelemetry export, and cloud deployment.
+<img src="https://raw.githubusercontent.com/ahmetatar/agent-blueprint/main/docs/assets/gate-demo.gif" alt="abp gate catching a routing regression: two harness scenarios pass, a one-line threshold change makes refund_request route to the wrong node, and the gate fails with exit 1" width="820"/>
 
-What makes ABP different is not less boilerplate — it is that **everything you declare is enforced at runtime**. Most agent frameworks let you *describe* guardrails; ABP *compiles them into the generated code*, so a contract in YAML and the behavior in production cannot drift apart:
+<sub>A one-line routing change, caught before merge. Fully offline: mocked LLM, stubbed tools, no API key. Source: <a href="docs/assets/gate-demo/"><code>docs/assets/gate-demo/</code></a></sub>
+
+</div>
+
+<br/>
+
+```bash
+pip install agent-blueprint
+abp init --output my-agent.agents.yaml
+abp run my-agent.agents.yaml "Hello!"
+```
+
+---
+
+## A blueprint in 60 seconds
+
+This is the blueprint from the demo above, trimmed. A router classifies a ticket, and conditional edges send it to the right specialist:
+
+```yaml
+contracts:
+  nodes:
+    router:
+      produces: [route, confidence]
+      output_contract: triage            # router output is validated against this schema
+
+graph:
+  entry_point: router
+  nodes:
+    router:  { agent: router }
+    billing: { agent: billing }
+    tech:    { agent: tech }
+    human:   { agent: human }
+  edges:
+    - from: router
+      to:
+        - target: billing
+          condition: "state.route == 'billing' and state.confidence >= 0.8"
+        - target: tech
+          condition: "state.route == 'tech' and state.confidence >= 0.8"
+        - default: human                 # anything uncertain goes to a person
+
+harness:
+  scenarios:
+    - id: refund_request
+      input: { message: "Please refund invoice 123" }
+      expected: { route: billing, tools_called: [issue_refund] }
+```
+
+`abp inspect` turns it into a graph:
+
+```mermaid
+flowchart LR
+    S([START]) --> router
+    router -->|"billing, confidence ≥ 0.8"| billing
+    router -->|"tech, confidence ≥ 0.8"| tech
+    router -->|default| human
+    billing --> F([END])
+    tech --> F
+    human --> F
+```
+
+Then a teammate tightens one threshold:
+
+```diff
+-          condition: "state.route == 'billing' and state.confidence >= 0.8"
++          condition: "state.route == 'billing' and state.confidence >= 0.9"
+```
+
+And `abp gate` blocks the merge, with no LLM call and no API key:
+
+```console
+$ abp gate support.yml
+FAIL scenario 'refund_request': tools_called mismatch: expected ['issue_refund'], got [];
+     route mismatch: expected 'billing', ended on 'human'
+Regressions:
+  - scenario 'refund_request' regressed: passed -> failed
+Gate FAILED                                                    # exit code 1
+```
+
+---
+
+## Why ABP
+
+Most agent frameworks let you *describe* guardrails. ABP **compiles them into the generated code**, so the contract in YAML and the behavior in production cannot drift apart.
 
 | You declare | The generated runtime does |
 |---|---|
-| `contracts.state.invariants` | Re-checks every invariant after each agent and supervisor node; violations emit a `contract_failed` trace event, then raise |
+| `contracts.state.invariants` | Re-checks every invariant after each agent and supervisor node. A violation emits a `contract_failed` trace event, then raises |
 | `contracts.nodes.*.output_contract` | Validates the node's structured output against your JSON-schema-style contract |
-| `policies.approvals` | Gates the listed tool calls behind human approval — `block` raises, `warn` continues but records a `policy_violation` event |
-| `policies.tool_usage` | Counts and caps tool calls per node and per run; a violation stops the run, and unknown tools fail instead of silently passing through |
-| `agents.*.max_turns` | Caps the LLM calls in a node's tool loop; at the limit it emits `max_turns_exhausted` and fails or finishes the node |
-| `policies.budgets` | Meters real token usage and provider-priced cost on every LLM call — crossing `max_tokens_per_run` / `max_cost_usd` aborts the run mid-flight; `max_latency_seconds` is verified at completion. All violations emit `policy_violation` events |
-| `policies.escalation` | Reroutes the workflow to your declared review/handoff node the moment confidence drops below the threshold — mid-run, not post-hoc |
-| `graph.nodes.*.retry` | Retries with backoff and emits retry trace events; exhausted retries fail deterministically |
-| `harness.scenarios` | Run as deterministic tests — mocked LLM, stubbed tools, seeded — no API key, no flakiness, CI-ready |
+| `policies.approvals` | Puts the listed tool calls behind human approval. `block` raises; `warn` continues but records a `policy_violation` event |
+| `policies.tool_usage` | Counts and caps tool calls per node and per run. A violation stops the run, and unknown tools fail instead of silently passing through |
+| `agents.*.max_turns` | Caps the LLM calls in a node's tool loop. At the limit it emits `max_turns_exhausted` and fails or finishes the node |
+| `policies.budgets` | Meters real token usage and provider-priced cost on every LLM call. Crossing `max_tokens_per_run` / `max_cost_usd` aborts the run mid-flight; `max_latency_seconds` is checked at completion |
+| `policies.escalation` | Reroutes to your review/handoff node the moment confidence drops below the threshold: mid-run, not after the fact |
+| `graph.nodes.*.retry` | Retries with backoff and emits retry trace events. Exhausted retries fail deterministically |
+| `harness.scenarios` | Runs as deterministic tests (mocked LLM, stubbed tools, seeded). No API key, no flakiness, ready for CI |
 
-And because every enforcement emits a structured trace event, the same declarations are **observable** (OpenTelemetry export), **testable** (`abp test` asserts on routes, state, and artifacts), and **gateable** (`abp gate` fails the PR when behavior regresses against the baseline).
+Every enforcement emits a structured trace event. That makes the same declarations **observable** (OpenTelemetry export), **testable** (`abp test` asserts on routes, state and artifacts) and **gateable** (`abp gate` fails the PR when behavior regresses against the baseline).
 
 ### The blueprint is the review unit
 
 > [!IMPORTANT]
 > **When agents write the code, humans review the design.**
-> A multi-agent system generated as thousands of lines of Python can't really be reviewed. A blueprint can. ABP keeps that blueprint honest: anything it declares is enforced at runtime.
+> A multi-agent system generated as thousands of lines of Python can't really be reviewed. A blueprint can, and ABP keeps it honest: everything it declares is enforced at runtime.
 
-As more code is written by agents, what's worth learning is the *mental model* of what they produce, not the syntax they produce it in. Reviewing generated code means rebuilding the design from its implementation. Reviewing a blueprint means reading the design directly:
+Reviewing generated code means rebuilding the design from its implementation. Reviewing a blueprint means reading the design directly:
 
-| The questions every reviewer asks | In generated code | In the blueprint |
+| The question every reviewer asks | In generated code | In the blueprint |
 |---|---|---|
 | Is this loop bounded? | Inferred from edges spread across `graph.py` | `max_iterations`, `max_turns`, plus the `unbounded-loop` lint |
 | Who approves this tool call? | Wrapper logic inside `nodes.py` | `policies.approvals` |
@@ -50,110 +134,69 @@ As more code is written by agents, what's worth learning is the *mental model* o
 | Where does control go when confidence drops? | Router functions and state flags | `policies.escalation` |
 | What does this change actually change? | A 3,000-line diff | A 5-line YAML diff |
 
-That turns the blueprint into the **contract between the human and the agent**. The agent can generate, refactor, and regenerate the implementation as often as it likes. The human reviews the part that carries the decisions. The schema is deliberately narrow, which also limits how much an agent can get wrong.
+The blueprint becomes the **contract between the human and the agent**. The agent can generate, refactor and regenerate the implementation as often as it likes; the human reviews the part that carries the decisions. The schema is deliberately narrow, which also limits how much an agent can get wrong.
 
 > [!NOTE]
-> **The whole point is that the YAML can't lie.** A short blueprint whose guarantees aren't enforced is worse than reading the code, because it gives you false confidence. That's why every declaration compiles to runtime enforcement, emits a trace event, and is pinned by `abp test` and `abp gate`. Keep the scope in mind too: the blueprint describes **structure and guarantees**. Whether the agents *behave well* is answered by evals and traces. Blueprint + evals + traces is the full picture. See [ADR 0001](docs/adr/0001-blueprint-is-the-source-of-truth.md).
+> **The YAML can't lie.** A short blueprint whose guarantees aren't enforced is worse than reading the code, because it gives you false confidence. So every declaration compiles to runtime enforcement, emits a trace event, and is pinned by `abp test` and `abp gate`.
+> Mind the scope: the blueprint describes **structure and guarantees**. Whether the agents *behave well* is a question for evals and traces. Blueprint + evals + traces is the full picture. See [ADR 0001](docs/adr/0001-blueprint-is-the-source-of-truth.md).
 
-If you are building a one-off demo, handwritten code is fine. If you are building agent systems that need consistency, auditability, and repeatable delivery — in CI, across a team — ABP is the stronger foundation.
-
-```bash
-pip install agent-blueprint
-abp init --output my-agent.agents.yaml
-abp generate my-agent.agents.yaml --target langgraph
-```
+For a one-off demo, handwritten code is fine. For agent systems that need consistency, auditability and repeatable delivery across a team, ABP is the stronger foundation.
 
 ---
 
-## Table of Contents
+## How it works
 
-- [How It Works](#how-it-works)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [The Operational Lifecycle](#the-operational-lifecycle)
-- [Blueprint Schema](#blueprint-schema)
-- [CLI Reference](#cli-reference)
-- [Generated Project Structure](#generated-project-structure)
-- [Generation Targets](#generation-targets)
-- [IDE Integration](#ide-integration-vs-code)
-- [Development](#development)
-- [Roadmap](#roadmap)
+A blueprint flows through a strict, one-way compilation pipeline:
 
----
-
-## How It Works
-
-A blueprint flows through a strict one-way compilation pipeline:
-
-```
-            ┌──────────────────┐
- YAML  ───▶ │  Pydantic models  │  schema + cross-reference validation
-            └────────┬─────────┘  (escalation targets, tool refs, contract refs…)
-                     ▼
-            ┌──────────────────┐
-            │   AgentGraph IR   │  subgraph flattening, LLM resolution,
-            └────────┬─────────┘  condition expression compilation
-                     ▼
-            ┌──────────────────┐
-            │  Code generator   │  Jinja2 templates per target
-            └────────┬─────────┘
-                     ▼
-       runnable project:  state.py · nodes.py · graph.py · tools.py · main.py
-                          + _abp_trace.py (trace manifest) · _abp_harness.py
-                          + _abp_otel.py (when tracing is enabled)
+```mermaid
+flowchart LR
+    Y["YAML blueprint"] --> M["Pydantic models<br/><i>schema + cross-reference<br/>validation</i>"]
+    M --> IR["AgentGraph IR<br/><i>subgraph flattening,<br/>LLM resolution,<br/>condition compilation</i>"]
+    IR --> G["Code generator<br/><i>Jinja2 templates<br/>per target</i>"]
+    G --> P["Runnable project<br/><i>graph.py · nodes.py · state.py<br/>+ trace, harness, OTel runtime</i>"]
 ```
 
-Around the pipeline sits the operational surface — every command is a thin CLI wrapper over a reusable logic module:
+Conditions like `state.department == 'billing'` are parsed by a safe AST-based parser: no `eval`, no arbitrary code. The same parser powers static analysis, such as route-overlap detection and loop analysis in the linter.
+
+### The operational lifecycle
+
+The real value comes after generation. A blueprint lives in this loop:
+
+```mermaid
+flowchart LR
+    A["author"] --> V["validate"] --> L["lint / fix"] --> D["doctor"] --> T["test"] --> E["eval"] --> G["gate (CI)"]
+    G --> R["run / deploy"] --> X["traces export"]
+    X -->|"failures become<br/>eval cases"| E
+```
 
 | Surface | What it does |
 |---|---|
-| `abp lint` / `abp fix` | 9 static checks over the compiled graph (unreachable nodes, route overlap, unbounded loops, parallel branch conflicts, …); 2 are auto-fixable |
-| `abp doctor` | Environment + target-compatibility diagnostics before you generate |
-| `abp test` | Deterministic harness: mock/replay/live LLM modes, stub/live tools, route/state/artifact/output-contract assertions |
+| `abp lint` / `abp fix` | 11 static checks over the compiled graph (unreachable nodes, route overlap, unbounded loops, parallel branch conflicts and more); 2 are auto-fixable |
+| `abp doctor` | Environment and target-compatibility diagnostics before you generate |
+| `abp test` | Deterministic harness: mock/replay/live LLM, stub/replay/live tools, route/state/artifact/output-contract assertions |
 | `abp eval` | Dataset-driven eval suites (`exact_match`, `policy_violations`, `rubric`) |
 | `abp gate` | CI merge gate: runs harness + evals, diffs against a committed baseline, exit 1 on regression |
-| `abp traces` | Persisted trace records; export failures (or goldens) as eval dataset cases — the test flywheel |
-| `abp run` | Generate to a temp dir and execute — optionally inside a docker/podman sandbox with an allowlist-only environment |
-| `abp package` | Package the agent as a pip/pipx-installable command-line tool (console-script entry point) |
-| `abp deploy` | Build a container and run it locally with Docker/Podman, or ship it to Azure Container Apps, AWS App Runner, GCP Cloud Run (cloud platforms experimental) |
+| `abp traces` | Persisted trace records. Export failures (or goldens) as eval cases: the dataset grows from real failures |
+| `abp run` | Generates to a temp dir and executes, optionally in a docker/podman sandbox with an allowlist-only environment |
+| `abp package` | Packages the agent as a pip/pipx-installable command-line tool |
+| `abp deploy` | Builds a container and runs it locally with Docker/Podman, or ships it to Azure Container Apps, AWS App Runner or GCP Cloud Run (cloud platforms experimental) |
 
-Condition expressions (`state.department == 'billing'`) are parsed with a safe AST-based parser — no `eval`, no arbitrary code — and the same parser powers static analysis: route-overlap detection and loop analysis in the linter.
+**Observability is declarative too.** A top-level `observability.tracing` section exports trace events as OpenTelemetry spans to any OTLP backend. Only hashes are exported, never message content. Standard `OTEL_*` env vars override blueprint values, and `ABP_OTEL=off` is the kill switch.
+
+Deep dives: [Runtime Guarantees](docs/runtime-guarantees.md) · [Gate](docs/gate.md) · [Traces](docs/traces.md) · [Sandbox](docs/sandbox.md) · [Observability](docs/observability.md) · [Scope](docs/scope.md)
 
 ---
 
-## Installation
+## Quick start
 
 **Requirements:** Python 3.11+
 
 ```bash
-pip install agent-blueprint
+pipx install agent-blueprint     # recommended: keeps abp isolated
+# or: pip install agent-blueprint
 ```
 
-Or with `pipx` (recommended for CLI tools — keeps `abp` isolated):
-
-```bash
-pipx install agent-blueprint
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/ahmetatar/agent-blueprint
-cd agent-blueprint
-pip install -e ".[dev]"
-```
-
-Verify:
-
-```bash
-abp --help
-```
-
----
-
-## Quick Start
-
-### 1. Create a blueprint
+**1. Create a blueprint**
 
 ```bash
 abp init --template=blueprint --output=my-agent.agents.yaml
@@ -161,7 +204,8 @@ abp init --template=blueprint --output=my-agent.agents.yaml
 abp init --template=spec --output=my-agent.spec.md
 ```
 
-This creates `my-agent.agents.yaml`:
+<details>
+<summary>The generated <code>my-agent.agents.yaml</code></summary>
 
 ```yaml
 blueprint:
@@ -199,122 +243,70 @@ memory:
   backend: in_memory
 ```
 
-### 2. Validate and lint
+</details>
+
+**2. Check it**
 
 ```bash
-abp validate my-agent.agents.yaml
-abp lint my-agent.agents.yaml        # static analysis on the compiled graph
-abp doctor my-agent.agents.yaml      # env vars set? impls importable? target compatible?
+abp validate my-agent.agents.yaml    # schema + cross-reference validation
+abp lint     my-agent.agents.yaml    # static analysis on the compiled graph
+abp doctor   my-agent.agents.yaml    # env vars set? impls importable? target compatible?
+abp inspect  my-agent.agents.yaml    # Mermaid diagram of the graph
 ```
 
-```
-╭──────────────────── Valid — my-agent.agents.yaml ────────────────────╮
-│   Blueprint      my-agent                                             │
-│   Version        1.0                                                  │
-│   Agents         1                                                    │
-│   Tools          0                                                    │
-│   Nodes          1                                                    │
-│   Entry point    assistant                                            │
-╰───────────────────────────────────────────────────────────────────────╯
-```
-
-### 3. Visualize the graph
+**3. Run it**
 
 ```bash
-abp inspect my-agent.agents.yaml
+# the short way: generate to a temp dir and execute
+abp run my-agent.agents.yaml "Hello, how are you?"
+
+# isolated from the host: container image + allowlist-only environment
+abp run my-agent.agents.yaml "Hello, how are you?" --sandbox
 ```
 
-Outputs a [Mermaid](https://mermaid.live) diagram you can paste into any Mermaid renderer.
-
-### 4. Generate code
+**4. Or own the code**
 
 ```bash
 abp generate my-agent.agents.yaml --target langgraph
-```
-
-```
-╭────────────── Generated — my-agent (langgraph) ──────────────╮
-│   my-agent-langgraph/__init__.py                              │
-│   my-agent-langgraph/state.py                                 │
-│   my-agent-langgraph/tools.py                                 │
-│   my-agent-langgraph/nodes.py                                 │
-│   my-agent-langgraph/graph.py                                 │
-│   my-agent-langgraph/main.py                                  │
-│   my-agent-langgraph/requirements.txt                         │
-│   my-agent-langgraph/.env.example                             │
-╰───────────────────────────────────────────────────────────────╯
-```
-
-### 5. Run
-
-```bash
-# the short way — generates to a temp dir and executes:
-abp run my-agent.agents.yaml "Hello, how are you?"
-
-# isolated from the host — builds a container image (docker or podman)
-# and runs with an allowlist-only environment:
-abp run my-agent.agents.yaml "Hello, how are you?" --sandbox
-
-# or work with the generated project directly:
 cd my-agent-langgraph
 pip install -r requirements.txt
-cp .env.example .env   # add your OPENAI_API_KEY
+cp .env.example .env                 # add your OPENAI_API_KEY
 python main.py "Hello, how are you?"
 ```
 
-Sandboxing can also be declared in the blueprint (`run.sandbox`) so every `abp run` is isolated by default — see [Sandboxed Runs](docs/sandbox.md).
+The generated code is plain, readable LangGraph. Edit it freely, or stay blueprint-first and regenerate safely.
 
 ---
 
-## The Operational Lifecycle
-
-ABP's value compounds after generation. A typical blueprint lives through this loop:
-
-```
- author ──▶ validate ──▶ lint / fix ──▶ doctor ──▶ test ──▶ eval ──▶ gate (CI)
-   ▲                                                  │
-   │                                                  ▼
-   └──────────── traces export (failures → eval cases) ◀── run / deploy
-```
-
-1. **`abp test`** runs harness scenarios deterministically — `llm_mode: mock|replay|live`, `tool_mode: stub|replay|live` — and asserts on the final route, state, artifacts, and output contracts. Every run writes a trace manifest.
-2. **`abp eval`** scores dataset-driven suites: routing accuracy, policy compliance, artifact quality rubrics.
-3. **`abp gate`** is the CI merge gate: it runs both, diffs against `.abp/gate-baseline.json`, and fails on any regression. `--update-baseline` only writes when everything is green.
-4. **`abp traces export`** turns failed runs into new eval cases (TDD for agents) and golden runs into locked regression tests — the dataset grows from real failures.
-5. **Observability** is declarative: a top-level `observability.tracing` section exports trace events as OpenTelemetry spans to any OTLP backend. Only hashes are exported, never message content. Standard `OTEL_*` env vars override blueprint values; `ABP_OTEL=off` is the kill switch.
-
-Deep dives: [Runtime Guarantees](docs/runtime-guarantees.md) · [Gate](docs/gate.md) · [Traces](docs/traces.md) · [Sandbox](docs/sandbox.md) · [Observability](docs/observability.md) · [Scope](docs/scope.md)
-
----
-
-## Blueprint Schema
-
-A blueprint YAML has these top-level sections:
+## Blueprint schema
 
 | Section | Required | Description |
-|---|---|---|
-| `blueprint` | Yes | Name, version, description |
-| `settings` | No | Default model, temperature, retries, `max_graph_steps` |
-| `state` | No | Shared typed state fields flowing through the graph |
-| `model_providers` | No | Provider connections — OpenAI, Anthropic, Google, Ollama, Azure, Bedrock, compatible ([details](docs/model-providers.md)) |
-| `retrievers` | No | Generic RAG retriever implementations ([details](docs/rag.md)) |
-| `mcp_servers` | No | MCP server connections — schema-validated; generation not implemented yet ([details](docs/mcp-servers.md)) |
-| `agents` | Yes | Agent definitions: model, prompt, tools, memory, RAG, reasoning |
-| `tools` | No | Tool definitions: `function`, `api`, `retrieval`, `mcp` ([details](docs/tools.md)) |
-| `graph` | Yes | Nodes, edges, entry point — incl. parallel, subgraph, handoff, supervisor nodes ([details](docs/workflow-nodes.md)) |
-| `subgraphs` | No | Named reusable graphs referenced by `subgraph` nodes (nesting supported) |
-| `memory` | No | Checkpointing / persistence ([details](docs/memory.md)) |
-| `input` / `output` | No | Input/output schemas, validated at runtime |
-| `contracts` | No | State, node, and output contracts — **enforced at runtime** |
-| `policies` | No | Approvals, tool limits, budgets, low-confidence escalation — **enforced at runtime** |
-| `artifacts` | No | Declared artifacts (markdown/json/yaml/text) with producer + contract binding |
-| `harness` | No | Deterministic scenario tests and replay fixtures |
-| `evals` | No | Dataset-driven eval suites |
-| `run` | No | Sandbox configuration for `abp run` ([details](docs/sandbox.md)) |
-| `observability` | No | OpenTelemetry trace export ([details](docs/observability.md)) |
-| `deploy` | No | Cloud deployment configuration ([details](docs/deploy.md)) |
+|---|:---:|---|
+| `blueprint` | ✅ | Name, version, description |
+| `settings` | | Default model, temperature, retries, `max_graph_steps` |
+| `state` | | Shared typed state fields flowing through the graph |
+| `model_providers` | | OpenAI, Anthropic, Google, Ollama, Azure, Bedrock, compatible endpoints ([details](docs/model-providers.md)) |
+| `retrievers` | | Generic RAG retriever implementations ([details](docs/rag.md)) |
+| `mcp_servers` | | MCP server connections. Schema-validated; generation not implemented yet ([details](docs/mcp-servers.md)) |
+| `agents` | ✅ | Agent definitions: model, prompt, tools, memory, RAG, reasoning |
+| `tools` | | `function`, `api`, `retrieval`, `mcp` ([details](docs/tools.md)) |
+| `graph` | ✅ | Nodes, edges, entry point. Includes parallel, subgraph, handoff and supervisor nodes ([details](docs/workflow-nodes.md)) |
+| `subgraphs` | | Named reusable graphs referenced by `subgraph` nodes (nesting supported) |
+| `memory` | | Checkpointing / persistence ([details](docs/memory.md)) |
+| `input` / `output` | | Input/output schemas, validated at runtime |
+| `contracts` | | State, node and output contracts. **Enforced at runtime** |
+| `policies` | | Approvals, tool limits, budgets, low-confidence escalation. **Enforced at runtime** |
+| `artifacts` | | Declared artifacts (markdown/json/yaml/text) with producer + contract binding |
+| `harness` | | Deterministic scenario tests and replay fixtures |
+| `evals` | | Dataset-driven eval suites |
+| `run` | | Sandbox configuration for `abp run` ([details](docs/sandbox.md)) |
+| `observability` | | OpenTelemetry trace export ([details](docs/observability.md)) |
+| `deploy` | | Cloud deployment configuration ([details](docs/deploy.md)) |
 
-### `blueprint`
+Click a section to expand it:
+
+<details>
+<summary><b><code>blueprint</code> and <code>settings</code></b>: identity and defaults</summary>
 
 ```yaml
 blueprint:
@@ -323,11 +315,7 @@ blueprint:
   description: "..."     # Optional.
   author: "..."          # Optional.
   tags: [support, nlp]   # Optional.
-```
 
-### `settings`
-
-```yaml
 settings:
   default_model: "gpt-4o"             # Default model for all agents
   default_model_provider: openai_gpt  # Default provider (references model_providers)
@@ -337,13 +325,15 @@ settings:
   max_graph_steps: 25                 # maps to LangGraph recursion_limit
 ```
 
-> **Variable interpolation** supports two namespaces:
-> - `${settings.field}` — resolved from the blueprint's `settings` section
-> - `${env.VAR_NAME}` — resolved from environment variables at load time; if the variable is not set, the placeholder is kept as-is
+**Variable interpolation** supports two namespaces:
 
-### `state`
+- `${settings.field}`: resolved from the blueprint's `settings` section
+- `${env.VAR_NAME}`: resolved from environment variables at load time. If the variable is not set, the placeholder is kept as-is
 
-Defines the typed state object shared across all nodes:
+</details>
+
+<details>
+<summary><b><code>state</code></b>: the typed state shared across nodes</summary>
 
 ```yaml
 state:
@@ -362,7 +352,10 @@ state:
 
 Reducers matter for parallel nodes: fan-out branches merge their updates through the declared reducer.
 
-### `agents`
+</details>
+
+<details>
+<summary><b><code>agents</code></b>: model, prompt, tools, memory, reasoning</summary>
 
 ```yaml
 agents:
@@ -375,6 +368,7 @@ agents:
     tools: [tool_a, tool_b]         # References to tools section
     temperature: 0.5
     max_tokens: 2048
+    max_turns: 6                    # cap on LLM calls in this node's tool loop
     memory:
       type: conversation_buffer     # conversation_buffer | summary | vector
       max_tokens: 4000
@@ -391,12 +385,12 @@ agents:
           effort: high
 ```
 
-> See [Model Providers](docs/model-providers.md) for adapter selection and [Reasoning Patterns](docs/reasoning.md) for native thinking and graph-level reasoning strategies.
-> Structured outputs belong under top-level `contracts` and `output` — not under agents.
+See [Model Providers](docs/model-providers.md) for adapter selection and [Reasoning Patterns](docs/reasoning.md) for native thinking and graph-level reasoning strategies. Structured outputs belong under top-level `contracts` and `output`, not under agents.
 
-### `tools`
+</details>
 
-Four tool types: `function`, `api`, `retrieval`, and `mcp` (mcp: schema-only today — see [status](docs/mcp-servers.md)).
+<details>
+<summary><b><code>tools</code></b>: function, api, retrieval, mcp</summary>
 
 ```yaml
 tools:
@@ -418,11 +412,14 @@ tools:
       token_env: "BILLING_API_KEY"
 ```
 
-> See [Tools](docs/tools.md) for all tool types and [RAG](docs/rag.md) for retrievers and automatic context injection.
+`mcp` tools are schema-only today (see [status](docs/mcp-servers.md)). See [Tools](docs/tools.md) for all tool types and [RAG](docs/rag.md) for retrievers and automatic context injection.
 
-### `graph`
+</details>
 
-Defines the agent workflow as a directed graph. Six node types: `agent` (default), `function`, `handoff`, `parallel`, `subgraph`, and `supervisor`.
+<details>
+<summary><b><code>graph</code> and <code>subgraphs</code></b>: six node types and conditional routing</summary>
+
+Node types: `agent` (default), `function`, `handoff`, `parallel`, `subgraph` and `supervisor`.
 
 ```yaml
 graph:
@@ -459,25 +456,17 @@ graph:
         prd: prd
 
   edges:
-    # Simple edge
-    - from: handle_billing
+    - from: handle_billing          # simple edge
       to: END
 
-    # Conditional routing
-    - from: router
+    - from: router                  # conditional routing
       to:
         - condition: "state.department == 'billing'"
           target: handle_billing
         - condition: "state.department == 'technical'"
           target: handle_technical
         - default: END
-```
 
-**Condition expressions** support: `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`. They reference state fields with `state.field_name`; arbitrary names, function calls, arithmetic, and subscripts are rejected. See [Condition Expressions](docs/condition-expressions.md).
-
-**Parallel nodes** fan out to each branch and join at the declared `join` node — a real barrier; branch updates merge through the state reducers. **Subgraph nodes** reuse a named graph from the `subgraphs` registry with namespaced isolation (nesting supported, cycles detected at compile time). **Supervisor nodes** delegate dynamically to a declared worker set with an enforced iteration budget. **Handoff nodes** deliver to console/webhook/slack/email and emit `handoff_requested` events. See [Workflow Nodes](docs/workflow-nodes.md) for all of them.
-
-```yaml
 subgraphs:
   prd_generation_v1:
     entry_point: writer
@@ -489,9 +478,19 @@ subgraphs:
         to: END
 ```
 
-### `contracts`
+| Node type | Behavior |
+|---|---|
+| `parallel` | Fans out to each branch and joins at the declared `join` node, a real barrier. Branch updates merge through the state reducers |
+| `subgraph` | Reuses a named graph with namespaced isolation. Nesting supported, cycles detected at compile time |
+| `supervisor` | Delegates dynamically to a declared worker set, with an enforced iteration budget |
+| `handoff` | Delivers to console/webhook/slack/email and emits `handoff_requested` events |
 
-Contracts make node behavior explicit, reviewable — and enforced:
+**Condition expressions** support `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `and`, `or`, `not`, and reference state with `state.field_name`. Arbitrary names, function calls, arithmetic and subscripts are rejected. See [Condition Expressions](docs/condition-expressions.md) and [Workflow Nodes](docs/workflow-nodes.md).
+
+</details>
+
+<details>
+<summary><b><code>contracts</code></b>: state, node and output contracts</summary>
 
 ```yaml
 contracts:
@@ -516,9 +515,12 @@ contracts:
         confidence: { type: number }
 ```
 
-All contract layers are enforced at runtime by the generated code: `required_fields` must be non-null at workflow completion, `invariants` are re-checked after every agent node, and violations emit `contract_failed` trace events before raising.
+Every contract layer is enforced by the generated code: `required_fields` must be non-null when the workflow completes, `invariants` are re-checked after every agent and supervisor node, and violations emit `contract_failed` trace events before raising.
 
-### `policies`
+</details>
+
+<details>
+<summary><b><code>policies</code></b>: approvals, tool limits, escalation, budgets</summary>
 
 ```yaml
 policies:
@@ -543,9 +545,10 @@ policies:
     max_cost_usd: 0.75
 ```
 
-### `harness`
+</details>
 
-Deterministic regression checks without hitting live models:
+<details>
+<summary><b><code>harness</code> and <code>evals</code></b>: deterministic tests and dataset suites</summary>
 
 ```yaml
 harness:
@@ -566,48 +569,35 @@ harness:
           - "state.route == 'billing'"
         output_contract: refund_response        # validate stdout against contracts.outputs
         artifacts: [refund_receipt]             # artifact names that must have been written
-```
 
-All scenario assertions are executed by `abp test` — `route`, `state_assertions`, `output_contract`, and `artifacts` included. See [Runtime Guarantees](docs/runtime-guarantees.md) for real-world patterns.
-
-### `evals`
-
-Benchmark-style checks over datasets instead of fixed scenarios:
-
-```yaml
 evals:
   suites:
     - id: router_accuracy
       metric: exact_match
       dataset: datasets/router_cases.yaml
-
     - id: tool_policy_compliance
       metric: policy_violations
       dataset: datasets/policy_cases.yaml
-
     - id: prd_quality
       metric: rubric
       dataset: datasets/prd_cases.yaml
 ```
 
-Rubric evals score generated artifacts with deterministic criteria (`min_score`, `required_sections`, `required_terms`, `min_word_count`).
+`abp test` executes every scenario assertion. Rubric evals score generated artifacts with deterministic criteria (`min_score`, `required_sections`, `required_terms`, `min_word_count`). See [Runtime Guarantees](docs/runtime-guarantees.md) for real-world patterns.
 
-### `memory`
+</details>
+
+<details>
+<summary><b><code>memory</code>, <code>run</code> and <code>observability</code></b>: persistence, sandbox, tracing</summary>
 
 ```yaml
 memory:
-  backend: in_memory     # in_memory | sqlite | postgres | redis
-```
+  backend: in_memory       # in_memory | sqlite | postgres | redis
 
-> See [Memory & Checkpointing](docs/memory.md) for backends and checkpoint strategies.
-
-### `run` and `observability`
-
-```yaml
 run:
   sandbox:
     enabled: true
-    engine: auto           # auto (podman → docker) | docker | podman
+    engine: auto           # auto (podman, then docker) | docker | podman
     network: none
     memory: 1g
     cpus: 2
@@ -616,51 +606,47 @@ run:
 observability:
   tracing:
     enabled: true
-    exporter: otlp         # otlp | console
+    exporter: otlp           # otlp | console
     protocol: http/protobuf  # or grpc
     endpoint: "http://localhost:4318"
     service_name: my-agent
     sample_ratio: 1.0
 ```
 
-> Sandbox: [docs/sandbox.md](docs/sandbox.md) · Observability: [docs/observability.md](docs/observability.md)
+See [Memory & Checkpointing](docs/memory.md), [Sandbox](docs/sandbox.md) and [Observability](docs/observability.md).
+
+</details>
 
 ---
 
-## CLI Reference
+## CLI reference
 
 | Command | Description |
 |---|---|
 | `abp init` | Scaffold a blueprint YAML (`--template=blueprint`) or an agent-spec markdown for Codex/Claude Code (`--template=spec`) |
-| `abp validate <file>` | Validate against the schema, incl. cross-reference checks (`--quiet` for CI) |
-| `abp lint <file>` | 9 static checks on the compiled graph; `abp fix` applies the auto-fixable ones |
-| `abp doctor <file>` | Env + target-compatibility diagnostics (`--target langgraph\|plain\|crewai`) |
+| `abp validate <file>` | Validate against the schema, including cross-reference checks (`--quiet` for CI) |
+| `abp lint <file>` | 11 static checks on the compiled graph; `abp fix` applies the auto-fixable ones |
+| `abp doctor <file>` | Env and target-compatibility diagnostics (`--target langgraph\|plain\|crewai`) |
 | `abp inspect <file>` | Visualize the graph as a Mermaid diagram |
 | `abp generate <file>` | Generate framework code (`--target`, `--output-dir`, `--dry-run`) |
 | `abp run <file> [input]` | Generate to a temp dir and run (single-shot or REPL; `--sandbox` for containers) |
 | `abp package <file>` | Package as a pip/pipx-installable CLI tool named after the blueprint ([details](docs/cli-packaging.md)) |
 | `abp test <file>` | Run deterministic harness scenarios (`--save-traces failed\|all\|none`) |
 | `abp eval <file>` | Run dataset-driven eval suites (`--suite`, `--output`, `--json`) |
-| `abp gate <file>` | CI merge gate: harness + evals vs. baseline; exit 1 on regression ([details](docs/gate.md)) |
+| `abp gate <file>` | CI merge gate: harness + evals vs. baseline, exit 1 on regression ([details](docs/gate.md)) |
 | `abp traces list/export` | Inspect persisted traces; export failures/goldens as eval cases ([details](docs/traces.md)) |
 | `abp deploy <file>` | Deploy as a container (`--platform docker\|podman\|azure\|aws\|gcp`; cloud platforms experimental, [details](docs/deploy.md)) |
 | `abp schema` | Export the blueprint JSON Schema (`--format json\|yaml`) |
 | `abp github` | Open the GitHub repository |
 
-### `abp run`
+<details>
+<summary><b><code>abp run</code> flags and examples</b></summary>
 
 ```bash
-# Single-shot
-abp run my-agent.yml "What is the capital of France?"
-
-# Interactive REPL (omit input)
-abp run my-agent.yml
-
-# With options
-abp run my-agent.yml --thread-id session-1 --install --env .env.local
-
-# Inside a container (docker or podman), isolated from the host
-abp run my-agent.yml "hello" --sandbox --engine podman
+abp run my-agent.yml "What is the capital of France?"        # single-shot
+abp run my-agent.yml                                         # interactive REPL
+abp run my-agent.yml --thread-id session-1 --env .env.local  # with options
+abp run my-agent.yml "hello" --sandbox --engine podman       # inside a container
 ```
 
 | Flag | Default | Description |
@@ -672,63 +658,69 @@ abp run my-agent.yml "hello" --sandbox --engine podman
 | `--sandbox / --no-sandbox` | blueprint `run.sandbox.enabled` | Run inside a container ([details](docs/sandbox.md)) |
 | `--engine` | blueprint `run.sandbox.engine` | Sandbox engine: `auto` \| `docker` \| `podman` |
 
-### `abp gate` in CI
+</details>
+
+<details>
+<summary><b><code>abp gate</code> in CI</b></summary>
 
 ```yaml
 # .github/workflows/agents.yml (your project)
 - run: abp gate my-agent.agents.yaml          # fails the PR on any regression
-# after intentional changes, locally:
-#   abp gate my-agent.agents.yaml --update-baseline && git add .abp/gate-baseline.json
 ```
+
+After an intentional behavior change, refresh the baseline locally and commit it:
+
+```bash
+abp gate my-agent.agents.yaml --update-baseline   # only writes when everything is green
+git add .abp/gate-baseline.json
+```
+
+</details>
 
 ---
 
-## Generated Project Structure
+## Generated project
 
 For the LangGraph target:
 
-```
+```text
 my-agent-langgraph/
-├── __init__.py          # Package init
-├── state.py             # AgentState TypedDict with reducers
-├── tools.py             # Tool functions + policy/approval enforcement
-├── nodes.py             # Node functions, contract checks, escalation routing
-├── graph.py             # StateGraph construction with edges and routing
-├── main.py              # Entrypoint: run(user_input) → str
-├── _abp_trace.py        # Trace manifest emission + observer registry
-├── _abp_harness.py      # Mock/stub/replay runtime helpers
-├── _abp_otel.py         # OpenTelemetry bridge (only when tracing is enabled)
-├── requirements.txt     # langgraph, langchain-openai, …
-└── .env.example         # Required environment variables
+├── state.py            AgentState TypedDict with reducers
+├── tools.py            tool functions + policy/approval enforcement
+├── nodes.py            node functions, contract checks, escalation routing
+├── graph.py            StateGraph construction with edges and routing
+├── main.py             entrypoint: run(user_input) -> str
+├── _abp_trace.py       trace manifest emission + observer registry
+├── _abp_harness.py     mock/stub/replay runtime helpers
+├── _abp_otel.py        OpenTelemetry bridge (only when tracing is enabled)
+├── requirements.txt    langgraph, langchain-openai, ...
+└── .env.example        required environment variables
 ```
 
-The generated code is **human-readable and fully editable**. It's a starting point, not a black box — but if you stay blueprint-first, regeneration is always safe.
+The code is **human-readable and fully editable**: a starting point, not a black box.
 
----
-
-## Generation Targets
+### Generation targets
 
 | Target | Status | Scope |
 |---|---|---|
-| `langgraph` | **Production target** | Everything documented here: all node types, contracts, policies, harness, tracing |
-| `plain` | Minimal | Single-node agents without tools/graph routing — a dependency-light starting point |
-| `crewai` | Not implemented | `abp generate --target crewai` fails with a clear error; `abp doctor` flags it up front |
+| `langgraph` | 🟢 **Production** | Everything documented here: all node types, contracts, policies, harness, tracing |
+| `plain` | 🟡 Minimal | Single-node agents without tools/graph routing, a dependency-light starting point |
+| `crewai` | ⚪ Not implemented | `abp generate --target crewai` fails with a clear error, and `abp doctor` flags it up front |
 
-ABP's blueprint schema, IR, trace schema, and harness model are deliberately framework-agnostic — but the project's priority is **deepening runtime guarantees on the LangGraph target**, not breadth of half-supported targets. A new target is added when it can implement the same trace and harness semantics, so blueprints and their test suites stay portable. If you want to build one, see [Adding a new target framework](#adding-a-new-target-framework).
+The schema, IR, trace schema and harness model are framework-agnostic, but the priority is **deeper runtime guarantees on LangGraph**, not a spread of half-supported targets. A new target lands when it implements the same trace and harness semantics, so blueprints and their test suites stay portable.
 
 ---
 
-## IDE Integration (VS Code)
+## IDE integration
 
-Export the JSON Schema and configure the YAML extension for autocompletion and inline validation:
+Export the JSON Schema and point the VS Code YAML extension at it for autocompletion and inline validation:
 
 ```bash
 abp schema --output blueprint-schema.json
 ```
 
-Add to `.vscode/settings.json`:
-
-```json
+```jsonc
+// .vscode/settings.json
 {
   "yaml.schemas": {
     "./blueprint-schema.json": "*.agents.yaml"
@@ -752,56 +744,70 @@ ruff check .          # lint
 mypy src              # strict type check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules, Conventional Commits, PR expectations, and testing requirements. For maintainers, [Releasing](docs/releasing.md) covers version bump, tagging, and PyPI publishing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules, Conventional Commits, PR expectations and testing requirements. Maintainers: [Releasing](docs/releasing.md) covers version bump, tagging and PyPI publishing.
 
-### Project Structure
+<details>
+<summary><b>Project structure</b></summary>
 
-```
+```text
 src/agent_blueprint/
-├── models/         # Pydantic v2 schema models (validation + cross-references)
-├── ir/             # Intermediate representation: compiler + safe expression parser
-├── generators/     # Code generators (langgraph; plain minimal)
-├── templates/      # Jinja2 templates per target framework
-├── cli/            # Typer CLI commands (thin wrappers)
-├── linting.py      # Static checks over the compiled graph
-├── doctoring.py    # Env + target-compatibility diagnostics
-├── harness_runner.py / eval_runner.py / gating.py / trace_store.py
-├── runners/        # abp run: local + container sandbox
-├── deployers/      # Azure, AWS, GCP, Docker/Podman
-└── utils/          # YAML loader (${} interpolation), Mermaid visualizer
+├── models/            Pydantic v2 schema models (validation + cross-references)
+├── ir/                intermediate representation: compiler + safe expression parser
+├── generators/        code generators (langgraph; plain minimal)
+├── templates/         Jinja2 templates per target framework
+├── cli/               Typer CLI commands (thin wrappers)
+├── runners/           abp run: local + container sandbox
+├── packagers/         abp package: pipx-installable CLI packages
+├── deployers/         Docker/Podman, AWS, Azure, GCP
+├── utils/             YAML loader (${} interpolation), Mermaid visualizer
+├── linting.py         static checks over the compiled graph
+├── doctoring.py       env + target-compatibility diagnostics
+├── harness_runner.py  deterministic test harness
+├── eval_runner.py     eval suites
+├── gating.py          CI regression gate
+└── trace_store.py     trace persistence + eval export
 ```
 
-### Adding a new target framework
+</details>
+
+<details>
+<summary><b>Adding a new target framework</b></summary>
 
 1. Create `src/agent_blueprint/generators/<framework>.py` implementing `BaseGenerator`
 2. Add Jinja2 templates to `src/agent_blueprint/templates/<framework>/`
-3. Register in `src/agent_blueprint/cli/generate.py`
+3. Register it in `src/agent_blueprint/cli/generate.py`
 
-The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input to all generators — you don't touch the parser or validator. A target is considered complete when it implements the ABP trace and harness semantics, so existing harness scenarios run against it unchanged.
+The `AgentGraph` IR in `src/agent_blueprint/ir/compiler.py` is the single input to all generators, so you don't touch the parser or validator. A target is complete when it implements the ABP trace and harness semantics, so existing harness scenarios run against it unchanged.
+
+</details>
 
 ---
 
 ## Roadmap
 
-Done — and enforced at runtime, not just declared:
+**Done, and enforced at runtime rather than just declared:**
 
 - [x] Schema validation, `${}` interpolation, safe condition expressions
-- [x] LangGraph generator: all 6 node types incl. parallel, nested subgraphs, handoff, supervisor
-- [x] Runtime-enforced contracts, approval policies, budgets, retries, escalation
-- [x] Deterministic harness (`abp test`) with mock/replay/live modes + full assertion surface
-- [x] Eval suites, CI regression gate, trace→eval flywheel
+- [x] LangGraph generator: all 6 node types including parallel, nested subgraphs, handoff, supervisor
+- [x] Runtime-enforced contracts, approval policies, tool limits, `max_turns`, budgets, retries, escalation
+- [x] Deterministic harness (`abp test`) with mock/replay/live modes and the full assertion surface
+- [x] Eval suites, CI regression gate, trace-to-eval flywheel
 - [x] Sandboxed runs (docker/podman), OpenTelemetry export
-- [x] Cloud deploy: Azure Container Apps, AWS App Runner, GCP Cloud Run, Docker/Podman
+- [x] `abp package` and container deploys: Docker/Podman, plus experimental Azure Container Apps, AWS App Runner, GCP Cloud Run
 - [x] PyPI publish (`pip install agent-blueprint`)
 
-Next:
+**Next:**
 
-- [ ] MCP tool code generation (schema + validation already in place)
-- [ ] Deeper plain-Python target or an additional framework target — gated on demand and on full trace/harness parity
+- [ ] MCP tool code generation (schema and validation already in place)
+- [ ] Deeper plain-Python target or an additional framework target, gated on demand and full trace/harness parity
 - [ ] VS Code extension
 
 ---
 
-## License
+<div align="center">
 
-MIT
+**MIT licensed** · [Report an issue](https://github.com/ahmetatar/agent-blueprint/issues) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
+
+<sub>If ABP saves you from reviewing a 3,000-line diff, a ⭐ helps others find it.</sub>
+
+</div>
